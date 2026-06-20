@@ -65,6 +65,22 @@ public final class ProductSheetsModel: ObservableObject {
     /// The product-list row whose id matches draws the「介紹中」banner (LIVE-only). nil → none.
     @Published public private(set) var introducingProductId: String?
 
+    /// Playback-mode signals for the product-row thumbnail overlay
+    /// (rb-ios-product-row-status-overlay). Mirrored from the template
+    /// `header.isLive` / `playbackProgress.isReplay` / `playbackProgress.position`.
+    @Published public private(set) var isLive: Bool
+    @Published public private(set) var isReplay: Bool
+    @Published public private(set) var position: Double
+
+    /// Derived playback mode for the product-row overlay (replay takes precedence
+    /// over live). `nil` for a demo / snapshot model (no bound template) → the
+    /// view falls back to its real-frame `live` flag so baselines stay byte-identical.
+    public var rowMode: ProductRowMode? {
+        guard template != nil else { return nil }
+        if isReplay { return .replay }
+        return isLive ? .live : .vod
+    }
+
     /// Whether the product-list drawer is presented (rb-ios-product-list-slide-sheet).
     /// A UI PRESENTATION flag — NOT a core snapshot — so it is publicly writable (unlike
     /// the `private(set)` snapshot fields): the container's `onOpenProductList` default sets
@@ -103,8 +119,14 @@ public final class ProductSheetsModel: ObservableObject {
     /// true when `addToCart()` is called with an incomplete spec selection.
     @Published public private(set) var needsVariantSelection: Bool
     /// Add-to-cart failure flag (`DefaultPlayerTemplate.addToCartFailed`) — set true
-    /// when the route-B add threw; drives the failure banner.
+    /// when the route-B add threw a GENUINE failure; drives the failure banner.
     @Published public private(set) var addToCartFailed: Bool
+    /// Add-to-cart「需登入」flag (`DefaultPlayerTemplate.addToCartNeedsLogin`) — set
+    /// true when the route-B add threw the core「needs login」signal (empty `buy_no`
+    /// → `serverError(code:401)`). Orthogonal to `addToCartFailed`; drives the
+    /// `AuthGateModalView(.cartAdd)` login gate instead of the failure banner
+    /// (cart-needs-login-gate).
+    @Published public private(set) var addToCartNeedsLogin: Bool
 
     // MARK: - Live binding
 
@@ -144,13 +166,17 @@ public final class ProductSheetsModel: ObservableObject {
         self.init(
             products: t.productOverlay.productsIntroducingFirst,
             introducingProductId: t.productOverlay.introducingProductId,
+            isLive: t.header.isLive,
+            isReplay: t.playbackProgress.isReplay,
+            position: t.playbackProgress.position,
             detail: t.productSheet.detail,
             variant: t.variantPicker.state,
             qty: t.qtyStepper.state,
             miniCartPeek: t.miniCart.peek,
             cartCount: t.cartCTA.state.count,
             needsVariantSelection: t.needsVariantSelection,
-            addToCartFailed: t.addToCartFailed
+            addToCartFailed: t.addToCartFailed,
+            addToCartNeedsLogin: t.addToCartNeedsLogin
         )
     }
 
@@ -169,16 +195,23 @@ public final class ProductSheetsModel: ObservableObject {
     public init(
         products: [LBProduct] = [],
         introducingProductId: String? = nil,
+        isLive: Bool = false,
+        isReplay: Bool = false,
+        position: Double = 0,
         detail: LBProductDetailState? = nil,
         variant: LBVariantState = ProductSheetsModel.emptyVariant,
         qty: LBQtyState = ProductSheetsModel.emptyQty,
         miniCartPeek: LBMiniCartPeek? = nil,
         cartCount: Int = 0,
         needsVariantSelection: Bool = false,
-        addToCartFailed: Bool = false
+        addToCartFailed: Bool = false,
+        addToCartNeedsLogin: Bool = false
     ) {
         self.products = products
         self.introducingProductId = introducingProductId
+        self.isLive = isLive
+        self.isReplay = isReplay
+        self.position = position
         self.detail = detail
         self.variant = variant
         self.qty = qty
@@ -186,6 +219,7 @@ public final class ProductSheetsModel: ObservableObject {
         self.cartCount = cartCount
         self.needsVariantSelection = needsVariantSelection
         self.addToCartFailed = addToCartFailed
+        self.addToCartNeedsLogin = addToCartNeedsLogin
     }
 
     deinit {
@@ -204,6 +238,9 @@ public final class ProductSheetsModel: ObservableObject {
     private func refresh(from t: DefaultPlayerTemplate) {
         products = t.productOverlay.productsIntroducingFirst
         introducingProductId = t.productOverlay.introducingProductId
+        isLive = t.header.isLive
+        isReplay = t.playbackProgress.isReplay
+        position = t.playbackProgress.position
         detail = t.productSheet.detail
         variant = t.variantPicker.state
         qty = t.qtyStepper.state
@@ -211,6 +248,7 @@ public final class ProductSheetsModel: ObservableObject {
         cartCount = t.cartCTA.state.count
         needsVariantSelection = t.needsVariantSelection
         addToCartFailed = t.addToCartFailed
+        addToCartNeedsLogin = t.addToCartNeedsLogin
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)

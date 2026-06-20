@@ -302,9 +302,16 @@ enum TemplateWiring {
             // rush[], chat/event-join = push[]. Win (with award detail) arrives
             // via route-B WIN_RECEIVED, not here (`win[]` is the broadcast bucket).
             // `handlePush` splits event-begin pushes into event-join feed items.
-            for push in response.push { template.handlePush(push) }
-            for user in response.user { template.handleJoin(text: user.text) }
-            for rush in response.rush { template.handlePurchase(text: rush.text) }
+            //
+            // backlog gate（chat-history-dedupe-template）：以 core 的 `isBacklogReplay` cursor 訊號
+            // + per-session 旗標分流 feed ingestion——後續輪真實新訊息（含後台刻意重送）一律灌、首輪
+            // backlog 首次灌當歷史首屏、已 ingest 過的 backlog 重放整批 skip（換片漏 clear / 重入疊加）。
+            // `handlePollReceived`（header / pinned 等）維持每輪呼叫（冪等，不受 gate 影響）。
+            if template.shouldIngestPoll(response.isBacklogReplay) {
+                for push in response.push { template.handlePush(push) }
+                for user in response.user { template.handleJoin(text: user.text) }
+                for rush in response.rush { template.handlePurchase(text: rush.text) }
+            }
             if response.liveEnd == 1 { template.handleLiveEnd() }
         }
         vc.onStateChange = { [weak template] state in
@@ -327,6 +334,14 @@ enum TemplateWiring {
         // that drives the VOD chrome. weak-capture (parity with onMomentStateChange).
         vc.onPlaybackProgressChange = { [weak template] progress in
             template?.handlePlaybackProgress(progress)
+        }
+        // Live channel-settings refresh (core-live-guest-comment-refresh) → re-ingest the
+        // freshly-fetched channel so mid-stream `guest_comment` (chatEnabled) changes apply
+        // WITHOUT the user re-entering the player. `ingestChannel` is a pure view-model
+        // re-derivation (header / rail enablement / nav) — it does NOT restart playback.
+        // weak-capture (parity with onPlaybackProgressChange).
+        vc.onChannelRefresh = { [weak template] channel in
+            template?.ingestChannel(channel)
         }
         // Seed the PlayerHeader mute flag = false (unmuted by default / sound on,
         // matching the core engines' default-unmuted main playback). momentState

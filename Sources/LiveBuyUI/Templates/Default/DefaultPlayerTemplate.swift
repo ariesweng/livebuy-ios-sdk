@@ -102,6 +102,18 @@ public final class DefaultPlayerTemplate {
     /// none contains the playhead. Kept for back-compat; the carousel reads `vodActiveProducts`.
     public var vodActiveProduct: LBProduct? { vodActiveProducts.last }
 
+    /// ALL products currently being introduced in a LIVE — every product with `narrate_status == 2`
+    /// in the current `productOverlay.products` snapshot. The backend MAY narrate MULTIPLE products
+    /// simultaneously (component-contracts updated: `narratingProduct` / `activeProduct` take the
+    /// first; this exposes the FULL set). Order follows `products` (the data-layer order; template
+    /// MUST NOT re-sort); empty when none. Pure computed (no second state). Feeds the reference-ui
+    /// LIVE now-introducing carousel (問題 7, live-now-introducing-multi-product-template). Does NOT
+    /// alter the single `productOverlay.activeProduct` (`narrate_status == 2` first) / `pinnedProduct`
+    /// path (back-compat). The LIVE analogue of `vodActiveProducts`.
+    public var liveActiveProducts: [LBProduct] {
+        productOverlay.products.filter { $0.narrateStatus == 2 }
+    }
+
     /// SubtitleTrack `{ available, enabled }`.
     public let subtitle: DefaultSubtitleState
 
@@ -163,6 +175,24 @@ public final class DefaultPlayerTemplate {
     /// error toast. Set true on a failed delegation; cleared on the next add
     /// attempt. Purely additive (false by default).
     private(set) public var addToCartFailed: Bool = false
+
+    /// Add-to-cart「需登入」flag, orthogonal to `addToCartFailed`. Set true when the
+    /// route-B `addToCart` threw the core「needs login」signal
+    /// (`LBError.serverError(code: 401, ...)` raised for an empty `buy_no`) so the
+    /// reference-ui can present a login gate (host `config.onLogin`) instead of the
+    /// 「加入購物車失敗」retry banner. Reset alongside `addToCartFailed` on every new
+    /// attempt / sheet (re-)open. Purely additive (false by default).
+    private(set) public var addToCartNeedsLogin: Bool = false
+
+    /// 置頂留言（chat-message-kind ⑤，messages `data.top`）。由 `handlePollReceived` 從
+    /// `poll.top` 設定，供 reference-ui 渲染。冪等：每輪以當前釘選狀態覆蓋，取消釘選 → nil。
+    /// 預設 nil（無置頂）。
+    private(set) public var pinnedMessage: LBPinnedMessage?
+
+    /// 會員等級限定旗標（restriction-gate ②），由 `ingestChannel` 從 `LBChannel.isRestriction`
+    /// 衍生（`== 1`）。**軟性顯示閘門**：core 不擋播放，reference-ui 讀此旗標在播放畫面上疊
+    /// 升級遮罩。預設 false（未受限）。
+    private(set) public var isRestricted: Bool = false
 
     /// 「請選規格」guard flag — set true when `addToCart()` is called with an
     /// incomplete spec selection (D5 guard); cleared when a valid add is attempted
@@ -413,12 +443,29 @@ public final class DefaultPlayerTemplate {
                 guestEditAvailable: ch.guestComment == 1)
             // LIVE/VOD flag for the top-bar chrome branch (host reads header.isLive).
             handleLive(ch.liveStatus == 1)
+            // 會員等級限定軟閘門（restriction-gate ②）：衍生 isRestricted 供 reference-ui 疊遮罩。
+            applyRestriction(ch.isRestriction == 1)
             // Prev/next adjacent video targets (swipe-navigate-template) — read the
             // first item id of each nav array (LBNavItem.id). Diff-then-notify inside
             // this same coalescing batch, so a channel ingest still fires at most one
             // onChange.
             navigation.ingest(prevVideoId: ch.prev.first?.id, nextVideoId: ch.next.first?.id)
+            // 公告也是 channel 資料：跟 header / rail / nav 同路徑注入，使 LIVE 進行中 core 的
+            // live channel refresh（20s 重抓 /sdk/video，`onChannelRefresh` → `ingestChannel`）帶回
+            // 的 mid-stream 後台公告變更**即時反映**到 notice-tab，無需使用者重進播放器（問題 5,
+            // live-notice-channel-refresh-template）。`handleChannelNotices` 為 idempotent
+            // diff-then-notify，且其內層 coalescing 由計數式 depth 折進本批次（仍只發一次 onChange）。
+            handleChannelNotices(systemNotice: ch.sysNotice, notice: ch.notice)
         }
+    }
+
+    /// Diff-then-notify the member-restriction soft-gate flag (restriction-gate ②).
+    /// Called inside `ingestChannel`'s coalescing batch, so a change here folds into
+    /// the single channel-ingest onChange.
+    private func applyRestriction(_ restricted: Bool) {
+        guard isRestricted != restricted else { return }
+        isRestricted = restricted
+        notifyChange()
     }
 
     /// Feed the VideoInfoPanel notice-tab the latest `sys_notice` / `notice` from
@@ -457,7 +504,8 @@ public final class DefaultPlayerTemplate {
             endScreen.handleMoment(next: [s.nextItem].compactMap { $0 },
                                    hot: s.hotItems,
                                    countdownActive: s.autoNextCountdownActive,
-                                   remain: s.autoNextRemainingSeconds)
+                                   remain: s.autoNextRemainingSeconds,
+                                   endScreenShown: s.endScreenShown)
             productOverlay.handleProducts(s.products, active: s.narratingProduct)
             header.handleHeader(isSubscribed: s.isSubscribed, viewerCount: s.viewerCount)
             subtitle.handle(available: s.subtitleAvailable, enabled: s.subtitleEnabled)
@@ -474,13 +522,12 @@ public final class DefaultPlayerTemplate {
             for p in s.products {
                 goodsTracking.seed(goodsGpn: p.goodsGpn, isAwait: p.isAwait, isAwaitNotice: p.isAwaitNotice)
             }
-            // mini-cart fallback peek = the narrating product, ONLY when there is
-            // no peek yet (a successful add wins — non-clobbering, D4). Keeps the
-            // mini-cart populated with 講解中商品 before the first add.
-            if let active = s.narratingProduct {
-                miniCart.seedFallback(LBMiniCartPeek(productId: active.id, name: active.name,
-                                                     priceShow: active.priceShow, soldOut: active.soldOut))
-            }
+            // mini-cart peek is populated ONLY by a successful add (route-B), NOT by the
+            // narrating product (tmpl-ios-remove-minicart-peek-fallback): the 講解中商品 is
+            // already shown by the pinned card (LIVE) / now-introducing card (VOD), so seeding
+            // the mini-cart peek with it duplicated that surface (same `MiniCartView` component)
+            // and leaked the VOD-only peek into LIVE. The prior `miniCart.seedFallback(narrating)`
+            // is removed.
         }
     }
 
@@ -537,6 +584,24 @@ public final class DefaultPlayerTemplate {
     /// Tap a product → core default flow (not-intercepted → reactive `handleProductTap`
     /// builds the detail-sheet state the family-3 overlay binds).
     public func performProductTap(_ product: LBProduct) { player?.performProductTap(product) }
+
+    /// 商品開賣卡「立即搶購」(問題5 / product-sale-open-detail): resolve the onsale 商品名 back to a
+    /// loaded `LBProduct` in `channel.goods` and open ITS product detail sheet (reusing the existing
+    /// `performProductTap` 開 detail path). The onsale push carries NO product id, so the 商品名 is the
+    /// only locator today — name matching is the interim; once the backend ships a product id /
+    /// deeplink on the onsale push this can locate by id. No match → no-op (the onsale product is
+    /// normally in `channel.goods`).
+    public func openProductSaleByName(_ name: String) {
+        guard let match = Self.matchSaleProduct(name: name, in: player?.channel?.goods ?? []) else { return }
+        performProductTap(match)
+    }
+
+    /// Resolve an onsale 商品名 to the first `LBProduct` in `goods` with an equal `name`, or nil.
+    /// Pure (no I/O) so the name resolution is unit-testable without a Simulator
+    /// (internal-testability / product-sale-open-detail).
+    static func matchSaleProduct(name: String, in goods: [LBProduct]) -> LBProduct? {
+        goods.first { $0.name == name }
+    }
     /// Request the next page of chat history.
     public func loadChatHistory() { player?.performLoadChatHistory() }
     /// Send a chat message — wraps the already-public async core `sendChat`.
@@ -706,6 +771,7 @@ public final class DefaultPlayerTemplate {
         coalescing {
             needsVariantSelection = false
             addToCartFailed = false
+            addToCartNeedsLogin = false
             productSheet.openDetail(product)
             guard let detail = productSheet.detail else { return }
             variantPicker.reset(for: detail)
@@ -761,8 +827,9 @@ public final class DefaultPlayerTemplate {
     /// route — a host that takes over `productTap`/加購 never opens this sheet).
     public func addToCart() {
         guard let detail = productSheet.detail else { return }
-        // Reset the transient flags for this attempt.
+        // Reset the transient flags for this attempt (both orthogonal flags together).
         addToCartFailed = false
+        addToCartNeedsLogin = false
         // Guard 1 — sold-out / no stock.
         guard qtyStepper.max > 0 else { return }
         // Guard 2 — has spec groups but selection incomplete.
@@ -789,7 +856,13 @@ public final class DefaultPlayerTemplate {
                 _ = try await requester(request)
                 await MainActor.run { [weak self] in self?.applyAddSuccess(peek: peek) }
             } catch {
-                await MainActor.run { [weak self] in self?.applyAddFailure() }
+                // Branch the thrown error: the core「needs login」signal
+                // (`serverError(code:401)` for an empty `buy_no`) → needs-login;
+                // any other error → genuine failure.
+                let needsLogin = Self.isAddToCartAuthRequired(error)
+                await MainActor.run { [weak self] in
+                    if needsLogin { self?.applyAddNeedsLogin() } else { self?.applyAddFailure() }
+                }
             }
         }
     }
@@ -809,14 +882,39 @@ public final class DefaultPlayerTemplate {
         notifyChange()
     }
 
+    /// Needs-login branch (main thread): expose the needs-login flag (orthogonal to
+    /// `addToCartFailed`), count unchanged. The reference-ui presents a login gate
+    /// (host `config.onLogin`) instead of the「加入購物車失敗」retry banner.
+    private func applyAddNeedsLogin() {
+        addToCartNeedsLogin = true
+        notifyChange()
+    }
+
+    /// Pure classifier: `true` only for the core「needs login」signal
+    /// (`LBError.serverError(code: 401, ...)` raised for an empty `buy_no`), `false`
+    /// for every other error (other `serverError` codes, `networkError`, framework
+    /// errors, …). Extracted so the add-to-cart error branching is unit-testable in
+    /// isolation.
+    static func isAddToCartAuthRequired(_ error: Error) -> Bool {
+        if case LBError.serverError(let code, _) = error { return code == 401 }
+        return false
+    }
+
     /// Host intent to re-zero the per-session cart count (OQ2 — on release /
     /// new-video). Exposed so the wiring / host can reset between videos.
     public func resetCartForSession() {
         cartCTA.resetForSession()
     }
 
-    /// POLL_RECEIVED (Task 3.4) — headless; host provides poll UI
-    func handlePollReceived(_ poll: LBPollResponse) {}
+    /// POLL_RECEIVED (Task 3.4) — headless; host provides poll UI.
+    /// chat-message-kind ⑤：消費 `poll.top` 暴露置頂留言 view-model（冪等：取消釘選 → nil）。
+    /// 值未變時不觸發多餘變更通知。
+    func handlePollReceived(_ poll: LBPollResponse) {
+        if pinnedMessage != poll.top {
+            pinnedMessage = poll.top
+            notifyChange()
+        }
+    }
 
     /// Activity notification (Task 3.4) — headless; host provides notification UI.
     /// Retained for source compatibility; join / purchase / win now route through
@@ -844,39 +942,85 @@ public final class DefaultPlayerTemplate {
     }
 
     /// Chat row (push / comment) → feed chat row. The feed is a SEPARATE model;
-    /// activity rows are NOT written into the ChatView chat data source.
-    func handleChat(text: String) {
-        activityFeed.appendChat(text: text)
+    /// activity rows are NOT written into the ChatView chat data source. `name` is
+    /// the author nickname (chat-nickname-display); nil → text-only row.
+    func handleChat(text: String, name: String? = nil) {
+        activityFeed.appendChat(text: text, name: name)
     }
 
     /// A poll `push[]` row → merged feed. A core event-BEGIN push
     /// (`push.isEventBegin`) is surfaced as an INDEPENDENT event-join item (host
     /// draws `LBEventJoinLine`); everything else — including event-END
     /// (`isEventEnd`) and ordinary pushes — stays a plain `.chat` row.
+    /// 活動「加入 CTA」keyword 來源 = messages `push.ek`（後端「`ek` isset 才顯示 CTA」契約）。
+    /// 與 goods `event[]` / `activeEventKeyword(eid:)` 解耦——`ek` 與 push 同一筆同步到達，無時序競態。
+    /// `ek` unset（nil）→ `""` → 純活動公告（無 CTA）。Pure / testable（`@testable` internal）。
+    static func eventJoinKeyword(for push: LBPushMsg) -> String {
+        push.ek ?? ""
+    }
+
     func handlePush(_ push: LBPushMsg) {
-        if push.isEventBegin {
-            activityFeed.appendEventJoin(eid: push.eid ?? 0, keyword: push.ek ?? "", text: push.text)
-        } else if push.color == DefaultTemplateConstants.productPushColor {
-            // 商品推播 (`#66F796`, e.g.「商品開賣 / 開始介紹」) → the dedicated `intro` activity
-            // row (喇叭 + accent 暈染). The `push[]` bucket has no stable id, so a backend re-send
-            // on an adjacent poll would duplicate it — `appendIntro` routes through the same DE-DUPED
-            // activity path so it shows once.
-            activityFeed.appendIntro(text: push.text)
-        } else if Self.isSystemNoticePush(push) {
-            // Remaining system notice (event-end `eid>0` / promo `ct` / `p`) — DE-DUPED chat row so
-            // a re-send shows once. Free user chat (below) stays un-deduped.
-            activityFeed.appendSystemNotice(text: push.text)
-        } else {
-            activityFeed.appendChat(text: push.text)
+        // chat-message-kind ⑤：依 `push.kind` 判型路由，**停止以 `color` 反推**。
+        // event-join-cta-isset-ek-template：`kind=event` 活動公告（與其他 kind 正交）仍**最先**判定 →
+        // 獨立 event-join 項（套用 `LBEventJoinLine` 樣式）。判定用 `kind == .event` + `eid > 0`。
+        // 「加入活動」CTA 的 keyword 來源 = **messages `push.ek`**（後端「`ek` isset 才顯示 CTA」契約：
+        // 進行中帶 `ek="168"`、結束後不帶）——`ek` 與 push 同一筆同步到達，**MUST NOT** 改用 goods
+        // `event[]` / `activeEventKeyword(eid:)`（獨立 poll，時序競態 + 去重鎖死會使 CTA 永久消失）。
+        // begin/end 由 `push.ek` isset 與否自然分流：isset → keyword 非空 → CTA；unset → `""` → 純公告。
+        if push.kind == .event, let eid = push.eid, eid > 0 {
+            let keyword = Self.eventJoinKeyword(for: push)
+            activityFeed.appendEventJoin(eid: eid, keyword: keyword, text: push.text)
+            return
+        }
+        switch push.kind {
+        case .narrate:
+            // 觀眾選購（`#66F796`, ty=ds）= 社會認同廣播（「{觀眾名} 正在選購商品～」），
+            // **性質同 join / purchase、非主播訊息、非介紹中**。→ 社會認同 activity row。
+            // （舊版誤把 `#66F796` 當「商品介紹中」走 appendIntro，本批次語意校正。）
+            activityFeed.appendNarrate(text: push.text)
+        case .onsale:
+            // 商品開賣（chat5 群組①）→ 商品開賣卡 feed item（商品名 = `text`、現價 = **權威欄 `price`**），
+            // 供 reference-ui 渲染 `LBProductSaleCard`。`price` 為 wrapper 算好的已格式化開賣價（非上游
+            // 原始 `p`）。ProductController 來源已知限制（`text == ""`）→ 退回純文字系統通知（graceful，
+            // 不出空白卡）。皆 DE-DUPED（相鄰重送只顯示一列）。
+            if push.text.isEmpty {
+                activityFeed.appendSystemNotice(text: push.text)
+            } else {
+                activityFeed.appendProductSale(name: push.text, price: push.price ?? "")
+            }
+        case .comment:
+            // 一般用戶 / 訪客留言 → chat row 帶暱稱（chat-nickname-display），isHost=false，不去重。
+            activityFeed.appendChat(text: push.text, name: push.name)
+        case .host, .hostReply, .aiReply:
+            // 主播訊息：帶 promo metadata（`ct` / `p`，或 `eid>0` 的 promo-tied）→ DE-DUPED 系統通知；
+            // 其餘主播留言 → chat row 帶暱稱 + 角色 metadata。維持既有去重語意。
+            // （`.event` 已在最前面以 `kind == .event` 攔截為 event-join 活動公告，不再落此分支。）
+            if Self.isSystemNoticePush(push) {
+                activityFeed.appendSystemNotice(text: push.text)
+            } else {
+                // 群組① 真正的聊天（chat-message-taxonomy ⑤）：thread 角色 metadata 供
+                // reference-ui 依**版型**區分主播留言（主播標 + accent 氣泡）/ 主播回覆（引用框）/
+                // AI 回覆（AI 標）。
+                let isAI = (push.kind == .aiReply)
+                let isReply = (push.kind == .hostReply || push.kind == .aiReply)
+                activityFeed.appendChat(
+                    text: push.text, name: push.name,
+                    isHost: true,
+                    replyText: (isReply && !push.reply.isEmpty) ? push.reply : nil,
+                    isAI: isAI)
+            }
+        default:
+            // .join / .purchase / .win 不會落 push 桶；.unknown → 保守當 chat。
+            activityFeed.appendChat(text: push.text, name: push.name)
         }
     }
 
-    /// Whether a (non-event-begin, non-product-push) `push[]` row is a SYSTEM / 事件 / 促銷 notice
-    /// rather than free user chat — used to route it through the DE-DUPED `appendSystemNotice` path.
-    /// A notice is flagged by event metadata (`eid > 0`, e.g. event-end / event-tied) OR promo
-    /// metadata (`ct` / `p`). NOTE: the product-push color (`productPushColor`, spec §PollManager
-    /// fan-out) is handled BEFORE this check in `handlePush` (→ `intro` activity row), so it is NOT
-    /// part of this predicate. Ordinary user chat carries none of these, so it stays un-deduped.
+    /// Whether a host / event `push[]` row (kind `.host` / `.hostReply` / `.aiReply` / `.event`)
+    /// is a SYSTEM / 事件 / 促銷 notice rather than free主播 chat — used (within the `kind`-based
+    /// `handlePush` routing) to send it through the DE-DUPED `appendSystemNotice` path. A notice is
+    /// flagged by event metadata (`eid > 0`, e.g. event-end / event-tied) OR promo metadata (`ct` /
+    /// `p`). `.narrate` / `.onsale` / `.comment` are routed by kind BEFORE this check, so they are
+    /// NOT part of this predicate. Ordinary主播 chat carries none of these, so it stays un-deduped.
     /// Pure / testable.
     static func isSystemNoticePush(_ push: LBPushMsg) -> Bool {
         (push.eid ?? 0) > 0
@@ -915,7 +1059,33 @@ public final class DefaultPlayerTemplate {
         coalescing {
             activityFeed.clear()
             winClaim.clear()
+            // 換片後新場的第一批 backlog 應能正常 ingest（feed 已 clear、旗標 reset → 乾淨）
+            // — chat-history-dedupe-template。
+            hasIngestedBacklog = false
         }
+    }
+
+    // MARK: - 聊天歷史 backlog 分流（cursor-based，chat-history-dedupe-template）
+
+    /// per-session 旗標：該場是否已 ingest 過第一批「首輪 backlog 重放」（`isBacklogReplay == true`）。
+    /// 換片 / 重入時由 `handleVideoSwitch` 重置為 false。
+    private var hasIngestedBacklog = false
+
+    /// 純函式：是否 ingest 這一輪 poll 進 feed。**只依 cursor 訊號 + per-session 旗標，NOT 內容**
+    /// （禁內容指紋去重——後台「推廣活動」會刻意重送相同內容真實通知，內容去重會誤殺）：
+    /// - 後續輪（`isBacklogReplay == false`）→ 一律 ingest（真實新訊息，含後台刻意重送，照顯示）。
+    /// - 首輪 backlog 首次（旗標 false）→ ingest 當該場歷史首屏，置旗標 true。
+    /// - 首輪 backlog 已 ingest 過（旗標 true）→ 整批 skip（換片漏 clear / 同場重入疊加時不重灌歷史）。
+    static func shouldIngestPoll(isBacklogReplay: Bool, alreadyIngestedBacklog: inout Bool) -> Bool {
+        if !isBacklogReplay { return true }
+        if alreadyIngestedBacklog { return false }
+        alreadyIngestedBacklog = true
+        return true
+    }
+
+    /// Instance wrapper：操作 per-session `hasIngestedBacklog`（chat-history-dedupe-template）。
+    func shouldIngestPoll(_ isBacklogReplay: Bool) -> Bool {
+        Self.shouldIngestPoll(isBacklogReplay: isBacklogReplay, alreadyIngestedBacklog: &hasIngestedBacklog)
     }
 
     // MARK: - Layout well-known keys (Task 3.7)

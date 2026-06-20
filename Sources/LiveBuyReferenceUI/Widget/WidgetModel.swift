@@ -120,12 +120,17 @@ public final class WidgetModel: ObservableObject {
     /// live convenience init for the seed values.
     private convenience init(snapshotting t: DefaultWidgetTemplate) {
         let c = t.content.current
+        // Hide in-app-unplayable lives (`type==2 && liveStatus==1 && liveurl==""`)
+        // from the card list and the floating preview (rb-ios-widget-hide-urlless-live
+        // / `widget-hide-urlless-live`). Applied ONLY on the live republish path —
+        // the public memberwise init below stays unfiltered so demo / snapshot
+        // fixtures render exactly as constructed (design D4).
         self.init(
-            videos: c.videos,
+            videos: WidgetVisibility.visibleVideos(c.videos),
             mode: c.mode,
             currentPage: c.currentPage,
             lastPage: c.lastPage,
-            liveVideo: c.liveVideo,
+            liveVideo: WidgetVisibility.visibleLive(c.liveVideo),
             widgetColor: c.widgetColor,
             widgetBgcolor: c.widgetBgcolor
         )
@@ -173,11 +178,13 @@ public final class WidgetModel: ObservableObject {
     /// runloop.
     private func refresh(from t: DefaultWidgetTemplate) {
         let c = t.content.current
-        videos = c.videos
+        // Same in-app-unplayable-live hiding as the live seed init above
+        // (rb-ios-widget-hide-urlless-live / `widget-hide-urlless-live`).
+        videos = WidgetVisibility.visibleVideos(c.videos)
         mode = c.mode
         currentPage = c.currentPage
         lastPage = c.lastPage
-        liveVideo = c.liveVideo
+        liveVideo = WidgetVisibility.visibleLive(c.liveVideo)
         widgetColor = c.widgetColor
         widgetBgcolor = c.widgetBgcolor
     }

@@ -464,7 +464,8 @@ public extension LBVideoItem {
         live: Bool = false,
         upcoming: Bool = false,
         duration: Int = 754,
-        goods: LBFeaturedGood? = .demo()
+        goods: LBFeaturedGood? = .demo(),
+        liveurl: String = ""
     ) -> LBVideoItem {
         LBVideoItem(
             id: id,
@@ -480,7 +481,7 @@ public extension LBVideoItem {
             liveStatus: live ? 1 : 0,
             pin: 0,
             showPvNum: 0,
-            liveurl: "",
+            liveurl: liveurl,
             playbackurl: "",
             previewTime: "",
             showStock: false,

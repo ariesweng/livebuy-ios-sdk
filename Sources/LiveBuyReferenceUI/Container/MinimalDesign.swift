@@ -38,6 +38,7 @@ public struct MinimalDesign: ReferenceUIDesign {
                 showGestureHints: context.showGestureHints,
                 onSwipeUp: context.onSwipeUp,
                 onSwipeDown: context.onSwipeDown,
+                onCloseRequest: context.onCloseRequest,
                 onHoldStart: context.onHoldStart,
                 onHoldEnd: context.onHoldEnd,
                 onMinimize: context.onMinimize,
@@ -123,6 +124,21 @@ struct PlayerOverlayRootView: View {
     /// so the product card shows and is tappable (rb-ios-live-pinned-card-appears).
     static let liveChatTrailingClearance: CGFloat = 152
 
+    /// EXTRA bottom clearance added to the chat feed when the LBLiveAnnounce banner is showing,
+    /// so the chat's newest rows clear the bottom-left 公告 banner instead of overlapping it
+    /// (rb-ios-live-announce-chat-clearance, 問題 4). ≈ the announce banner's height: vertical
+    /// padding 6×2 + 2-line 10.5pt copy (~28) ≈ 40, plus a small gap → 44. Mirrors the design's
+    /// chat / announce vertical offset (`live-chrome.jsx` chat `bottom:110` vs announce `bottom:70`,
+    /// 差 40). Only applied while a 公告 is present; no announce → no extra inset (baseline unchanged).
+    static let liveAnnounceClearance: CGFloat = 44
+
+    /// The chat feed's bottom inset: the LIVE-bottom-bar clearance, PLUS the announce banner's
+    /// height WHEN a 公告 is showing (so the chat avoids overlapping LBLiveAnnounce). Pure function
+    /// (unit-testable). `hasAnnounce == false` → `liveBottomBarClearance` (既有 baseline byte-identical).
+    static func liveChatBottomInset(hasAnnounce: Bool) -> CGFloat {
+        hasAnnounce ? liveBottomBarClearance + liveAnnounceClearance : liveBottomBarClearance
+    }
+
     let shellModel: PlayerShellModel
     let productModel: ProductSheetsModel
     let feedModel: FeedWinModel
@@ -142,10 +158,14 @@ struct PlayerOverlayRootView: View {
 
     let paintsBackgroundPlaceholder: Bool
     let showGestureHints: Bool
-    /// Host-feed swipe overrides forwarded into `PlayerShellView`. nil → the shell uses its
-    /// own channel-adjacency forwarders (see `LiveBuyPlayerConfig.swipeFeed`).
+    /// Optional host swipe overrides forwarded into `PlayerShellView`. The turnkey container
+    /// always passes nil (it no longer drives swipe from a host feed — the swipe-feed was
+    /// removed), so the shell uses its own channel-adjacency forwarders + close-on-empty;
+    /// the seam is retained for hosts wiring `PlayerShellView` directly.
     let onSwipeUp: (() -> Void)?
     let onSwipeDown: (() -> Void)?
+    /// Swipe toward an empty direction (no next / prev) → close the player (#7).
+    let onCloseRequest: (() -> Void)?
     /// Hold-to-pause start/end → default-wired to core `player.pause()` / `player.play()`.
     let onHoldStart: (() -> Void)?
     let onHoldEnd: (() -> Void)?
@@ -184,6 +204,14 @@ struct PlayerOverlayRootView: View {
     /// on its frequent position/viewer publishes). Defaults VOD (false) until the first report.
     @State private var isLiveMode: Bool = false
 
+    /// Mirrors whether the LBLiveAnnounce banner is showing (`shellModel.announceText` non-empty),
+    /// so the chat feed gets EXTRA bottom clearance only while a 公告 is present
+    /// (rb-ios-live-announce-chat-clearance, 問題 4). `PlayerShellView` reports the initial value +
+    /// every change via `onHasAnnounceChange` (the root does NOT observe `shellModel` directly, to
+    /// avoid re-evaluating on its frequent position/viewer publishes). Defaults false (no 公告 →
+    /// no extra inset → baseline unchanged) until the first report.
+    @State private var hasAnnounce: Bool = false
+
     var body: some View {
         ZStack {
             PlayerShellView(
@@ -198,6 +226,7 @@ struct PlayerOverlayRootView: View {
                 onNickname: onNickname,
                 onSwipeUp: onSwipeUp,
                 onSwipeDown: onSwipeDown,
+                onCloseRequest: onCloseRequest,
                 onHoldStart: onHoldStart,
                 onHoldEnd: onHoldEnd,
                 // Hide the LIVE bottom bar while the composer is up (avoid bottom overlap).
@@ -205,7 +234,10 @@ struct PlayerOverlayRootView: View {
                 // Mirror info-panel open state to hide the chat feed while it's up.
                 onInfoPanelPresentedChange: { infoPanelOpen = $0 },
                 // Mirror LIVE/VOD so the LIVE-only chat feed is dropped in VOD.
-                onIsLiveChange: { isLiveMode = $0 })
+                onIsLiveChange: { isLiveMode = $0 },
+                // Mirror 公告 presence so the chat feed avoids overlapping the LBLiveAnnounce
+                // banner (extra bottom clearance only while a 公告 is showing) — 問題 4.
+                onHasAnnounceChange: { hasAnnounce = $0 })
 
             // Keep the merged chat feed above the LIVE bottom bar (they share this ZStack /
             // safe-area space). Clearance = LiveBottomBarView height (8+36+8 ≈ 52) + its own
@@ -214,7 +246,9 @@ struct PlayerOverlayRootView: View {
             // scroll up to view history (rb-ios-chat-feed-scrollable); snapshot/demo
             // paths keep the non-scrollable baseline.
             FeedWinOverlayView(model: feedModel, theme: theme,
-                               chatBottomInset: Self.liveBottomBarClearance,
+                               // 有公告（LBLiveAnnounce 橫幅）時加大底部避讓，讓聊天最底行不與公告
+                               // 重疊；無公告時維持原 clearance（baseline 不變）— 問題 4。
+                               chatBottomInset: Self.liveChatBottomInset(hasAnnounce: hasAnnounce),
                                chatScrollable: true,
                                // Hide the chat feed while the info panel is up so it doesn't
                                // occlude the sheet / swallow its taps (the panel's own scrim
@@ -238,7 +272,11 @@ struct PlayerOverlayRootView: View {
                 onProductTap: onProductTap,
                 onShare: onShare,
                 onSeekToProductIntro: onSeekToProductIntro,
-                onShareProduct: onShareProduct)
+                onShareProduct: onShareProduct,
+                // 加購「需登入」gate's 前往登入 → host login flow (`config.onLogin`), the SAME
+                // host hook the comment login-gate uses. reference-ui NEVER logs in itself
+                // (cart-needs-login-gate).
+                onRequestLogin: onRequestLogin)
 
             ChatComposerBar(
                 controller: composerController,

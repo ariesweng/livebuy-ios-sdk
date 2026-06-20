@@ -126,6 +126,12 @@ public final class PlayerShellModel: ObservableObject {
     /// via `navigateToNext()`'s template forwarder.
     @Published public private(set) var nextVideoId: String?
 
+    /// Whether there is a next / previous adjacent video to switch to. Derived from
+    /// `nextVideoId` / `prevVideoId` (swipe-nav-close-on-empty #7): a swipe toward a
+    /// direction with NO video closes the player instead of no-op'ing.
+    public var hasNextVideo: Bool { nextVideoId != nil }
+    public var hasPrevVideo: Bool { prevVideoId != nil }
+
     // -- Surface 3: VideoInfoPanelView ← info-tab + notice-tab -----------------
 
     /// Info-tab snapshot (`DefaultInfoTab.current` — `LBInfoTabState`).
@@ -160,6 +166,17 @@ public final class PlayerShellModel: ObservableObject {
     /// Feeds the now-introducing carousel (rb-ios-now-introducing-real-image-carousel, 問題 10).
     /// Empty → no VOD product card.
     @Published public private(set) var vodActiveProducts: [LBProduct]
+    /// ALL LIVE now-introducing products — every `narrate_status == 2` product
+    /// (`DefaultPlayerTemplate.liveActiveProducts`, data-layer order). The backend may narrate
+    /// multiple simultaneously. Feeds the LIVE pinned-card carousel (問題 7,
+    /// rb-ios-live-now-introducing-carousel). Empty → fall back to the single `pinnedProduct`.
+    @Published public private(set) var liveActiveProducts: [LBProduct]
+    /// The LIVE pinned-card source for the carousel: the full `liveActiveProducts` when non-empty
+    /// (multi-product carousel + page dots); ELSE the single `pinnedProduct` (既有單卡：
+    /// `activeProduct` ?? 首個 `isHot==1`) as a one-element list. Pure computed.
+    public var livePinnedProducts: [LBProduct] {
+        liveActiveProducts.isEmpty ? [pinnedProduct].compactMap { $0 } : liveActiveProducts
+    }
 
     // -- Identity (DefaultIdentityLabel, AUTH_STATE_CHANGED) --------------------
 
@@ -178,6 +195,11 @@ public final class PlayerShellModel: ObservableObject {
     /// on a `guest_comment == 0` live (`chatEnabled == false`) — rb-ios-live-comment-login-gate.
     /// Default `false` (pre-channel / non-live); set true once a live + open-comments channel loads.
     @Published public private(set) var chatEnabled: Bool
+
+    /// 會員等級限定軟閘門（restriction-mask ②），鏡像自 `template.isRestricted`
+    /// （`LBChannel.isRestriction == 1`）。`true` → PlayerShellView 在播放畫面疊升級遮罩。
+    /// 預設 false（未受限）。
+    @Published public private(set) var isRestricted: Bool
 
     // MARK: - Live binding
 
@@ -246,8 +268,10 @@ public final class PlayerShellModel: ObservableObject {
             pinnedProduct: Self.derivePinnedProduct(t.productOverlay),
             vodActiveProduct: t.vodActiveProduct,
             vodActiveProducts: t.vodActiveProducts,
+            liveActiveProducts: t.liveActiveProducts,
             isLoggedIn: t.identityLabel.current?.isLoggedIn ?? false,
-            displayName: t.identityLabel.current?.displayName ?? ""
+            displayName: t.identityLabel.current?.displayName ?? "",
+            isRestricted: t.isRestricted
         )
     }
 
@@ -290,9 +314,11 @@ public final class PlayerShellModel: ObservableObject {
         pinnedProduct: LBProduct? = nil,
         vodActiveProduct: LBProduct? = nil,
         vodActiveProducts: [LBProduct]? = nil,
+        liveActiveProducts: [LBProduct] = [],
         isLoggedIn: Bool = false,
         displayName: String = "",
-        chatEnabled: Bool = false
+        chatEnabled: Bool = false,
+        isRestricted: Bool = false
     ) {
         self.title = title
         self.hostName = hostName
@@ -328,9 +354,11 @@ public final class PlayerShellModel: ObservableObject {
         // Back-compat: callers passing only `vodActiveProduct` (e.g. existing snapshot tests)
         // get a single-element list; the live snapshot path passes the full plural.
         self.vodActiveProducts = vodActiveProducts ?? [vodActiveProduct].compactMap { $0 }
+        self.liveActiveProducts = liveActiveProducts
         self.isLoggedIn = isLoggedIn
         self.displayName = displayName
         self.chatEnabled = chatEnabled
+        self.isRestricted = isRestricted
     }
 
     deinit {
@@ -383,10 +411,12 @@ public final class PlayerShellModel: ObservableObject {
         pinnedProduct = Self.derivePinnedProduct(t.productOverlay)
         vodActiveProduct = t.vodActiveProduct
         vodActiveProducts = t.vodActiveProducts
+        liveActiveProducts = t.liveActiveProducts
 
         isLoggedIn = t.identityLabel.current?.isLoggedIn ?? false
         displayName = t.identityLabel.current?.displayName ?? ""
         chatEnabled = t.operationRail.chatEnabled
+        isRestricted = t.isRestricted
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)
@@ -445,14 +475,35 @@ public final class PlayerShellModel: ObservableObject {
 
     // -- Swipe navigation (→ template → core load(videoId:), swipe-navigate-template) --
 
+    /// Fired AFTER a vertical-swipe in-place switch resolves a NON-nil adjacent target id and
+    /// forwards the core `load` to the template, carrying that new video id. The reference-ui
+    /// container (`LiveBuyPlayer`) wires this to keep its cover/current identity in sync and
+    /// report `config.onVideoSwitched?(id)` — parity with the watch-next / hot-pick switch
+    /// paths — so a host-bound video mirror (e.g. the minimized floating preview card's
+    /// `video`) tracks the shown video after a swipe (swipe-video-switched-notify). The
+    /// resolved id is the EXISTING published `nextVideoId` / `prevVideoId` (no second source of
+    /// truth). An empty-direction swipe (no adjacent video → close per swipe-nav-close-on-empty)
+    /// does NOT fire this. nil on demo / snapshot instances.
+    public var onDidSwitchVideo: ((String) -> Void)?
+
     /// Switch to the PREVIOUS adjacent video (vertical swipe-DOWN) — forward to the
     /// template's `navigateToPrev()` (→ core `load(videoId:)`); no-op when there is
-    /// no previous video or no bound template (demo / snapshot instance).
-    public func navigateToPrev() { template?.navigateToPrev() }
+    /// no previous video or no bound template (demo / snapshot instance). On a non-nil
+    /// `prevVideoId` it then fires `onDidSwitchVideo` so the container reports `onVideoSwitched`.
+    public func navigateToPrev() {
+        guard let id = prevVideoId else { return }
+        template?.navigateToPrev()
+        onDidSwitchVideo?(id)
+    }
     /// Switch to the NEXT adjacent video (vertical swipe-UP) — forward to the
     /// template's `navigateToNext()` (→ core `load(videoId:)`); no-op when there is
-    /// no next video or no bound template (demo / snapshot instance).
-    public func navigateToNext() { template?.navigateToNext() }
+    /// no next video or no bound template (demo / snapshot instance). On a non-nil
+    /// `nextVideoId` it then fires `onDidSwitchVideo` so the container reports `onVideoSwitched`.
+    public func navigateToNext() {
+        guard let id = nextVideoId else { return }
+        template?.navigateToNext()
+        onDidSwitchVideo?(id)
+    }
 
     // MARK: - Deterministic defaults (demo / snapshot seeds)
 

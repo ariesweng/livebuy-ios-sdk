@@ -45,8 +45,8 @@ public struct LiveBuyWidgetConfig {
     /// push its own see-all / 影音商城 page.
     public var onSeeMore: (() -> Void)?
 
-    /// Called after the first load with the ordered video feed, so a host can drive
-    /// swipe-to-switch-video in the player (`LiveBuyPlayerConfig.swipeFeed`). DEFAULT: `nil`.
+    /// Called after the first load with the ordered video feed, so a host can keep its own
+    /// list state in sync (e.g. a floating live-entry preview). DEFAULT: `nil`.
     public var onVideosChanged: (([LBVideoItem]) -> Void)?
 
     /// Render real thumbnails at runtime (`preview → cover → placeholder`, REQ1 host opt-in).
@@ -261,7 +261,10 @@ public struct LiveBuyWidget: View {
             model: controller.model,
             theme: controller.theme,
             live: config.live,
-            onTapVideo: config.onTapVideo,
+            // Redirect external-platform lives (Facebook) out to their platform on
+            // tap instead of opening the in-app player (external-live-watch);
+            // non-external lives forward to the host `onTapVideo` unchanged.
+            onTapVideo: externalLiveAwareTap(config.onTapVideo),
             onSeeMore: config.onSeeMore,
             onLoadMore: { controller.requestLoadMore() })
         switch mode {

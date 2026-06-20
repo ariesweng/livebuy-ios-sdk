@@ -185,6 +185,14 @@ public struct ProductSheetsOverlayView: View {
     /// `onShare`（channel-level、`() -> Void`）為**不同**入口。nil for demo / snapshot instances。
     private let onShareProduct: ((LBProduct) -> Void)?
 
+    /// Host-wired「前往登入」CTA for the add-to-cart needs-login gate (cart-needs-login-gate).
+    /// When the template's `addToCartNeedsLogin` flips true (route-B add hit the empty-`buy_no`
+    /// 401 signal), the overlay presents `AuthGateModalView(.cartAdd)`; its 前往登入 CTA routes
+    /// HERE — the HOST's own login flow (`config.onLogin`). reference-ui NEVER logs in itself
+    /// (same invariant as the comment login-gate). nil for demo / snapshot instances (the gate
+    /// defaults not-presented, so baselines stay byte-identical).
+    private let onRequestLogin: (() -> Void)?
+
     /// The product-detail the sheet is currently presented for, if any. Mirrors
     /// `model.detail` so the sheet binds a non-optional detail inside; the SOLD-OUT
     /// bit selects restock vs plain detail. The template owns detail open/close —
@@ -206,6 +214,16 @@ public struct ProductSheetsOverlayView: View {
     /// `lbBottomSheet` stack so the viewer covers the open sheet. NOT view-model state.
     @State private var zoomedDetail: LBProductDetailState?
 
+    /// Whether the add-to-cart needs-login gate is currently presented. A LOCAL
+    /// presentation flag (NOT a model snapshot): set true on the template's
+    /// `addToCartNeedsLogin` false→true transition; cleared on 前往登入 hand-off /
+    /// 稍後再說 / scrim. Default false → snapshot-neutral (baselines byte-identical).
+    /// Using a local flag (not gating directly on `model.addToCartNeedsLogin`) lets
+    /// 稍後再說 dismiss the gate even though reference-ui cannot reset the template
+    /// flag; the next add attempt re-fires the false→true transition (template resets
+    /// then re-sets the flag) and re-presents (cart-needs-login-gate).
+    @State private var cartLoginGatePresented = false
+
     public init(
         model: ProductSheetsModel,
         theme: ReferenceUITheme,
@@ -213,7 +231,8 @@ public struct ProductSheetsOverlayView: View {
         onProductTap: ((LBProduct) -> Void)? = nil,
         onShare: (() -> Void)? = nil,
         onSeekToProductIntro: ((LBProduct) -> Void)? = nil,
-        onShareProduct: ((LBProduct) -> Void)? = nil
+        onShareProduct: ((LBProduct) -> Void)? = nil,
+        onRequestLogin: (() -> Void)? = nil
     ) {
         self.model = model
         self.theme = theme
@@ -222,6 +241,7 @@ public struct ProductSheetsOverlayView: View {
         self.onShare = onShare
         self.onSeekToProductIntro = onSeekToProductIntro
         self.onShareProduct = onShareProduct
+        self.onRequestLogin = onRequestLogin
     }
 
     public var body: some View {
@@ -238,30 +258,40 @@ public struct ProductSheetsOverlayView: View {
                     live: live,
                     onClose: { zoomedDetail = nil })
             }
+            // Add-to-cart「需登入」gate (cart-needs-login-gate) — presented TOPMOST (after
+            // the sheet stack + lightbox) when the route-B add hit the empty-`buy_no` 401
+            // signal (`model.addToCartNeedsLogin`). REUSES the comment login-gate's
+            // `AuthGateModalView` surface (no new pixel surface); the modal owns its own
+            // scrim. 前往登入 → host `onRequestLogin` (reference-ui NEVER logs in itself);
+            // 稍後再說 / scrim → dismiss. The genuine-failure banner is unaffected (it draws
+            // only on the orthogonal `addToCartFailed`, never set together with needs-login).
+            if cartLoginGatePresented {
+                AuthGateModalView(
+                    theme: theme,
+                    triggerAction: .cartAdd,
+                    onLogin: {
+                        cartLoginGatePresented = false
+                        onRequestLogin?()
+                    },
+                    onDismiss: { cartLoginGatePresented = false })
+            }
         }
+        // Present the gate on the template flag's false→true transition (iOS-14-safe
+        // `onChange`; mirrors `syncPresentation`). A local flag — not direct gating —
+        // so 稍後再說 can dismiss without reference-ui resetting the template flag.
+        .presentCartLoginGate(on: model.addToCartNeedsLogin, into: $cartLoginGatePresented)
     }
 
     /// The product sheet-stack proper (mini-cart peek + the `lbBottomSheet` list / detail /
     /// restock presenters). Wrapped by `body` so the zoom lightbox can layer above it.
     private var sheetStack: some View {
         ZStack {
-            // Floating mini-cart peek, pinned bottom-trailing. Drawn ONLY when a
-            // peek exists (`model.miniCartPeek != nil`). Surface 2.
-            if let peek = model.miniCartPeek {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        MiniCartView(
-                            theme: theme,
-                            peek: peek,
-                            onDismiss: { model.dismissMiniCart() },
-                            onOpenDetail: { model.openMiniCartDetail() })
-                            .padding(.trailing, 12)
-                            .padding(.bottom, 120)
-                    }
-                }
-            }
+            // mini-cart peek surface REMOVED (rb-ios-remove-minicart-peek-surface): the floating
+            // peek looked identical to the VOD now-introducing card (same `MiniCartView` component)
+            // and duplicated the「current product」(VOD → now-introducing card / LIVE → pinned card);
+            // recent-add confirmation is the bag-button badge. A transparent base keeps the ZStack
+            // full-size so the `.lbBottomSheet` presenters below anchor correctly.
+            Color.clear
         }
         // Product list drawer (surface 1) — shared SheetKit bottom-sheet presenter (dim
         // scrim + grab handle + drag-to-dismiss). Presentation is driven by the SHARED
@@ -276,6 +306,12 @@ public struct ProductSheetsOverlayView: View {
                 cartCount: model.cartCount,
                 live: live,
                 introducingProductId: model.introducingProductId,
+                // Playback mode for the row overlay (VOD play / live 介紹中 / replay
+                // begin-end window). `rowMode` is nil for a demo model → ProductListView
+                // falls back to `live` (baselines byte-identical); a live-bound model
+                // supplies the real mode + playback position (rb-ios-product-row-status-overlay).
+                mode: model.rowMode,
+                playbackPosition: Int(model.position),
                 onOpenProduct: { product in
                     // 明細鈕 / 商品名 → full browse sheet. reference-ui NEVER opens the detail
                     // itself — set the LOCAL presentation mode, then forward to the host-wired
@@ -442,6 +478,22 @@ private extension View {
         if #available(iOS 14.0, *) {
             self.onChange(of: detail) { newValue in
                 binding.wrappedValue = newValue
+            }
+        } else {
+            self
+        }
+    }
+
+    /// Present the add-to-cart needs-login gate on the template flag's false→true
+    /// transition (cart-needs-login-gate). Mirrors `syncPresentation`: iOS-14-safe
+    /// `onChange`; only a rising edge sets the local presentation flag (so a 稍後再說
+    /// dismiss, which leaves the template flag true, does not re-present until the next
+    /// add attempt re-fires false→true).
+    @ViewBuilder
+    func presentCartLoginGate(on needsLogin: Bool, into binding: Binding<Bool>) -> some View {
+        if #available(iOS 14.0, *) {
+            self.onChange(of: needsLogin) { newValue in
+                if newValue { binding.wrappedValue = true }
             }
         } else {
             self

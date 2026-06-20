@@ -71,6 +71,13 @@ public final class MomentsModel: ObservableObject {
     /// `duration` is an ALREADY-FORMATTED string (e.g. `"38:36"`, NOT seconds).
     @Published public private(set) var hot: [LBHotItem]
 
+    /// Whether the end screen should be shown at all (`DefaultEndScreenState.endScreenVisible`,
+    /// mirrors core `endScreenShown`). True on live_end REGARDLESS of next/hot. The container
+    /// shows the end moment when `countdown != nil || endScreenVisible`; when `countdown == nil`
+    /// && `endScreenVisible`, EndScreenView renders the no-countdown「直播已結束」variant
+    /// (end-screen-no-countdown #6c).
+    @Published public private(set) var endScreenVisible: Bool
+
     // -- Surface 2: ErrorScreenView ← terminal error snapshot (design §3) -------
 
     /// Terminal player error snapshot (`DefaultErrorState.current`); nil when the
@@ -132,6 +139,7 @@ public final class MomentsModel: ObservableObject {
             countdown: t.endScreen.countdown,
             next: t.endScreen.next,
             hot: t.endScreen.hot,
+            endScreenVisible: t.endScreen.endScreenVisible,
             error: t.errorState.current,
             upcomingActive: t.upcoming.active,
             upcomingStartAt: t.upcoming.scheduledStartAt,
@@ -152,6 +160,7 @@ public final class MomentsModel: ObservableObject {
         countdown: LBEndScreenCountdown? = nil,
         next: [LBNavItem] = [],
         hot: [LBHotItem] = [],
+        endScreenVisible: Bool = false,
         error: LBPlayerErrorState? = nil,
         upcomingActive: Bool = false,
         upcomingStartAt: String = "",
@@ -160,6 +169,7 @@ public final class MomentsModel: ObservableObject {
         self.countdown = countdown
         self.next = next
         self.hot = hot
+        self.endScreenVisible = endScreenVisible
         self.error = error
         self.upcomingActive = upcomingActive
         self.upcomingStartAt = upcomingStartAt
@@ -183,6 +193,7 @@ public final class MomentsModel: ObservableObject {
         countdown = t.endScreen.countdown
         next = t.endScreen.next
         hot = t.endScreen.hot
+        endScreenVisible = t.endScreen.endScreenVisible
         error = t.errorState.current
         upcomingActive = t.upcoming.active
         upcomingStartAt = t.upcoming.scheduledStartAt

@@ -17,25 +17,30 @@ import LiveBuyUI
 //   • a white shopping-bag button + cart badge (when `bagCount > 0`),
 //   • a flex "留言..." TAP-TARGET pill (NOT an inline TextField — design `onComment`
 //     opens a sheet; the real composer is the host's),
-//   • a nickname (person-edit) button — OR, in the replay variant, a CC toggle,
+//   • a nickname (person-edit) button,
 //   • a share button,
 //   • an accent like (heartFill) button.
 //
-// Replay variant (D-3): when `isReplay`, the "留言..." pill becomes a disabled
-// "聊天室已關閉" state and the nickname button is swapped for the CC toggle
-// (`live-chrome.jsx` `replay` branch, lines 198-221).
+// Comment entry ALWAYS available (prerecorded-live-bottom-bar-comment, 問題 1): this bar
+// renders ONLY for a live broadcast (`isLive == true`, i.e. `channel.liveStatus == 1`) /
+// upcoming / introPlaying — true 回放/VOD (`liveStatus == 3`) uses the side rail, not this
+// bar. A live broadcast's chat room is open REGARDLESS of the viewer's playback position,
+// so the "留言..." pill and the nickname button are NEVER collapsed on `isReplay`. The
+// prior "replay variant" (disabled "聊天室已關閉" + CC swap) is removed: `isReplay` was a
+// playback-position heuristic that mis-flags a 預錄直播 (a finite-length HLS routed to the
+// IVS engine, `position < duration - 5` immediately true) and wrongly closed its chat.
 //
 // Upcoming SLIM variant (rb-ios-upcoming-live-chrome): when `isUpcoming`, the comment
-// area collapses to a flex spacer and the nickname / CC button is dropped — only
-// bag + share + like remain (the stream hasn't started, so there is no chat). Mirrors
-// `LBLiveBottomBar({ upcoming: true })` (`live-chrome.jsx` lines 195-197). Takes
-// precedence over `isReplay`. Used for the awaitingLive countdown.
+// area collapses to a flex spacer and the nickname button is dropped — only bag + share +
+// like remain (the stream hasn't started, so there is no chat). Mirrors
+// `LBLiveBottomBar({ upcoming: true })` (`live-chrome.jsx` lines 195-197). Used for the
+// awaitingLive countdown.
 //
 // bag-only variant (rb-ios-intro-chrome-minimal): when `bagOnly`, the bar collapses
 // further to JUST the shopping-bag button + a trailing flex spacer — comment / nickname
-// / CC / share / like are ALL dropped. This is the minimal chrome for 直播預告的開場影片
+// / share / like are ALL dropped. This is the minimal chrome for 直播預告的開場影片
 // (`introPlaying`, the upcoming intro MP4 playing). `bagOnly` takes PRECEDENCE over
-// `isUpcoming` / `isReplay`. (awaitingLive keeps the slim three-button bar above.)
+// `isUpcoming`. (awaitingLive keeps the slim three-button bar above.)
 //
 // One-way data flow (mirrors OperationRailView): this view reads ONLY its passed-in
 // SNAPSHOT VALUES (`bagCount` / `isReplay`); it never reaches back into
@@ -48,12 +53,12 @@ import LiveBuyUI
 // `LinearGradient` / `Image(systemName:)` + `PlainButtonStyle` are all iOS-13+.
 // No `ScrollView` / `Lazy*` (the `ImageRenderer` snapshot path renders those blank).
 //
-// The user-facing strings ("留言...", "聊天室已關閉") are design-literal (the minimal
-// design mockup is the source of truth); localization is a cross-layer follow-up.
+// The user-facing string ("留言...") is design-literal (the minimal design mockup is the
+// source of truth); localization is a cross-layer follow-up.
 
 /// The family-1 LIVE bottom bar surface. Renders the horizontal bag / comment /
-/// nickname-or-CC / share / like row from `LBLiveBottomBar`, with the replay
-/// "聊天室已關閉" variant keyed on `isReplay`.
+/// nickname / share / like row from `LBLiveBottomBar`. The comment entry is always
+/// available for a live broadcast (prerecorded-live-bottom-bar-comment).
 public struct LiveBottomBarView: View {
 
     // MARK: - Inputs (sub-view input pattern: theme, snapshot values, actions)
@@ -64,8 +69,11 @@ public struct LiveBottomBarView: View {
     /// Shopping-bag badge count. `> 0` → draw the badge on the bag button.
     public let bagCount: Int
 
-    /// Replay (重播) variant flag. `true` → the comment pill becomes the disabled
-    /// "聊天室已關閉" state and the nickname button is swapped for the CC toggle.
+    /// Replay (behind-live-edge) flag. RETAINED for source compatibility, but it NO LONGER
+    /// alters this bar's comment / nickname rendering: the LIVE bottom bar renders only for a
+    /// live broadcast (whose chat room is open regardless of playback position), so the comment
+    /// entry is always available (prerecorded-live-bottom-bar-comment, 問題 1). The header's
+    /// separate LIVE-pill `isReplay` handling (`PlayerHeaderBarView`) is a different surface.
     public let isReplay: Bool
 
     /// Upcoming (直播預告) SLIM variant flag. `true` → the comment area collapses to a
@@ -91,7 +99,9 @@ public struct LiveBottomBarView: View {
     public let onShare: (() -> Void)?
     /// Like (❤️) tap → host-wired like exit. nil → inert.
     public let onLike: (() -> Void)?
-    /// CC toggle (replay variant) → host-wired subtitle toggle. nil → inert.
+    /// CC toggle → host-wired subtitle toggle. RETAINED for source compatibility (defaulted
+    /// nil); the LIVE bottom bar no longer draws a CC button (the prior replay variant is
+    /// removed — prerecorded-live-bottom-bar-comment). nil → inert.
     public let onToggleCC: (() -> Void)?
 
     public init(
@@ -135,30 +145,31 @@ public struct LiveBottomBarView: View {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
             } else {
                 // Flex comment area. Upcoming (slim) → an ACTIVE flex (no chat before the
-                // stream starts); replay → disabled "聊天室已關閉"; LIVE → tap-target "留言...".
-                // The upcoming flex uses `Color.clear` + `maxWidth: .infinity` (mirrors the
-                // design `<div flex:1/>` and the LIVE commentPill), NOT a bare `Spacer` — a
-                // bare Spacer collapses to ideal-width when the bar is hosted without an
-                // explicit width proposal, pushing the end buttons (bag / like) off-screen.
+                // stream starts); otherwise (LIVE — INCLUDING 預錄直播 where isReplay is
+                // mis-flagged true) → the tap-target "留言...". The LIVE bottom bar only renders
+                // for a live broadcast (liveStatus == 1), whose chat room is open REGARDLESS of
+                // the viewer's playback position — so the comment entry is ALWAYS available and
+                // MUST NOT collapse to a disabled "聊天室已關閉" on `isReplay`
+                // (prerecorded-live-bottom-bar-comment, 問題 1). True 回放/VOD uses the side rail,
+                // not this bar. The upcoming flex uses `Color.clear` + `maxWidth: .infinity`
+                // (mirrors the design `<div flex:1/>` and the LIVE commentPill), NOT a bare
+                // `Spacer` — a bare Spacer collapses to ideal-width when the bar is hosted without
+                // an explicit width proposal, pushing the end buttons (bag / like) off-screen.
                 if isUpcoming {
                     Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                } else if isReplay {
-                    chatClosedPill
                 } else {
                     commentPill
                 }
 
-                // Nickname / CC button is dropped entirely in the upcoming variant (design
-                // gates both on `!upcoming`). Replay swaps the nickname for a CC toggle.
+                // Nickname (person-edit) button is dropped entirely in the upcoming variant
+                // (design gates it on `!upcoming`). Otherwise it ALWAYS shows — the LIVE bottom
+                // bar no longer swaps it for a CC toggle on `isReplay` (a live broadcast's chat is
+                // open, so the nickname/comment affordance stays — prerecorded-live-bottom-bar-comment).
                 if !isUpcoming {
-                    if isReplay {
-                        iconButton(symbol: Self.ccSymbol, tint: .white, action: onToggleCC)
-                    } else {
-                        // 設定暱稱 draws the hand-drawn person-EDIT composite (head + pencil
-                        // badge, design `live-chrome.jsx` ≈224), not SF `person.fill`
-                        // (rb-align-nickname-icon-person-edit).
-                        iconButton(action: onNickname) { PersonEditGlyph(size: Self.iconGlyphSize, color: .white) }
-                    }
+                    // 設定暱稱 draws the hand-drawn person-EDIT composite (head + pencil
+                    // badge, design `live-chrome.jsx` ≈224), not SF `person.fill`
+                    // (rb-align-nickname-icon-person-edit).
+                    iconButton(action: onNickname) { PersonEditGlyph(size: Self.iconGlyphSize, color: .white) }
                 }
 
                 // Share draws the hand-drawn `ShareGlyph` (design `Icons.share`),
@@ -233,16 +244,6 @@ public struct LiveBottomBarView: View {
         .buttonStyle(PlainButtonStyle())
     }
 
-    /// Replay variant: disabled, centered "聊天室已關閉" pill (no tap).
-    private var chatClosedPill: some View {
-        Text(Self.chatClosedLabel)
-            .font(.system(size: Self.chatClosedFontSize))
-            .foregroundColor(Color.white.opacity(0.5))
-            .frame(height: Self.iconSize)
-            .frame(maxWidth: .infinity)
-            .background(Capsule().fill(Self.chatClosedBackground))
-    }
-
     // MARK: - Icon button (`LBLiveBottomBar` iconBtn)
 
     /// A round translucent-dark icon button (36×36). `tint` colors the glyph
@@ -306,18 +307,12 @@ private extension LiveBottomBarView {
     static let commentBackground = Color(.sRGB, red: 20 / 255, green: 20 / 255, blue: 24 / 255, opacity: 0.55)
     static let commentPlaceholder = "留言..."
 
-    // replay closed pill (rgba(20,20,24,0.45), text rgba(255,255,255,0.5) 12px center)
-    static let chatClosedFontSize: CGFloat = 12
-    static let chatClosedBackground = Color(.sRGB, red: 20 / 255, green: 20 / 255, blue: 24 / 255, opacity: 0.45)
-    static let chatClosedLabel = "聊天室已關閉"
-
     // glyphs (match OperationRailView.symbolName mapping)
     static let bagSymbol = "bag.fill"               // Icons.bag
     // 設定暱稱 改用自繪 PersonEditGlyph（人頭 + 鉛筆 badge），不再用 SF `person.fill`
     // （rb-align-nickname-icon-person-edit）。
     // share 改用自繪 ShareGlyph（Icons.share 三節點），不再用 SF symbol（rb-ios-share-icon-design-align）。
     static let likeSymbol = "heart.fill"            // Icons.heartFill
-    static let ccSymbol = "captions.bubble"         // Icons.cc
 }
 
 // MARK: - Preview (deterministic demo)
@@ -327,6 +322,7 @@ struct LiveBottomBarView_Previews: PreviewProvider {
     static var previews: some View {
         VStack(spacing: 24) {
             LiveBottomBarView(theme: ReferenceUIThemePalette.minimal, bagCount: 8, isReplay: false)
+            // isReplay == true (預錄直播) now renders the SAME live bar (comment 留言 stays available).
             LiveBottomBarView(theme: ReferenceUIThemePalette.minimal, bagCount: 0, isReplay: true)
             LiveBottomBarView(theme: ReferenceUIThemePalette.minimal, bagCount: 3, isReplay: false, isUpcoming: true)
             // bag-only (introPlaying intro MP4) — just the bag button

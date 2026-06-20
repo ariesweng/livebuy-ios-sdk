@@ -174,10 +174,17 @@ public struct FeedWinOverlayView: View {
                 // the ambient / snapshot path keeps the N=7 feedItems.
                 items: chatScrollable ? model.feedHistory : model.feedItems,
                 hostScrollable: chatScrollable,
+                // 置頂留言（chat-pinned-message-render ⑤c）；nil → 無橫幅（snapshot 中性）。
+                pinned: model.pinned,
                 onJoinEvent: { eid, keyword in
                     // The唯一 interactive row's「加入活動」intent → upstream exit
                     // (host wired) via the model's thin forwarder.
                     model.joinEvent(eid: eid, keyword: keyword)
+                },
+                onTapSaleBuy: { name in
+                    // 商品開賣卡「立即搶購」(問題5) → model forwarder → template
+                    // `openProductSaleByName` → resolve 商品名 → open that product's detail sheet.
+                    model.openSaleProduct(name: name)
                 })
                 // Keep the newest (bottom) rows ABOVE the LIVE bottom bar — applied
                 // ONLY to the chat feed (NOT the centered claim modal / win-entry).

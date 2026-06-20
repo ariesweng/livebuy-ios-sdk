@@ -34,9 +34,12 @@ import LiveBuyUI
 //       hostCaption: String = "",                //    host-supplied static copy (GAP NOTE)
 //       showGestureHints: Bool = true)           //    static presentation toggle
 //
-// There are NO action closures on this surface: the announce / caption / gesture
-// hints carry no tap intent, and the pinned card's tap is a host-wired core exit
-// (NOT owned by the shell — D-4). The card therefore renders presentation-only.
+// Action closures on this surface are host-wired taps only (the layer NEVER acts itself):
+// the pinned card's tap is a host-wired core exit (`onTapPinnedProduct`, D-4), and the
+// announce banner's tap is a host-wired navigation that opens the VideoInfoPanel notice tab
+// (`onTapAnnounce`, live-announce-tap-open-info-panel). The caption / gesture hints carry no
+// tap intent. Both tap closures default to nil → the affordance renders inert (demo / snapshot),
+// pixel-neutral either way.
 //
 // One-way data flow: this view reads ONLY its passed-in values and NEVER reaches
 // back into PlayerShellModel or DefaultPlayerTemplate (D-1 / D-4).
@@ -58,10 +61,23 @@ public struct LiveOverlayChromeView: View {
     /// .announceText` (← `noticeTab.notice`). Empty → the banner is omitted.
     public let announceText: String
 
-    /// The single pinned narrating product (`LBLivePinnedCard`). Source:
-    /// `PlayerShellModel.pinnedProduct` (← `productOverlay.activeProduct`).
-    /// nil → no pinned card.
-    public let pinnedProduct: LBProduct?
+    /// The LIVE pinned narrating product(s) (`LBLivePinnedCard`). Source:
+    /// `PlayerShellModel.livePinnedProducts` (← template `liveActiveProducts`, ALL `narrate_status==2`;
+    /// ELSE the single `pinnedProduct` = `activeProduct` ?? first `isHot==1`, as a 1-element list).
+    /// Empty → no card; exactly 1 → single card (現狀); >1 → current card + 分頁點 carousel
+    /// (問題 7, rb-ios-live-now-introducing-carousel).
+    public let pinnedProducts: [LBProduct]
+
+    /// Current page in the multi-product pinned-card carousel (only meaningful when
+    /// `pinnedProducts.count > 1`). Pure UI `@State`, NOT a view-model.
+    @State private var pinnedIndex: Int = 0
+
+    /// `true` (runtime, real live video surface) → the pinned card loads the real
+    /// product image over its placeholder; `false` (snapshot / demo) keeps the
+    /// deterministic gray placeholder (live-pinned-card-image-radius). Reuses the
+    /// same runtime-image gate (`!paintsBackgroundPlaceholder`) the shop logo / VOD
+    /// now-introducing card use.
+    public let live: Bool
 
     /// Host caption copy (`LBLiveHostCaption`). There is no public host-caption
     /// view-model on the template (see PlayerShellModel GAP NOTE) — this is a
@@ -82,20 +98,31 @@ public struct LiveOverlayChromeView: View {
     /// drawn but inert (demo / snapshot). No pixel change either way.
     private let onTapPinnedProduct: ((LBProduct) -> Void)?
 
+    /// Tap on the announcement banner (`LBLiveAnnounce`) → host-wired navigation that
+    /// opens the `VideoInfoPanelView` notice tab (PlayerShellView wires
+    /// `selectInfoTab(.notice)` + `infoPanelPresented = true`). nil → the banner is drawn
+    /// but inert (demo / snapshot). Pixel-neutral either way (`PlainButtonStyle` wrapper) —
+    /// live-announce-tap-open-info-panel.
+    private let onTapAnnounce: (() -> Void)?
+
     public init(theme: ReferenceUITheme,
                 announceText: String,
-                pinnedProduct: LBProduct?,
+                pinnedProducts: [LBProduct],
+                live: Bool = false,
                 hostCaption: String = "",
                 showGestureHints: Bool = true,
                 autoFadeGestureHints: Bool = false,
-                onTapPinnedProduct: ((LBProduct) -> Void)? = nil) {
+                onTapPinnedProduct: ((LBProduct) -> Void)? = nil,
+                onTapAnnounce: (() -> Void)? = nil) {
         self.theme = theme
         self.announceText = announceText
-        self.pinnedProduct = pinnedProduct
+        self.pinnedProducts = pinnedProducts
+        self.live = live
         self.hostCaption = hostCaption
         self.showGestureHints = showGestureHints
         self.autoFadeGestureHints = autoFadeGestureHints
         self.onTapPinnedProduct = onTapPinnedProduct
+        self.onTapAnnounce = onTapAnnounce
     }
 
     /// Gesture-hint opacity — starts visible, then fades out shortly after the
@@ -150,24 +177,85 @@ public struct LiveOverlayChromeView: View {
                 Spacer(minLength: 0)
                 HStack(alignment: .bottom, spacing: 8) {
                     if !announceText.isEmpty {
-                        announceBanner
-                    }
-                    Spacer(minLength: 0)
-                    if let product = pinnedProduct {
-                        // Tappable → host-wired turnkey product detail. PlainButtonStyle
-                        // preserves the pixels (snapshot baselines unchanged); inert when
-                        // onTapPinnedProduct == nil (demo / snapshot).
-                        Button(action: { onTapPinnedProduct?(product) }) {
-                            pinnedCard(product)
+                        // Tappable → host-wired navigation that opens the VideoInfoPanel notice
+                        // tab (PlayerShellView: selectInfoTab(.notice) + infoPanelPresented).
+                        // PlainButtonStyle keeps the pixels (snapshot baselines unchanged);
+                        // inert when onTapAnnounce == nil (live-announce-tap-open-info-panel).
+                        Button(action: { onTapAnnounce?() }) {
+                            announceBanner
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
+                    Spacer(minLength: 0)
+                    pinnedCardCarousel
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 64)
             }
         }
     }
+
+    // MARK: - LBLivePinnedCard carousel — single card OR multi-product carousel + 分頁點
+
+    /// The current pinned product (clamped index), or nil when none. Shared by the bottom-right
+    /// pinned-card carousel and the host-caption live-price row.
+    private var currentPinnedProduct: LBProduct? {
+        guard !pinnedProducts.isEmpty else { return nil }
+        return pinnedProducts[min(max(pinnedIndex, 0), pinnedProducts.count - 1)]
+    }
+
+    /// Bottom-right pinned product card. `pinnedProducts.count > 1` → current card + 分頁點（卡上方）
+    /// + horizontal swipe to change page; `== 1` → single card（現狀）; empty → nothing
+    /// (問題 7, rb-ios-live-now-introducing-carousel).
+    @ViewBuilder
+    private var pinnedCardCarousel: some View {
+        if !pinnedProducts.isEmpty {
+            let i = min(max(pinnedIndex, 0), pinnedProducts.count - 1)
+            let product = pinnedProducts[i]
+            VStack(alignment: .trailing, spacing: 6) {
+                if pinnedProducts.count > 1 {
+                    pinnedPageDots(count: pinnedProducts.count, current: i)
+                }
+                // Tappable → host-wired turnkey product detail. PlainButtonStyle preserves the pixels
+                // (single-card snapshot baselines unchanged); inert when onTapPinnedProduct == nil.
+                Button(action: { onTapPinnedProduct?(product) }) {
+                    pinnedCard(product)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            // 水平 swipe 切頁（方向 gate：僅在水平位移 > 垂直位移時切頁；垂直交給外層上下換片）。
+            // `highPriorityGesture` minDistance 10 讓水平拖曳勝過卡片 Button / 外層手勢。單卡時 no-op。
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 10)
+                    .onEnded { value in
+                        guard pinnedProducts.count > 1,
+                              abs(value.translation.width) > abs(value.translation.height) else { return }
+                        if value.translation.width <= -Self.pinnedSwipeThreshold {
+                            pinnedIndex = min(i + 1, pinnedProducts.count - 1)
+                        } else if value.translation.width >= Self.pinnedSwipeThreshold {
+                            pinnedIndex = max(i - 1, 0)
+                        }
+                    }
+            )
+        }
+    }
+
+    /// Page dots — one per pinned product, current accent-filled, rest dim. Each dot TAPPABLE
+    /// (tap → that page). 6×6 dot keeps exact pixels; `contentShape(...inset -7)` enlarges the tap
+    /// target without changing layout. Mirrors `NowIntroducingCarouselView.pageDots`.
+    private func pinnedPageDots(count: Int, current: Int) -> some View {
+        HStack(spacing: 6) {
+            ForEach(0..<count, id: \.self) { idx in
+                Circle()
+                    .fill(idx == current ? theme.accent : Color.white.opacity(0.4))
+                    .frame(width: 6, height: 6)
+                    .contentShape(Rectangle().inset(by: -7))
+                    .onTapGesture { pinnedIndex = idx }
+            }
+        }
+    }
+
+    static let pinnedSwipeThreshold: CGFloat = 40
 
     // MARK: - LBLiveAnnounce — announcement marquee banner
 
@@ -220,14 +308,23 @@ public struct LiveOverlayChromeView: View {
             // Image area (design height 92). Themed placeholder so the snapshot
             // baseline is deterministic without a network image (no AsyncImage).
             ZStack(alignment: .topTrailing) {
-                Rectangle()
-                    .fill(Color(hex: "#EFEFF2") ?? Color(.systemGray5))
-                    .frame(height: 92)
-                    .overlay(
-                        Image(systemName: "photo")
-                            .font(.system(size: 22, weight: .regular))
-                            .foregroundColor(Color(hex: "#C7C7CC") ?? .gray)
-                    )
+                // Image area (design height 92): a gray placeholder with the REAL product
+                // image layered over it at runtime (`live` + a non-empty URL); the snapshot
+                // path keeps the deterministic placeholder (live-pinned-card-image-radius).
+                ZStack {
+                    Rectangle()
+                        .fill(Color(hex: "#EFEFF2") ?? Color(.systemGray5))
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 22, weight: .regular))
+                                .foregroundColor(Color(hex: "#C7C7CC") ?? .gray)
+                        )
+                    if live, let url = Self.imageURL(product) {
+                        RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
+                    }
+                }
+                .frame(height: 92)
+                .clipped()
 
                 // Close affordance chip (presentation-only; tap is host-wired).
                 RoundedRectangle(cornerRadius: 4)
@@ -274,6 +371,9 @@ public struct LiveOverlayChromeView: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.white)
         )
+        // 4a: clip the whole card to the rounded shape so the top image area's corners
+        // follow the card radius (previously the image `Rectangle` showed square top corners).
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .compositingGroup()
         .shadow(color: Color.black.opacity(0.25), radius: 9, x: 0, y: 6)
     }
@@ -296,8 +396,9 @@ public struct LiveOverlayChromeView: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
 
-            // Live-price row (`LBLiveHostCaption` 3rd line) — reads pinnedProduct.
-            if let product = pinnedProduct {
+            // Live-price row (`LBLiveHostCaption` 3rd line) — reads the CURRENT pinned product
+            // (follows the carousel page when multiple products are being introduced).
+            if let product = currentPinnedProduct {
                 HStack(spacing: 0) {
                     Text(Self.priceCaptionLabel)
                         .font(.system(size: 11 * theme.fontScale, weight: .regular))
@@ -379,6 +480,15 @@ public struct LiveOverlayChromeView: View {
     /// (core convention — see `LiveBuyPlayerViewController.narrating`).
     static func isNarrating(_ product: LBProduct) -> Bool {
         product.narrateStatus == 2
+    }
+
+    /// A non-empty product image URL (`photos.first ?? pic`, whitespace-trimmed) for the
+    /// real pinned-card image, or nil (empty / blank → keep the gray placeholder). Pure —
+    /// mirrors `MiniCartView.imageURL` / `ProductListView.photoURL`.
+    static func imageURL(_ product: LBProduct) -> URL? {
+        let s = (product.photos.first ?? product.pic).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        return URL(string: s)
     }
 
     /// The live-price label. Prefers the pre-formatted `priceShow`; falls back to

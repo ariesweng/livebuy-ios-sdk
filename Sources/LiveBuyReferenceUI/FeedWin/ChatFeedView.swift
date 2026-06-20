@@ -67,6 +67,12 @@ public struct ChatFeedView: View {
     /// template upstream exit `joinEvent(eid:keyword:)`, so the container shape wins.)
     public let onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)?
 
+    /// 商品開賣卡「立即搶購」intent (問題5 / product-sale-card-buy-tap). The container forwards this
+    /// to `FeedWinModel.openSaleProduct(name:)` → template `openProductSaleByName(name)` (which
+    /// resolves the 商品名 → `channel.goods` → opens that product's detail sheet). nil (demo /
+    /// snapshot) → the 立即搶購 CTA renders but is inert. This layer NEVER opens detail itself.
+    public let onTapSaleBuy: ((_ name: String) -> Void)?
+
     /// Scrollable history gate (default `false`, sharing the widget `hostScrollable`
     /// convention + the reference-ui "no `ScrollView` on the snapshot path" invariant).
     /// `false` (demo / snapshot / `ImageRenderer`) → the existing pure-`VStack` bottom-
@@ -74,6 +80,10 @@ public struct ChatFeedView: View {
     /// `ScrollView` variant so the user can scroll UP to view history (the container
     /// then passes the deeper `DefaultActivityFeed.history` as `items`).
     public let hostScrollable: Bool
+
+    /// 置頂留言（chat-pinned-message-render ⑤c）。非 nil → feed 上緣渲染置頂橫幅；nil（預設 /
+    /// demo / snapshot）→ 不出任何置頂像素（baseline byte-identical）。
+    public let pinned: LBPinnedMessage?
 
     /// Auto-stick to the newest row. Starts true; a manual scroll-up (drag) stops it
     /// so the user can read history without being yanked back. Scrollable variant only.
@@ -96,21 +106,42 @@ public struct ChatFeedView: View {
     public init(theme: ReferenceUITheme,
                 items: [LBFeedItem],
                 hostScrollable: Bool = false,
-                onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)? = nil) {
+                pinned: LBPinnedMessage? = nil,
+                onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)? = nil,
+                onTapSaleBuy: ((_ name: String) -> Void)? = nil) {
         self.theme = theme
         self.items = items
         self.hostScrollable = hostScrollable
+        self.pinned = pinned
         self.onJoinEvent = onJoinEvent
+        self.onTapSaleBuy = onTapSaleBuy
     }
 
     public var body: some View {
         // `hostScrollable == false` keeps the original pure-VStack path (no ScrollView)
         // so the snapshot / `ImageRenderer` baseline stays byte-identical; `true` swaps
         // in the scroll-up-for-history variant (runtime only).
+        feedBody
+            // 置頂留言橫幅（chat-pinned-message-render ⑤c）覆於 feed 上緣。`pinned == nil` →
+            // overlay 為空 → 不出像素（snapshot baseline byte-identical）。`.overlay(_:alignment:)`
+            // 視圖參數形 iOS-13+，iOS-14-safe。
+            .overlay(pinnedBanner, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var feedBody: some View {
         if hostScrollable {
             scrollableBody
         } else {
             staticBody
+        }
+    }
+
+    /// 置頂橫幅 overlay；無置頂 → 空（不出像素）。
+    @ViewBuilder
+    private var pinnedBanner: some View {
+        if let pinned = pinned {
+            PinnedMessageBanner(theme: theme, pinned: pinned)
         }
     }
 
@@ -235,11 +266,15 @@ public struct ChatFeedView: View {
     private func row(for item: LBFeedItem) -> some View {
         switch item.kind {
         case .chat:
-            LBChatLineRow(theme: theme, text: item.text)
+            LBChatLineRow(theme: theme, text: item.text, userName: item.userName,
+                          isHost: item.isHost, isAI: item.isAI, replyText: item.replyText)
         case .eventJoin:
             LBEventJoinLineRow(
                 theme: theme,
                 text: item.text,
+                // 後端「ek isset 才顯示 CTA」：keyword 非空 → 加入活動 CTA；空（活動結束 / goods 未含
+                // 該 event，template 帶入 "")→ 純活動公告無 CTA（問題 1）。
+                hasCTA: !(item.keyword ?? "").isEmpty,
                 joined: item.joined,
                 onJoin: {
                     // Surface the tap; forward via the container's closure. nil →
@@ -250,6 +285,13 @@ public struct ChatFeedView: View {
                 })
         case .activity(let tier):
             LBActivityLineRow(theme: theme, text: item.text, tier: tier)
+        case .productSale:
+            // chat5 群組①「商品開賣」→ 醒目商品開賣卡（設計 `LBProductSaleCard`）：商品名 = `text`、
+            // 現價 = `price`（已格式化）。demo seed 無 `.productSale` → 既有 golden byte-identical。
+            // 「立即搶購」(問題5)：綁定時帶商品名上拋（容器 → openSaleProduct）；未綁定 → onTapBuy nil → inert。
+            LBProductSaleCardRow(
+                theme: theme, name: item.text, price: item.price ?? "",
+                onTapBuy: onTapSaleBuy.map { cb in { cb(item.text) } })
         }
     }
 
@@ -278,7 +320,9 @@ public struct ChatFeedView: View {
     /// The remaining upper area stays empty so the player's full-bleed gestures (swipe to
     /// change video, tap to mute) pass through; a smaller viewport also lets scrolling
     /// engage with fewer rows. Scrollable variant only — the static path is unaffected.
-    static let scrollableHeightFraction: CGFloat = 0.46
+    /// Lowered 0.46 → 0.38 (rb-ios-chat-feed-lower-height) so the upper pass-through
+    /// region grows ~54%→~62%, making swipe-to-switch-video easier to trigger.
+    static let scrollableHeightFraction: CGFloat = 0.38
 
     /// Top fade gradient mask (`maskImage: linear-gradient(to top, #000 58%,
     /// transparent)`): rows are fully opaque for the lower 58% and fade to clear
@@ -352,33 +396,148 @@ private struct BottomAnchorMaxYKey: PreferenceKey {
 struct LBChatLineRow: View {
     let theme: ReferenceUITheme
     let text: String
+    /// The chat author's nickname (chat-nickname-render). nil / empty → text-only
+    /// row, BYTE-IDENTICAL to the pre-nickname layout (avatar keyed by `text`, bubble
+    /// straight in the HStack). Non-empty → a name label above the bubble + the avatar
+    /// keyed by the nickname (so one author = one stable avatar).
+    var userName: String? = nil
+
+    // MARK: - 群組① 真正的聊天角色 metadata (chat-message-taxonomy ⑤)
+    /// 主播留言 / 主播回覆。`true` → accent 軌 + `crown.fill` + accent 氣泡 +「主播」實心標。
+    var isHost: Bool = false
+    /// AI 自動回覆。`true` → `sparkles` 軌 glyph +「AI」外框標（疊在主播回覆版型上）。
+    var isAI: Bool = false
+    /// 主播回覆 / AI 回覆 的被回覆引用內容。非 nil → 氣泡內加引用框（只顯引用文字）。
+    var replyText: String? = nil
+
+    /// 是否帶角色版型（主播 / 回覆 / AI）。皆 false → 走既有觀眾留言路徑（byte-identical）。
+    private var hasRole: Bool { isHost || isAI || (replyText?.isEmpty == false) }
+
+    /// Avatar derivation key: the nickname when present, else `text` (legacy).
+    private var avatarKey: String { (userName?.isEmpty == false) ? userName! : text }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
+            slot
+            // 無角色 → 既有暱稱內聯前綴氣泡（byte-identical）；有角色 → 角色版型氣泡。
+            if hasRole { roleBubble } else { bubble }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - 24px 圖示軌（主播 / AI = accent + glyph；觀眾 = 名字色頭像）
+
+    @ViewBuilder
+    private var slot: some View {
+        if isAI {
+            Circle().fill(theme.accent).frame(width: 24, height: 24)
+                .overlay(Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .bold)).foregroundColor(.white))
+        } else if isHost {
+            Circle().fill(theme.accent).frame(width: 24, height: 24)
+                .overlay(Image(systemName: "crown.fill")
+                    .font(.system(size: 11, weight: .bold)).foregroundColor(.white))
+        } else {
             // Name-colored avatar (24×24 round — shared rail with activity slots) —
-            // deterministic from `text`. Dark glyph (`#3a2e25`) reads on the pastel
-            // demo avatars, matching the updated `LBChatLine` ACT_SLOT.
+            // deterministic from the nickname (or `text` when none). Dark glyph
+            // (`#3a2e25`) reads on the pastel demo avatars (`LBChatLine` ACT_SLOT).
             Circle()
-                .fill(Self.avatarColor(for: text))
+                .fill(Self.avatarColor(for: avatarKey))
                 .frame(width: 24, height: 24)
                 .overlay(
-                    Text(Self.avatarGlyph(for: text))
+                    Text(Self.avatarGlyph(for: avatarKey))
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(Color(hex: "#3a2e25") ?? .black))
+        }
+    }
 
-            // Translucent dark bubble carrying the full prebuilt text (NOT split).
-            // ACT_BUBBLE: radius 12, black 0.42, padding h11/v5.
+    // MARK: - 角色版型氣泡（主播標 / 引用框 / AI 標），對齊 `LBChatLine`
+
+    private var roleBubble: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            // header：名字 +「主播」/「AI」標（以版型而非顏色區分）。
+            HStack(spacing: 5) {
+                if let name = userName, !name.isEmpty {
+                    Text(name)
+                        .font(.system(size: 11.5 * theme.fontScale,
+                                      weight: isHost ? .bold : .semibold))
+                        .foregroundColor(.white.opacity(isHost ? 0.95 : 0.66))
+                        .lineLimit(1)
+                }
+                if isAI {
+                    roleTag("AI", solid: false)
+                } else if isHost {
+                    roleTag("主播", solid: true)
+                }
+            }
+            // 引用框（主播回覆 / AI 回覆）：左側直條 + 暗底，只顯引用文字（後端無引用者名）。
+            if let reply = replyText, !reply.isEmpty {
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.white.opacity(0.7))
+                        .frame(width: 2)
+                    Text(reply)
+                        .font(.system(size: 10.5 * theme.fontScale, weight: .regular))
+                        .foregroundColor(.white.opacity(0.82))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.26)))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            // 訊息文字。
             Text(text)
                 .font(.system(size: 11.5 * theme.fontScale, weight: .regular))
                 .foregroundColor(.white)
                 .lineLimit(2)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.black.opacity(0.42)))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isHost ? theme.accent : Color.black.opacity(0.42)))
+    }
+
+    /// 名字後的角色標。`solid`=true → 白 0.22 實心（主播）；false → 透明 + 白 0.55 邊框（AI）。
+    @ViewBuilder
+    private func roleTag(_ label: String, solid: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 9 * theme.fontScale, weight: .heavy))
+            .foregroundColor(.white)
+            .padding(.horizontal, 5)
+            .frame(height: 14)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(solid ? Color.white.opacity(0.22) : Color.clear)
+                    .overlay(solid ? nil : RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.white.opacity(0.55), lineWidth: 1)))
+    }
+
+    /// Translucent dark bubble. ACT_BUBBLE: radius 12, black 0.42, padding h11/v5.
+    private var bubble: some View {
+        bubbleText
+            .lineLimit(2)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.black.opacity(0.42)))
+    }
+
+    /// The bubble content: an inline dimmed nickname prefix + the message (design
+    /// `LBChatLine`), or just the message when there is no nickname. The message text is
+    /// the backend-prebuilt body (NOT name-embedded — design `m.text` is the message only).
+    private var bubbleText: Text {
+        let body = Text(text)
+            .font(.system(size: 11.5 * theme.fontScale, weight: .regular))
+            .foregroundColor(.white)
+        guard let userName = userName, !userName.isEmpty else { return body }
+        return Text(userName)
+            .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
+            .foregroundColor(.white.opacity(0.72))
+            + Text("  ")   // design `marginRight: 6` between name and message
+            + body
     }
 
     /// Deterministic avatar fill from the text (one of the design's pastel demo
@@ -413,90 +572,106 @@ struct LBChatLineRow: View {
 
 // MARK: - LBEventJoinLineRow — event-join row (LBEventJoinLine)
 //
-// Mirrors `moments.jsx` `LBEventJoinLine`: a dark translucent card with an
-// accent border + glow, an accent-gradient ticket/sparkle chip, the 2-line
-// keyword copy, and a trailing「加入活動」CTA that flips to a「已參加」chip when
-// joined. The ONLY interactive row in the stream — its tap is FORWARDED via
-// `onJoin` (host wired); this layer never joins itself.
+// Mirrors `moments.jsx` `LBEventJoinLine` with the feed's shared message-row language
+// (`ACT_ROW` + `ACT_SLOT`, same as `LBActivityLineRow`): a 24×24 round accent sparkle SLOT
+// OUTSIDE the bubble (on the shared 24px icon rail), then an accent-wash bubble (black 0.46 +
+// accent 0.23 wash + 1px solid accent border, radius 12) wrapping ONLY the 2-line keyword copy
+// + a trailing「加入活動」CTA that flips to a「已參加」chip when joined. The ONLY interactive
+// row in the stream — its tap is FORWARDED via `onJoin` (host wired); this layer never joins
+// itself. (rb-ios-event-message-design-align.)
 
 struct LBEventJoinLineRow: View {
     let theme: ReferenceUITheme
     let text: String
+    /// keyword 非空 → 畫「加入活動」CTA（後端「`ek` isset 才顯示 CTA」契約，問題 1）；空 → 純活動公告
+    /// （活動已結束 / goods `event[]` 未含該 event → template 帶入 keyword ""），不畫 CTA / 已參加 chip。
+    let hasCTA: Bool
     let joined: Bool
     let onJoin: () -> Void
 
     var body: some View {
-        HStack(spacing: 9) {
-            // Accent-gradient ticket/sparkle chip (26×26, radius 8).
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Self.chipGradient(theme.accent))
-                .frame(width: 26, height: 26)
-                .overlay(
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white))
+        // Shared message-row language (ACT_ROW gap 8): round sparkle slot OUTSIDE the bubble,
+        // then the accent-wash bubble wrapping copy + CTA only.
+        HStack(spacing: 8) {
+            eventSlot
 
-            // 2-line keyword copy (full prebuilt text, NOT split).
-            Text(text.isEmpty ? Self.defaultEventCopy : text)
-                .font(.system(size: 12 * theme.fontScale, weight: .semibold))
-                .foregroundColor(.white)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: 150, alignment: .leading)
+            HStack(spacing: 10) {
+                // 2-line keyword copy (full prebuilt text, NOT split).
+                Text(text.isEmpty ? Self.defaultEventCopy : text)
+                    .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: 132, alignment: .leading)
 
-            // Trailing CTA: 加入活動 (accent button) / 已參加 (translucent chip).
-            if joined {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .heavy))
-                    Text(Self.joinedLabel)
-                        .font(.system(size: 12 * theme.fontScale, weight: .bold))
+                // Trailing CTA: 加入活動 (accent button) / 已參加 (translucent chip). 僅在 keyword 非空
+                // （hasCTA）時畫——活動公告無可參加 keyword 時為純公告（無 CTA / 無 joined chip）。
+                if hasCTA {
+                    if joined { joinedChip } else { joinButton }
                 }
-                .foregroundColor(Color.white.opacity(0.72))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.white.opacity(0.16)))
-            } else {
-                Button(action: onJoin) {
-                    Text(Self.joinLabel)
-                        .font(.system(size: 12.5 * theme.fontScale, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(theme.accent))
-                }
-                .buttonStyle(.plain)
             }
+            .padding(EdgeInsets(top: 5, leading: 11, bottom: 5, trailing: 5))
+            .background(cardBubble)
         }
-        .padding(.init(top: 7, leading: 10, bottom: 7, trailing: 7))
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Self.cardFill)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(theme.accent, lineWidth: 1)))
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Card fill (`rgba(20,20,24,0.72)`).
-    static let cardFill = Color(hex: "#141418")?.opacity(0.72) ?? Color.black.opacity(0.72)
+    /// 24×24 round accent sparkle slot (`ACT_SLOT`), drawn OUTSIDE the bubble on the shared
+    /// 24px icon rail (same shape/size as `LBActivityLineRow`'s icon slot).
+    private var eventSlot: some View {
+        Circle()
+            .fill(theme.accent)
+            .frame(width: 24, height: 24)
+            .overlay(
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white))
+    }
+
+    /// Accent-wash bubble (`linear-gradient(accent3a,accent3a)` over `rgba(0,0,0,0.46)` = black
+    /// 0.46 + accent 0.23 wash) + 1px solid accent border, radius 12 — same wash formula as
+    /// `LBActivityLineRow` `.win` (here a solid accent border, no glow).
+    private var cardBubble: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Color.black.opacity(0.46))
+            .overlay(RoundedRectangle(cornerRadius: 12).fill(theme.accent.opacity(0.23)))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.accent, lineWidth: 1))
+    }
+
+    /// 加入活動 accent CTA button (`padding 13/6`, capsule accent).
+    private var joinButton: some View {
+        Button(action: onJoin) {
+            Text(Self.joinLabel)
+                .font(.system(size: 12 * theme.fontScale, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(theme.accent))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 已參加 chip (`padding 11/5`, white 0.16 capsule, white 0.72 text) + checkmark.
+    private var joinedChip: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .heavy))
+            Text(Self.joinedLabel)
+                .font(.system(size: 11.5 * theme.fontScale, weight: .bold))
+        }
+        .foregroundColor(Color.white.opacity(0.72))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.white.opacity(0.16)))
+    }
+
     /// 加入活動 CTA label.
     static let joinLabel = "加入活動"
     /// 已參加 joined-state label.
     static let joinedLabel = "已參加"
     /// Fallback copy when `text` is empty (`LBEventJoinLine` default copy).
     static let defaultEventCopy = "🎉 抽獎開始！留言「抽獎」即可參加"
-
-    /// Accent → darker-accent gradient for the chip (`linear-gradient(135deg,
-    /// accent, lbShade(accent,-0.28))`). Approximated with the accent over a 28%
-    /// black-shaded variant.
-    static func chipGradient(_ accent: Color) -> LinearGradient {
-        LinearGradient(
-            gradient: Gradient(colors: [accent, accent.opacity(0.78)]),
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing)
-    }
 }
 
 // MARK: - LBActivityLineRow — tier-styled activity row (LBActivityLine)
@@ -549,9 +724,11 @@ struct LBActivityLineRow: View {
                     .foregroundColor(glyphColor))
     }
 
+    // `.browse`（觀眾選購，chat-message-taxonomy ⑤）與 `.join` 同為最低調（白 0.16 軌、黑 0.32
+    // 氣泡、白 0.9 文字、medium），僅圖示不同：browse 出放大鏡（逛 / 選購語意）、join 出進場人像。
     private var slotFill: Color {
         switch tier {
-        case .join: return Color.white.opacity(0.16)
+        case .join, .browse: return Color.white.opacity(0.16)
         case .purchase, .intro, .win: return theme.accent
         }
     }
@@ -559,6 +736,7 @@ struct LBActivityLineRow: View {
     private var glyphName: String {
         switch tier {
         case .join: return "person.fill.badge.plus"
+        case .browse: return "magnifyingglass"
         case .purchase: return "bag.fill"
         case .intro: return "megaphone.fill"
         case .win: return "trophy.fill"
@@ -567,7 +745,7 @@ struct LBActivityLineRow: View {
 
     private var glyphColor: Color {
         switch tier {
-        case .join: return Color.white.opacity(0.85)
+        case .join, .browse: return Color.white.opacity(0.85)
         case .purchase, .intro, .win: return .white
         }
     }
@@ -577,8 +755,8 @@ struct LBActivityLineRow: View {
     @ViewBuilder
     private var bubble: some View {
         switch tier {
-        case .join:
-            // 進場 — black 0.32, no accent wash.
+        case .join, .browse:
+            // 進場 / 觀眾選購 — black 0.32, no accent wash（最低調，無 accent 暈染）。
             RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.32))
         case .purchase:
             washBubble(0.13)   // accent22
@@ -602,11 +780,173 @@ struct LBActivityLineRow: View {
     }
 
     private var textColor: Color {
-        tier == .join ? Color.white.opacity(0.9) : .white
+        (tier == .join || tier == .browse) ? Color.white.opacity(0.9) : .white
     }
 
     private var textWeight: Font.Weight {
         // join / purchase / intro = medium (500); win = bold (700).
         tier == .win ? .bold : .medium
+    }
+}
+
+// MARK: - 商品開賣卡（chat-message-taxonomy ⑤ 群組① onsale → LBProductSaleCard）
+
+/// 商品開賣 feed item 的醒目卡片（設計 `moments.jsx` `LBProductSaleCard`）：24px tag 軌 + 暗玻璃卡
+/// （accent 邊框 + 圓角 12）＝[46×46 縮圖 placeholder] +「開賣中」徽章 + 商品名 + 現價，底部滿版
+/// 「立即搶購」鈕。`name` = `push.text`（商品名）、`price` = `push.price`（已格式化開賣價，直接顯示）。
+/// **PARK（後端缺）**：listPrice 刪線原價、真實縮圖 URL、搶購 deeplink → 縮圖走確定性 placeholder、
+/// 搶購鈕暫 inert（無跳轉目標，待 deeplink 落地再 wire）。
+struct LBProductSaleCardRow: View {
+    let theme: ReferenceUITheme
+    let name: String
+    let price: String
+    /// 「立即搶購」tap (問題5 / product-sale-card-buy-tap). nil（demo / snapshot）→ 按鈕 inert 且
+    /// 渲染與綁定前 byte-identical；非 nil → 「立即搶購」變成可點按鈕（內容不變）。
+    var onTapBuy: (() -> Void)? = nil
+
+    // 暫時隱藏商品圖片與價格（後端真實縮圖 URL / 價格資料定案前，先收斂卡片為
+    // 「徽章 + 商品名 + 立即搶購」）。**還原**：把對應 flag 設回 `true`（或移除 gate）即可恢復
+    // 縮圖與現價——`thumbnail` 計算屬性與 `price` 參數刻意保留（資料仍流入，僅不渲染），無需改資料層。
+    private static let showsThumbnail = false
+    private static let showsPrice = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            // 24px accent 軌 — tag 圖示（共用聊天 / 活動軌 ACT_SLOT）。
+            Circle().fill(theme.accent).frame(width: 24, height: 24)
+                .overlay(Image(systemName: "tag.fill")
+                    .font(.system(size: 11, weight: .bold)).foregroundColor(.white))
+            card
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var card: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 9) {
+                // 商品圖片暫時隱藏（showsThumbnail = false）；恢復時走確定性 placeholder。
+                if Self.showsThumbnail { thumbnail }
+                VStack(alignment: .leading, spacing: 2) {
+                    saleBadge
+                    Text(name)
+                        .font(.system(size: 11 * theme.fontScale, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    // 現價暫時隱藏（showsPrice = false）；恢復時直接顯示已格式化的 `price`（不補幣別前綴）。
+                    if Self.showsPrice {
+                        Text(price)
+                            .font(.system(size: 13 * theme.fontScale, weight: .heavy))
+                            .foregroundColor(.white)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(8)
+            buyButton
+        }
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.62)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.accent, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // 46×46 確定性縮圖 placeholder（gradient + 商品名首字 monogram；無網路 / AsyncImage → snapshot 穩定，
+    // 對齊 MiniCartView 的 ProductMock placeholder）。真實縮圖 URL 待後端。
+    private var thumbnail: some View {
+        ZStack {
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(hex: "#FFD7A8") ?? .orange,
+                    Color(hex: "#E27D5A") ?? .orange,
+                ]),
+                startPoint: .topLeading, endPoint: .bottomTrailing)
+            Text(Self.monogram(for: name))
+                .font(.system(size: 15 * theme.fontScale, weight: .heavy))
+                .foregroundColor(.white.opacity(0.92))
+        }
+        .frame(width: 46, height: 46)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // 「開賣中」徽章 — accent 圓點（外圈淡暈）+ accent 文字。
+    private var saleBadge: some View {
+        HStack(spacing: 4) {
+            ZStack {
+                Circle().fill(theme.accent.opacity(0.2)).frame(width: 11, height: 11)
+                Circle().fill(theme.accent).frame(width: 5, height: 5)
+            }
+            Text("開賣中")
+                .font(.system(size: 9.5 * theme.fontScale, weight: .heavy))
+                .foregroundColor(theme.accent)
+        }
+    }
+
+    // 立即搶購 — 滿版 accent 鈕 + bag 圖示。`onTapBuy` 綁定時 → 可點開該商品 detail（問題5）；
+    // 未綁定（demo / snapshot）→ inert，且像素與綁定前 byte-identical。
+    @ViewBuilder
+    private var buyButton: some View {
+        if let onTapBuy = onTapBuy {
+            // `.buttonStyle(.plain)` 不加任何 chrome → 與靜態 label 像素一致，只是變可點。
+            Button(action: onTapBuy) { buyButtonLabel }
+                .buttonStyle(.plain)
+        } else {
+            buyButtonLabel
+        }
+    }
+
+    /// 「立即搶購」按鈕的視覺內容（按鈕化前後共用，確保像素不變）。
+    private var buyButtonLabel: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bag.fill")
+                .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
+            Text("立即搶購")
+                .font(.system(size: 12 * theme.fontScale, weight: .heavy))
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(theme.accent)
+    }
+
+    /// 商品名首個非空字元（大寫）作 monogram；空 → "?"。確定性 → snapshot 穩定。
+    static func monogram(for name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard let first = trimmed.first else { return "?" }
+        return String(first).uppercased()
+    }
+}
+
+// MARK: - Pinned message banner (chat-pinned-message-render ⑤c)
+
+/// 置頂留言橫幅：pin glyph + 留言者名（`kind == .comment` / name 非空時）+ 內容。最小中性
+/// 渲染（最終視覺 DECISION-PENDING 待設計稿）；只在 `ChatFeedView.pinned != nil` 時被建出，
+/// 故無置頂時不出像素（snapshot baseline byte-identical）。
+private struct PinnedMessageBanner: View {
+    let theme: ReferenceUITheme
+    let pinned: LBPinnedMessage
+
+    /// 主播置頂（`kind == .host` / name 空）不顯示名前綴；comment 顯示「{name}：」。
+    private var namePrefix: String {
+        (pinned.kind == .comment && !pinned.name.isEmpty) ? "\(pinned.name)：" : ""
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(theme.accent)
+            (Text(namePrefix).fontWeight(.bold) + Text(pinned.text))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.black.opacity(0.55))
+        )
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
     }
 }

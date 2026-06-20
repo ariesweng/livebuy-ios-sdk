@@ -216,14 +216,17 @@ public struct MomentsOverlayView: View {
                 error: error,
                 onRetry: { onRetry?() },
                 onDismiss: { onDismiss?() })
-        } else if model.countdown != nil {
-            // 2. Auto-next countdown end screen (倒數變體). `hot` is still passed so
-            //    the sub-view can render the 熱門 variant when appropriate.
+        } else if model.countdown != nil || model.endScreenVisible {
+            // 2. End screen. countdown != nil → 倒數變體 (auto-next). countdown == nil &&
+            //    endScreenVisible → no-countdown「直播已結束」variant (live ended with no
+            //    next: hot recommendations if any, else just the title). `hot` is passed
+            //    so the sub-view renders the 熱門 variant; `endScreenVisible` gates the title.
             EndScreenView(
                 theme: theme,
                 countdown: model.countdown,
                 next: model.next,
                 hot: model.hot,
+                liveEnded: model.endScreenVisible && model.countdown == nil,
                 onWatchNext: { onWatchNext?() },
                 onPickHot: { hot in onPickHot?(hot) },
                 onCancel: { onCancel?() })

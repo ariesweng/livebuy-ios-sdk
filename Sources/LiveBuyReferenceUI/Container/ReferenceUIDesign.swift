@@ -62,6 +62,10 @@ public struct PlayerOverlayContext {
     public let showGestureHints: Bool
     public let onSwipeUp: (() -> Void)?
     public let onSwipeDown: (() -> Void)?
+    /// Swipe toward an EMPTY direction (no next / prev video) → close the player
+    /// (swipe-nav-close-on-empty #7). Only on the template-nav fallback path (a host
+    /// swipe override always wins). nil → swipe-to-empty is a no-op.
+    public let onCloseRequest: (() -> Void)?
     public let onHoldStart: (() -> Void)?
     public let onHoldEnd: (() -> Void)?
     public let onMinimize: (() -> Void)?
@@ -101,6 +105,7 @@ public struct PlayerOverlayContext {
         showGestureHints: Bool,
         onSwipeUp: (() -> Void)?,
         onSwipeDown: (() -> Void)?,
+        onCloseRequest: (() -> Void)? = nil,
         onHoldStart: (() -> Void)?,
         onHoldEnd: (() -> Void)?,
         onMinimize: (() -> Void)?,
@@ -135,6 +140,7 @@ public struct PlayerOverlayContext {
         self.showGestureHints = showGestureHints
         self.onSwipeUp = onSwipeUp
         self.onSwipeDown = onSwipeDown
+        self.onCloseRequest = onCloseRequest
         self.onHoldStart = onHoldStart
         self.onHoldEnd = onHoldEnd
         self.onMinimize = onMinimize

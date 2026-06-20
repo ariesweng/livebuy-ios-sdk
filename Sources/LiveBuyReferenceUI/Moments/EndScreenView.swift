@@ -88,6 +88,12 @@ public struct EndScreenView: View {
     /// `HStack` of `LBPHotCard`s. `duration` is an ALREADY-FORMATTED string. Read-only.
     public let hot: [LBHotItem]
 
+    /// Whether this is the no-countdown LIVE-ENDED state (`endScreenVisible && countdown == nil`,
+    /// i.e. live ended with no next). Adds the「直播已結束」rule-flanked title above the 熱門
+    /// header (D2 / end-screen-no-countdown #6c). Default `false` → existing 熱門變體 demos /
+    /// snapshots render unchanged. No countdown, no auto-advance.
+    public let liveEnded: Bool
+
     /// 倒數變體「立即觀看」CTA → host-wired `onWatchNext` → host → core load(next).
     /// nil for demo / snapshot instances — the CTA is inert (D §2). This layer NEVER
     /// loads / advances itself.
@@ -106,6 +112,7 @@ public struct EndScreenView: View {
         countdown: LBEndScreenCountdown?,
         next: [LBNavItem],
         hot: [LBHotItem],
+        liveEnded: Bool = false,
         onWatchNext: (() -> Void)? = nil,
         onPickHot: ((LBHotItem) -> Void)? = nil,
         onCancel: (() -> Void)? = nil
@@ -114,6 +121,7 @@ public struct EndScreenView: View {
         self.countdown = countdown
         self.next = next
         self.hot = hot
+        self.liveEnded = liveEnded
         self.onWatchNext = onWatchNext
         self.onPickHot = onPickHot
         self.onCancel = onCancel
@@ -308,6 +316,12 @@ public struct EndScreenView: View {
 
     private var hotVariant: some View {
         VStack(spacing: 0) {
+            // D2 (end-screen-no-countdown): live ended with no next → 「直播已結束」收尾標題
+            // (rule-flanked, like the countdown variant's「影片結束」) above 為你推薦.
+            if liveEnded {
+                liveEndedRule
+                    .padding(.bottom, 14)
+            }
             hotHeader
             hotRow
             Spacer(minLength: 0)
@@ -315,6 +329,20 @@ public struct EndScreenView: View {
         .padding(.horizontal, 18)
         .padding(.top, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// 「— 直播已結束 —」rule-flanked caption for the no-countdown live-ended end screen
+    /// (D2). Mirrors `endedRule` but with the live-ended copy (design moments.jsx 熱門變體).
+    private var liveEndedRule: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Self.onDarkFaint).frame(width: 18, height: 1)
+            Text(Self.liveEndedLabel)
+                .font(.system(size: 12 * theme.fontScale, weight: .semibold))
+                .foregroundColor(Self.onDarkDim)
+                .kerning(1)
+            Rectangle().fill(Self.onDarkFaint).frame(width: 18, height: 1)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     /// 為你推薦 title + 換一批 pill (LBPEndScreen 343-355). The「換一批」pill forwards
@@ -475,6 +503,7 @@ public struct EndScreenView: View {
     // MARK: - Fixed localized copy (static presentation strings)
 
     static let endedLabel = "影片結束"
+    static let liveEndedLabel = "直播已結束"
     static let autoPlayLabel = "%d 秒後自動播放下一支"
     static let untitledNext = "下一支影片"
     static let cancelLabel = "取消"
@@ -513,6 +542,28 @@ public extension EndScreenView {
             countdown: nil,
             next: [],
             hot: MomentsModel.demoHotSet)
+    }
+
+    /// A deterministic no-countdown LIVE-ENDED demo (end-screen-no-countdown #6c):
+    /// 「直播已結束」title + a FIXED SMALL 熱門 set, NO countdown / NO auto-advance.
+    static func demoLiveEnded(theme: ReferenceUITheme) -> EndScreenView {
+        EndScreenView(
+            theme: theme,
+            countdown: nil,
+            next: [],
+            hot: MomentsModel.demoHotSet,
+            liveEnded: true)
+    }
+
+    /// A deterministic no-countdown LIVE-ENDED demo with NO hot — just the
+    /// 「直播已結束」title (live ended with neither next nor hot).
+    static func demoLiveEndedNoHot(theme: ReferenceUITheme) -> EndScreenView {
+        EndScreenView(
+            theme: theme,
+            countdown: nil,
+            next: [],
+            hot: [],
+            liveEnded: true)
     }
 }
 

@@ -60,6 +60,10 @@ public final class FeedWinModel: ObservableObject {
     /// superset suffix-derived in the data layer). Empty for demo / snapshot instances.
     @Published public private(set) var feedHistory: [LBFeedItem]
 
+    /// 置頂留言（chat-pinned-message-render ⑤c），鏡像自 `DefaultPlayerTemplate.pinnedMessage`
+    /// （core `LBPollResponse.top`）。nil → 無置頂（橫幅不出像素）。冪等：每輪覆蓋、取消釘選 → nil。
+    @Published public private(set) var pinned: LBPinnedMessage?
+
     // -- Surface 2: WinEntryView ← unclaimed win entry (D-3) -------------------
 
     /// Distinct unclaimed-win count (`DefaultWinClaim.unclaimedCount`); the entry
@@ -117,7 +121,8 @@ public final class FeedWinModel: ObservableObject {
             feedHistory: t.activityFeed.history,
             unclaimedCount: t.winClaim.unclaimedCount,
             unclaimedWinners: t.winClaim.unclaimedWinners,
-            resultState: t.winClaim.resultState
+            resultState: t.winClaim.resultState,
+            pinned: t.pinnedMessage
         )
     }
 
@@ -132,13 +137,15 @@ public final class FeedWinModel: ObservableObject {
         feedHistory: [LBFeedItem] = [],
         unclaimedCount: Int = 0,
         unclaimedWinners: [LBWinner] = [],
-        resultState: LBAwardClaimResultState? = nil
+        resultState: LBAwardClaimResultState? = nil,
+        pinned: LBPinnedMessage? = nil
     ) {
         self.feedItems = feedItems
         self.feedHistory = feedHistory
         self.unclaimedCount = unclaimedCount
         self.unclaimedWinners = unclaimedWinners
         self.resultState = resultState
+        self.pinned = pinned
     }
 
     deinit {
@@ -160,6 +167,7 @@ public final class FeedWinModel: ObservableObject {
         unclaimedCount = t.winClaim.unclaimedCount
         unclaimedWinners = t.winClaim.unclaimedWinners
         resultState = t.winClaim.resultState
+        pinned = t.pinnedMessage
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)
@@ -192,6 +200,13 @@ public final class FeedWinModel: ObservableObject {
     /// `markJoined`). No-op for demo instances (no bound template).
     public func joinEvent(eid: Int, keyword: String) {
         template?.joinEvent(eid: eid, keyword: keyword)
+    }
+
+    /// Forward a 商品開賣卡「立即搶購」intent (問題5) to the bound template
+    /// (`openProductSaleByName(_:)` → resolve the 商品名 in `channel.goods` → open that product's
+    /// detail sheet). No-op for demo instances (no bound template) / unmatched names.
+    public func openSaleProduct(name: String) {
+        template?.openProductSaleByName(name)
     }
 
     // MARK: - Presentation classification (read-only)

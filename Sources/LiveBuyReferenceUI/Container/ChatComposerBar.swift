@@ -17,8 +17,7 @@ import SwiftUI
 //
 // iOS-14-safe focus: SwiftUI `TextField` can't be focused programmatically before iOS 15 /
 // `@FocusState`, so the field is a `FocusableTextField` (UIViewRepresentable over
-// `UITextField`) that becomes first responder when `controller.focusToken` changes. The
-// replay「聊天室已關閉」state lives on the `LiveBottomBarView`, not here.
+// `UITextField`) that becomes first responder when `controller.focusToken` changes.
 
 /// Presentation + focus state for the on-demand chat composer. `open()` shows the bar
 /// and bumps `focusToken` (→ the field becomes first responder); `close()` hides it.

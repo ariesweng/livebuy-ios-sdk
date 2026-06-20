@@ -188,6 +188,12 @@ public struct PlayerShellView: View {
     /// non-nil → called INSTEAD of `model.navigateToPrev()`; nil → falls back.
     private let onSwipeDown: (() -> Void)?
 
+    /// Close-player request, fired when the user swipes toward a direction that has
+    /// NO adjacent video (swipe-nav-close-on-empty #7) — only on the template-nav
+    /// FALLBACK path (a host `onSwipeUp` / `onSwipeDown` override always wins and is
+    /// never overridden by this). nil → the swipe-to-empty is a no-op (demo / snapshot).
+    private let onCloseRequest: (() -> Void)?
+
     /// Hold-to-pause start → host pauses playback. The container default wires it to core
     /// `player.pause()`. nil → inert (demo / snapshot). This layer NEVER calls core/template
     /// play/pause itself; it only forwards the hold start.
@@ -219,6 +225,14 @@ public struct PlayerShellView: View {
     /// VOD (rb-ios-hide-chat-feed-in-vod). Read-only state report. nil (default / snapshot) →
     /// no report (baseline unchanged).
     private let onIsLiveChange: ((Bool) -> Void)?
+
+    /// Reports whether the LIVE announcement banner (`LBLiveAnnounce`) is showing —
+    /// i.e. `model.announceText` non-empty — initial value + every change, so the container
+    /// can give the chat feed EXTRA bottom clearance to avoid overlapping the bottom-left
+    /// announcement banner when (and only when) a 公告 is present (rb-ios-live-announce-chat-
+    /// clearance, 問題 4). Read-only state report. nil (default / snapshot) → no report
+    /// (baseline unchanged).
+    private let onHasAnnounceChange: ((Bool) -> Void)?
 
     // MARK: - Transient gesture-feedback state (default hidden → snapshot-neutral)
 
@@ -260,11 +274,13 @@ public struct PlayerShellView: View {
                 captionText: String = "",
                 onSwipeUp: (() -> Void)? = nil,
                 onSwipeDown: (() -> Void)? = nil,
+                onCloseRequest: (() -> Void)? = nil,
                 onHoldStart: (() -> Void)? = nil,
                 onHoldEnd: (() -> Void)? = nil,
                 composerPresented: Bool = false,
                 onInfoPanelPresentedChange: ((Bool) -> Void)? = nil,
-                onIsLiveChange: ((Bool) -> Void)? = nil) {
+                onIsLiveChange: ((Bool) -> Void)? = nil,
+                onHasAnnounceChange: ((Bool) -> Void)? = nil) {
         self.model = model
         self.theme = theme
         self.paintsBackgroundPlaceholder = paintsBackgroundPlaceholder
@@ -278,11 +294,13 @@ public struct PlayerShellView: View {
         self.captionText = captionText
         self.onSwipeUp = onSwipeUp
         self.onSwipeDown = onSwipeDown
+        self.onCloseRequest = onCloseRequest
         self.onHoldStart = onHoldStart
         self.onHoldEnd = onHoldEnd
         self.composerPresented = composerPresented
         self.onInfoPanelPresentedChange = onInfoPanelPresentedChange
         self.onIsLiveChange = onIsLiveChange
+        self.onHasAnnounceChange = onHasAnnounceChange
     }
 
     /// Resolves a committed vertical drag into the correct video-switch action,
@@ -290,18 +308,35 @@ public struct PlayerShellView: View {
     /// `.onEnded`; extracted (`internal`) so the override-vs-fallback dispatch is
     /// unit-testable without rendering a SwiftUI gesture (per unit-test discipline).
     ///
-    /// - swipe-UP (`dy <= -threshold`): `onSwipeUp` if set, else `model.navigateToNext()`.
-    /// - swipe-DOWN (`dy >= +threshold`): `onSwipeDown` if set, else `model.navigateToPrev()`.
-    /// - below threshold: no-op.
+    /// The fallback (no host override) swipe-nav action (swipe-nav-close-on-empty #7).
+    enum SwipeNavAction: Equatable { case navigateNext, navigatePrev, close, none }
+
+    /// PURE: resolve a committed vertical drag (no host override) into the template-nav
+    /// fallback action. A swipe toward a direction WITH an adjacent video navigates; a
+    /// swipe toward a direction with NO video → `.close` (close the player); below the
+    /// threshold → `.none`. Unit-testable without rendering a gesture.
+    static func resolveSwipeNav(translationHeight dy: CGFloat, hasNext: Bool, hasPrev: Bool) -> SwipeNavAction {
+        if dy <= -swipeThreshold { return hasNext ? .navigateNext : .close }
+        if dy >= swipeThreshold { return hasPrev ? .navigatePrev : .close }
+        return .none
+    }
+
+    /// Resolves a committed vertical drag into the correct action, honoring host overrides.
+    /// - A host `onSwipeUp` / `onSwipeDown` override ALWAYS wins (called instead of any
+    ///   template-nav / close behavior).
+    /// - Otherwise (template-nav fallback): swipe toward a video → navigate; swipe toward
+    ///   an EMPTY direction (no next / no prev) → `onCloseRequest()` (close the player, #7).
     func handleSwipeEnded(translationHeight dy: CGFloat) {
-        if dy <= -Self.swipeThreshold {
-            // swipe-UP → next video (host override wins if set)
-            if let onSwipeUp = onSwipeUp { onSwipeUp() }
-            else { model.navigateToNext() }
-        } else if dy >= Self.swipeThreshold {
-            // swipe-DOWN → previous video (host override wins if set)
-            if let onSwipeDown = onSwipeDown { onSwipeDown() }
-            else { model.navigateToPrev() }
+        // Host override wins, regardless of next/prev availability.
+        if dy <= -Self.swipeThreshold, let onSwipeUp = onSwipeUp { onSwipeUp(); return }
+        if dy >= Self.swipeThreshold, let onSwipeDown = onSwipeDown { onSwipeDown(); return }
+        // Fallback: template-nav, closing when there is no video in that direction.
+        switch Self.resolveSwipeNav(translationHeight: dy,
+                                    hasNext: model.hasNextVideo, hasPrev: model.hasPrevVideo) {
+        case .navigateNext: model.navigateToNext()
+        case .navigatePrev: model.navigateToPrev()
+        case .close:        onCloseRequest?()
+        case .none:         break
         }
     }
 
@@ -487,7 +522,13 @@ public struct PlayerShellView: View {
                 LiveOverlayChromeView(
                     theme: theme,
                     announceText: model.announceText,
-                    pinnedProduct: model.pinnedProduct,
+                    // LIVE 全部介紹中商品（多件 narrate_status==2）→ pinnedCard 多商品輪播 + 分頁點；
+                    // 空時 fallback 單一 pinnedProduct（activeProduct ?? first isHot）（問題 7）。
+                    pinnedProducts: model.livePinnedProducts,
+                    // Real product image on the pinned card only over a live video surface
+                    // (placeholder suppressed) — same gate as the shop logo / VOD card
+                    // (live-pinned-card-image-radius). Snapshot/demo keeps the placeholder.
+                    live: !paintsBackgroundPlaceholder,
                     // Host-suppressible: a host that has already shown the hint once
                     // passes showGestureHints: false (it owns the persisted flag).
                     showGestureHints: showGestureHints,
@@ -495,7 +536,14 @@ public struct PlayerShellView: View {
                     // hints; standalone / snapshot keeps them static (deterministic).
                     autoFadeGestureHints: !paintsBackgroundPlaceholder,
                     // Pinned-product card tap → turnkey product-detail default flow.
-                    onTapPinnedProduct: { product in model.performProductTap(product) })
+                    onTapPinnedProduct: { product in model.performProductTap(product) },
+                    // 公告橫幅 tap → 切到 VideoInfoPanel 公告分頁並開啟資訊面板（重用 host badge tap
+                    // 的同一 infoPanelPresented 狀態）。公告顯示中 ⇒ notice 非空 ⇒ canOpenNotice
+                    // ⇒ selectInfoTab(.notice) 生效（live-announce-tap-open-info-panel，問題 2）。
+                    onTapAnnounce: {
+                        model.selectInfoTab(.notice)
+                        withAnimation { infoPanelPresented = true }
+                    })
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     Spacer(minLength: 0)
@@ -663,8 +711,9 @@ public struct PlayerShellView: View {
                         onShare: { model.performShare() },
                         // Real like via the existing turnkey forwarder + an immediate local heart
                         // burst (rb-ios-live-bottom-heart-burst — design `onLike → spawnHeart`).
-                        onLike: { model.performLike(); liveHeartTick &+= 1 },
-                        onToggleCC: { model.toggleSubtitle() })
+                        onLike: { model.performLike(); liveHeartTick &+= 1 })
+                        // onToggleCC intentionally not wired: the LIVE bottom bar no longer has a CC
+                        // toggle (the replay variant is removed — prerecorded-live-bottom-bar-comment).
                         .padding(.bottom, 8)
                 }
 
@@ -697,6 +746,14 @@ public struct PlayerShellView: View {
             if muteToastVisible {
                 GestureMuteToastView(theme: theme, muted: model.muted)
                     .allowsHitTesting(false)
+            }
+
+            // 會員等級限定升級遮罩（restriction-mask ②）。`is_restriction` 為**軟性顯示閘門**：
+            // core 不擋播放，reference-ui 在播放畫面上疊遮罩 + 升級提示。預設隱藏
+            // （`model.isRestricted == false`）→ snapshot baseline byte-identical。最終視覺 /
+            // 退出 affordance DECISION-PENDING 待設計稿。
+            if model.isRestricted {
+                RestrictionMaskView(theme: theme)
             }
         }
         // Info panel (family-1 surface 3) — presented via the shared SheetKit bottom-sheet
@@ -733,9 +790,19 @@ public struct PlayerShellView: View {
         // Report LIVE/VOD mode (initial + every change) so the container can hide the LIVE-only
         // chat feed in VOD (rb-ios-hide-chat-feed-in-vod). `.onAppear` supplies the initial value
         // (`.onChange` does not fire for it); `.onChange` tracks switches between videos.
-        .onAppear { onIsLiveChange?(model.isLive) }
+        .onAppear {
+            onIsLiveChange?(model.isLive)
+            // 初值報告 announce 顯示與否（`.onChange` 不會為初值觸發），讓容器一進場就給對的避讓。
+            onHasAnnounceChange?(!model.announceText.isEmpty)
+        }
         .onChange(of: model.isLive) { isLive in
             onIsLiveChange?(isLive)
+        }
+        // Report whether the LBLiveAnnounce banner is showing (announceText 非空) so the container
+        // gives the chat feed extra bottom clearance only when a 公告 is present
+        // (rb-ios-live-announce-chat-clearance, 問題 4). announceText 只在後台公告變更時才變，不頻繁。
+        .onChange(of: model.announceText) { text in
+            onHasAnnounceChange?(!text.isEmpty)
         }
     }
 
@@ -796,5 +863,36 @@ private extension View {
         } else {
             self.edgesIgnoringSafeArea(.all)
         }
+    }
+}
+
+// MARK: - Restriction mask (restriction-mask ②)
+
+/// 會員等級限定升級遮罩：全幅暗罩 + 鎖 glyph + 升級提示。`is_restriction` 為**軟性顯示閘門**
+/// （core 不擋播放、後端仍回完整內容），此遮罩疊在播放畫面上擋住受限內容。只在
+/// `PlayerShellView` 偵測 `model.isRestricted == true` 時建出，故未受限時不出像素
+/// （snapshot baseline byte-identical）。最終視覺 / 退出 affordance DECISION-PENDING 待設計稿。
+private struct RestrictionMaskView: View {
+    let theme: ReferenceUITheme
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.78)
+            VStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundColor(.white)
+                Text("此內容限定會員等級觀看")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+                Text("提升會員等級後即可觀看")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .padding(24)
+            .multilineTextAlignment(.center)
+        }
+        // 擋住受限內容（軟閘門：阻擋與下層播放內容互動）。
+        .contentShape(Rectangle())
     }
 }

@@ -562,12 +562,11 @@ public struct ProductDetailSheetView: View {
                 addToCartButton
             }
 
-            // 查看購物車 CTA 僅在 `.detail`（完整商品明細）呈現；`.addToCart`（精簡購買 sheet）
-            // 不畫——對齊設計 `AddToCartSheet`（僅單一加購 CTA）+ 既有「.addToCart 只畫加入購物車
-            // CTA」requirement，跳購物車由浮動 mini-cart peek 負責（rb-ios-compact-sheet-cap-and-footer）。
-            if presentation == .detail && cartCount > 0 {
-                cartCTA
-            }
+            // 商品明細 footer 收斂為設計 `ProductDetailSheet` 的 3-slot `[收藏][分享][CTA]`：
+            // 設計並無額外的「查看購物車」CTA，且 `cartCount`（= `DefaultCartCTA.state.count`，
+            // per-session 成功加購計數）非真實購物車件數、數據不準，故 footer MUST NOT 畫查看購物車
+            // CTA（rb-ios-product-sheet-cart-cta-cleanup 問題 2）。`cartCTA` computed 與 `cartCount`
+            // / `onOpenCart` 參數保留（不動建構子簽章 / 外部接線），body 不再引用。
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -639,6 +638,9 @@ public struct ProductDetailSheetView: View {
     }
 
     /// LBPCartCTA — accent bag button with the per-session add count.
+    /// 保留但**目前未被 `footer` 引用**：明細 footer 收斂為設計 3-slot `[收藏][分享][CTA]`，
+    /// 不再畫「查看購物車」CTA（rb-ios-product-sheet-cart-cta-cleanup 問題 2）。此 computed 保留
+    /// 以免動建構子簽章 / 外部接線，日後若要恢復可一鍵接回 `footer`。
     private var cartCTA: some View {
         Button(action: { onOpenCart?() }) {
             HStack(spacing: 10) {

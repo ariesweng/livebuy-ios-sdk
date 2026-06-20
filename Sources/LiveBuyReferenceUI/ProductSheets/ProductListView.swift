@@ -79,6 +79,18 @@ public struct ProductListView: View {
     /// MUST NOT re-sort. nil (VOD / demo / nothing introducing) → no banner, play shown.
     public let introducingProductId: String?
 
+    /// Playback mode for the thumbnail overlay (rb-ios-product-row-status-overlay):
+    /// VOD → play icon; active-live → 介紹中 on the narrating row; replay → 介紹中 on the
+    /// product whose `[beginTime, endTime]` contains `playbackPosition`, else play icon.
+    /// `nil` (existing call sites / snapshots) falls back to deriving from the real-frame
+    /// `live` flag (`live ? .live : .vod`) so baselines stay byte-identical; the production
+    /// container passes an explicit mode. Orthogonal to `live` (which gates photo loading).
+    private let mode: ProductRowMode?
+
+    /// Current playback position in seconds (replay only) — compared to each product's
+    /// `[beginTime, endTime]` to decide「介紹中」. From `DefaultPlaybackProgressState.position`.
+    private let playbackPosition: Int
+
     /// Host-wired product-row tap → core product-tap exit. The container forwards
     /// this to its host-wired `onProductTap`, which the host wires to core
     /// `LiveBuyPlayerViewController.simulateProductTap(product)`. nil for demo /
@@ -132,6 +144,8 @@ public struct ProductListView: View {
         cartCount: Int,
         live: Bool = false,
         introducingProductId: String? = nil,
+        mode: ProductRowMode? = nil,
+        playbackPosition: Int = 0,
         onOpenProduct: ((LBProduct) -> Void)? = nil,
         onQuickAdd: ((LBProduct) -> Void)? = nil,
         onNotifyRestock: ((LBProduct) -> Void)? = nil,
@@ -147,6 +161,8 @@ public struct ProductListView: View {
         self.cartCount = cartCount
         self.live = live
         self.introducingProductId = introducingProductId
+        self.mode = mode
+        self.playbackPosition = playbackPosition
         self.onOpenProduct = onOpenProduct
         self.onQuickAdd = onQuickAdd
         self.onNotifyRestock = onNotifyRestock
@@ -342,13 +358,30 @@ public struct ProductListView: View {
     // both host-wired (nil → no-op for demo / snapshot, byte-identical baselines).
 
     private func productRow(_ product: LBProduct) -> some View {
-        let soldOut = product.soldOut == 1
-        // 介紹中 row (LIVE narrate_status==2). Banner shows + play hidden ONLY in LIVE
-        // for the introducing product; already-introduced rows stay clean (no label).
-        let isIntroducing = live && introducingProductId != nil && product.id == introducingProductId
-        // Seek-to-intro (play affordance) belongs to VOD / replay where you scrub a recording.
-        // In LIVE there is no future to jump to, so the play icon is hidden (design `showPlay = !live`).
-        let showPlay = !live
+        // 狀態標籤改吃後端結論欄 `label`（rb-ios-goods-label-unified ③，單一優先序）；label 空
+        // （舊後端 / demo）經 raw fallback 仍正確 → baseline 不變。
+        let statusBadge = ProductStatusBadge.resolve(product)
+        let soldOut = statusBadge == .soldOut
+        // out_soon / hot 小徽章只認**明確** label（label 空不臆測 → demo / 舊後端中性）。
+        let explicitBadge = ProductStatusBadge.fromLabel(product.label)
+        // Thumbnail overlay by playback MODE (rb-ios-product-row-status-overlay), via a pure
+        // function. `mode` falls back to deriving from the real-frame `live` flag for existing
+        // call sites / snapshots (`live ? .live : .vod`) so baselines stay byte-identical.
+        //   VOD          → play icon (seek-to-intro)
+        //   active live  → 介紹中 on the narrating product (introducingProductId), else nothing
+        //   replay       → 介紹中 when playbackPosition ∈ [beginTime, endTime], else play icon
+        let effectiveMode = mode ?? (live ? .live : .vod)
+        let isNarratingThis = introducingProductId != nil && product.id == introducingProductId
+        let overlay = ProductRowOverlay.decide(
+            mode: effectiveMode,
+            isNarrating: isNarratingThis,
+            beginTime: product.beginTime,
+            endTime: product.endTime,
+            position: playbackPosition
+        )
+        // 優先序 sold_out > narrating：售罄時壓過「介紹中」橫幅（rb-ios-goods-label-unified ③）。
+        let isIntroducing = overlay.showIntroducing && !soldOut
+        let showPlay = overlay.showPlay
         return HStack(spacing: 12) {
             // Thumbnail + play affordance. `live` + a real photo → the product image loads over
             // the placeholder; the play affordance stays on top (rb-ios-product-real-images).
@@ -418,6 +451,13 @@ public struct ProductListView: View {
                             Text(product.priceShow)
                                 .font(.system(size: 14 * theme.fontScale, weight: .heavy))
                                 .foregroundColor(Self.saleColor)
+                            // out_soon / hot 小徽章（rb-ios-goods-label-unified ③）——僅明確 label
+                            // 觸發（label 空不臆測）。最終配色 DECISION-PENDING 待設計稿。
+                            switch explicitBadge {
+                            case .outSoon: statusPill(Self.outSoonLabel, Self.outSoonColor)
+                            case .hot:     statusPill(Self.hotLabel, theme.accent)
+                            default:       EmptyView()
+                            }
                         }
                     }
                 }
@@ -518,11 +558,10 @@ public struct ProductListView: View {
                 Text(Self.cartLabel)
                     .font(.system(size: 16 * theme.fontScale, weight: .bold))
                     .foregroundColor(.white)
-                if cartCount > 0 {
-                    Text("(\(cartCount))")
-                        .font(.system(size: 15 * theme.fontScale, weight: .semibold))
-                        .foregroundColor(Color.white.opacity(0.85))
-                }
+                // 「查看購物車」CTA 不顯示加購數量 `(n)`：`cartCount`（= `DefaultCartCTA.state.count`，
+                // per-session 成功加購計數）非真實購物車件數、數據不準，MUST NOT 對外呈現
+                // （rb-ios-product-sheet-cart-cta-cleanup 問題 6）。`cartCount` 參數保留（仍流入、
+                // 不渲染數量），按鈕仍為開購物車入口（`onOpenCart` 轉發不變）。
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
@@ -554,6 +593,8 @@ public struct ProductListView: View {
     static let saleColor = Color(hex: "#E0334B") ?? Color.red
     /// `theme.soldOut` (sold-out grey label — `design/brands/livebuy/tokens.jsx`).
     static let soldOutColor = Color(hex: "#9A96A3") ?? Color.gray
+    /// out_soon「即將售完」徽章色（暖橘；最終配色 DECISION-PENDING 待設計稿）。
+    static let outSoonColor = Color(hex: "#F5A623") ?? Color.orange
 
     // MARK: - Fixed localized copy (static presentation strings)
 
@@ -562,6 +603,8 @@ public struct ProductListView: View {
     static let soldOutLabel = "已售完"
     static let emptyLabel = "目前沒有商品"
     static let introducingLabel = "介紹中"
+    static let outSoonLabel = "即將售完"
+    static let hotLabel = "熱賣中"
     // 搜尋（rb-ios-product-list-search，對齊設計 ProductListSheet）
     static let searchPlaceholder = "搜尋商品名稱"
     static let searchCancel = "取消"
@@ -588,6 +631,17 @@ public extension ProductListView {
 
     /// A deterministic demo drawer: three products (one sold-out) + a cart count
     /// of 2, action-free. Mirrors `ProductSheetsModel.demoListModel`'s product set.
+    /// out_soon / hot 小徽章（rb-ios-goods-label-unified ③）。最小中性 pill；最終樣式
+    /// DECISION-PENDING 待設計稿。
+    private func statusPill(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10 * theme.fontScale, weight: .bold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(color))
+    }
+
     static func demo(theme: ReferenceUITheme) -> ProductListView {
         ProductListView(
             theme: theme,

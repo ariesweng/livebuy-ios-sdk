@@ -16,14 +16,20 @@ import LiveBuySDK
 // (see `DefaultTemplateConstants.activityFeedTailRetain`), taken from the
 // delivered design `moments.jsx` `LBLiveChatStream` `items.slice(-7)`.
 
-/// Visual-tier marker for an activity feed item. Ordered ascending so a host
-/// can decide emphasis: 入場 < 購買 < 介紹 < 中獎. Chat items carry no tier.
-/// `intro`（商品開始介紹）來源為商品推播 push（`#66F796`），強調介於購買與中獎之間。
+/// Visual-tier marker for an activity feed item. Chat items carry no tier.
+/// 語意層級（強調遞增）：**觀眾選購 ≈ 進場（最低調社會認同）< 購買 < 介紹 < 中獎**。
+/// `browse`（觀眾選購，chat-message-taxonomy ⑤，來源 `kind == .narrate` / `#66F796`）為與
+/// `join` 同級的最低調熱度信號（非主播訊息、非購買、非介紹中）。`intro`（商品開始介紹）來源
+/// 為商品推播 push，強調介於購買與中獎之間。
+/// 註：`rawValue` 僅作 `dedupeSignature` 的穩定判別子與跨端 parity 對齊（不持久化、不序列化），
+/// **不等於強調順序**——`browse = 4` 為 append（不重排既有值），語意上仍是最低調。
 public enum LBActivityTier: Int, Equatable {
     case join = 0
     case purchase = 1
     case intro = 2
     case win = 3
+    /// 觀眾選購（最低調社會認同，與 `join` 同級）。
+    case browse = 4
 }
 
 /// One row in the merged feed. `text` is the backend-prebuilt, i18n-complete
@@ -39,13 +45,43 @@ public struct LBFeedItem: Equatable {
         /// `keyword` / `joined`. Surfaced ONLY for event-begin; event-end stays
         /// a plain `.chat` row.
         case eventJoin
+        /// A 商品開賣 (onsale) product-sale row (chat5 群組①「商品開賣」). Host draws the
+        /// `moments.jsx` `LBProductSaleCard` (縮圖 + 商品名 `text` + 現價 `price` + 搶購鈕).
+        /// Surfaced ONLY for `kind == .onsale` with a non-empty product name; the
+        /// ProductController-empty source falls back to a plain `.chat` notice.
+        case productSale
     }
 
     public let kind: Kind
     public let text: String
+    /// Present only for `.chat` rows — the message author's nickname (backend
+    /// `LBPushMsg.name` / `LBComment.name`). `nil` for every other kind and for
+    /// chat with no usable name (blank → normalized to nil by `appendChat`). The
+    /// reference-ui renders it as the chat-row nickname; nil → text-only fallback
+    /// (chat-nickname-display).
+    public let userName: String?
+
+    // MARK: - Chat role metadata (chat-message-taxonomy ⑤, 群組① 真正的聊天)
+    /// `.chat` only — 主播留言 / 主播回覆。`false` for viewer (`.comment`) messages.
+    /// Lets the reference-ui draw the「主播」tag + accent bubble — distinguishing by
+    /// LAYOUT, not colour. Default `false` keeps existing viewer rows byte-identical.
+    public let isHost: Bool
+    /// `.chat` only — AI 自動回覆（`kind == .aiReply`）。`true` adds the「AI」badge on
+    /// top of the host-reply layout. Default `false`.
+    public let isAI: Bool
+    /// `.chat` only — 主播回覆 / AI 回覆 的**被回覆引用內容**（backend `LBPushMsg.reply`），
+    /// 為一段獨立字串（NOT split from `text`）。`nil` → 無引用框。後端無「引用者名稱」欄，故
+    /// 只帶引用文字。Default `nil`.
+    public let replyText: String?
     /// Present only for `.activity(tier: .win)`; nil otherwise. Lets the host
     /// drill into the won award without re-parsing `text`.
     public let winner: LBWinner?
+
+    /// `.productSale` only — 商品開賣現價（已格式化字串，backend `LBPushMsg.p` / `price`，chat5
+    /// 群組①「商品開賣」）。`nil` for every other kind (default → existing feed byte-identical). The
+    /// reference-ui renders it as the card's price line; `text` is the 商品名. 原價（劃線 listPrice）/
+    /// 真實縮圖 URL / 搶購 deeplink 仍待後端補欄 (PARK).
+    public let price: String?
 
     // MARK: - Event-join fields (livebuy-ui-event-join-and-error-state-template)
     /// Present only for `.eventJoin`; nil otherwise. Core event id (`> 0`).
@@ -57,14 +93,21 @@ public struct LBFeedItem: Equatable {
     /// has NO "join succeeded" callback). Ignored for non-eventJoin rows.
     public internal(set) var joined: Bool
 
-    public init(kind: Kind, text: String, winner: LBWinner? = nil,
-                eid: Int? = nil, keyword: String? = nil, joined: Bool = false) {
+    public init(kind: Kind, text: String, userName: String? = nil, winner: LBWinner? = nil,
+                eid: Int? = nil, keyword: String? = nil, joined: Bool = false,
+                isHost: Bool = false, isAI: Bool = false, replyText: String? = nil,
+                price: String? = nil) {
         self.kind = kind
         self.text = text
+        self.userName = userName
         self.winner = winner
         self.eid = eid
         self.keyword = keyword
         self.joined = joined
+        self.isHost = isHost
+        self.isAI = isAI
+        self.replyText = replyText
+        self.price = price
     }
 
     /// Convenience: the tier if this is an activity row, else nil.
@@ -80,8 +123,11 @@ public struct LBFeedItem: Equatable {
 
     // `LBWinner` (core model) is not Equatable, so compare by `winner.id`.
     public static func == (lhs: LBFeedItem, rhs: LBFeedItem) -> Bool {
-        lhs.kind == rhs.kind && lhs.text == rhs.text && lhs.winner?.id == rhs.winner?.id
+        lhs.kind == rhs.kind && lhs.text == rhs.text && lhs.userName == rhs.userName
+            && lhs.winner?.id == rhs.winner?.id
             && lhs.eid == rhs.eid && lhs.keyword == rhs.keyword && lhs.joined == rhs.joined
+            && lhs.isHost == rhs.isHost && lhs.isAI == rhs.isAI && lhs.replyText == rhs.replyText
+            && lhs.price == rhs.price
     }
 }
 
@@ -139,6 +185,16 @@ public final class DefaultActivityFeed {
         append(LBFeedItem(kind: .activity(tier: .purchase), text: text))
     }
 
+    /// 觀眾選購（chat-message-taxonomy ⑤ `kind == .narrate`，`#66F796`，上游 `ty=ds`）→ feed
+    /// 社會認同 activity row（「{觀眾名} 正在選購商品～」）。**性質同 join**——是觀眾行為、
+    /// **非主播訊息、非購買、非「商品介紹中」**（介紹中改由 goods `is_narrating` 在商品列呈現）。
+    /// 依設計稿 chat5 定案，以**自己的低調 `.browse` tier**（與 `join` 同級）呈現，解除先前
+    /// 「最終視覺 tier DECISION-PENDING」。push 無 stable id → 走 activity 去重（簽名涵蓋
+    /// `.browse` tier + text）。
+    public func appendNarrate(text: String) {
+        append(LBFeedItem(kind: .activity(tier: .browse), text: text))
+    }
+
     /// 商品推播（`push[]` 帶商品推播色 `#66F796`，例如「商品開賣 / 開始介紹」）→ feed
     /// activity row, tier = intro（喇叭 + accent 暈染，強調介於購買與中獎之間）。商品推播
     /// push 無 stable id，故與 join / purchase 同樣走 activity 去重（簽名涵蓋 tier）。
@@ -152,8 +208,21 @@ public final class DefaultActivityFeed {
 
     // MARK: - Chat ingestion (push + comments)
 
-    public func appendChat(text: String) {
-        append(LBFeedItem(kind: .chat, text: text))
+    /// chat row（push / comment）。`isHost` / `replyText` / `isAI` 為**群組① 真正的聊天**的
+    /// 角色 metadata（chat-message-taxonomy ⑤），供 reference-ui 依版型區分主播留言 / 主播回覆 /
+    /// AI 回覆；皆帶預設值，使既有觀眾留言（`.comment`）呼叫點 byte-identical。`replyText` 為
+    /// 後端 `LBPushMsg.reply` 帶來的獨立引用字串（NOT split from `text`）。
+    public func appendChat(text: String, name: String? = nil,
+                           isHost: Bool = false, replyText: String? = nil, isAI: Bool = false) {
+        // Normalize the author nickname: a missing / blank name → nil so the
+        // reference-ui falls back to its text-only chat row (chat-nickname-display).
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let userName = (trimmed?.isEmpty == false) ? trimmed : nil
+        // Normalize the quoted reply: blank → nil（無引用框）。
+        let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reply = (trimmedReply?.isEmpty == false) ? trimmedReply : nil
+        append(LBFeedItem(kind: .chat, text: text, userName: userName,
+                          isHost: isHost, isAI: isAI, replyText: reply))
     }
 
     /// A SYSTEM / 商品推播 notice (e.g. 「商品開賣」) surfaced as a chat row but DE-DUPED. The
@@ -164,7 +233,20 @@ public final class DefaultActivityFeed {
     /// `onMutation`). Routed here by `DefaultPlayerTemplate.handlePush` for product/event/promo
     /// pushes (`color == productPushColor` / `eid > 0` / `ct` / `p`).
     public func appendSystemNotice(text: String) {
-        append(LBFeedItem(kind: .chat, text: text), dedupeKey: "cs|\(text)")
+        // **不再傳 dedupeKey**（chat-history-dedupe-template）：`cs|<text>` 內容指紋會誤殺後台刻意
+        // 重送的相同內容真實系統通知。相鄰輪重送防重複改由 cursor-based backlog 分流承擔。
+        append(LBFeedItem(kind: .chat, text: text))
+    }
+
+    /// 商品開賣 product-sale row (chat5 群組①「商品開賣」). Surfaces an onsale push as a
+    /// `.productSale` feed item carrying the 商品名 (`name` → `text`) + 現價 (`price`), for the
+    /// reference-ui's `LBProductSaleCard`. DE-DUPED like a system notice (the push bucket carries no
+    /// stable id; an adjacent-poll re-send of the same name+price within the window is dropped).
+    /// Routed here by `DefaultPlayerTemplate.handlePush` for `kind == .onsale` with a non-empty name.
+    public func appendProductSale(name: String, price: String) {
+        // **不再傳 dedupeKey**（chat-history-dedupe-template）：`ps|<name>|<price>` 內容指紋會誤殺
+        // 後台刻意重送的相同商品開賣公告。相鄰輪重送防重複改由 cursor-based backlog 分流承擔。
+        append(LBFeedItem(kind: .productSale, text: name, price: price))
     }
 
     // MARK: - Event-join ingestion (from core event-begin push)
@@ -217,18 +299,31 @@ public final class DefaultActivityFeed {
         onMutation?()
     }
 
-    /// De-dup signature for an ACTIVITY / EVENT-JOIN row, or nil for chat (chat
-    /// repeats are legitimate and MUST NOT be de-duped). With no stable message id
-    /// the backend-prebuilt `text` is the only usable fingerprint, qualified by the
-    /// row kind (+ `tier` / `eid` / `winner.id`) so different row types never collide.
+    /// De-dup signature for a feed row. **所有 kind 現在皆回 `nil`（不做內容指紋去重）**：`.chat`
+    /// 一向 nil（兩人同字合法）；`.activity` / `.productSale` 於 chat-history-dedupe-template 移除；
+    /// `.eventJoin` 於 chat-event-message-no-dedupe-template 移除（活動公告會被刻意重播，每筆都顯示）。
+    /// 後端 push 無單則 id，內容指紋去重會誤殺後台刻意重送的真實通知；機制性 backlog 重放的防重複改由
+    /// cursor 分流承擔（chat-history-dedupe，含跨重入保存）。本函式保留為去重 seam（`append` 仍支援顯式
+    /// `dedupeKey`），目前無 caller 產生非 nil 簽名。
     static func dedupeSignature(for item: LBFeedItem) -> String? {
         switch item.kind {
         case .chat:
             return nil
-        case .activity(let tier):
-            return "a\(tier.rawValue)|\(item.winner?.id ?? "")|\(item.text)"
+        case .activity:
+            // 進場 / 購買 / 選購 / 中獎跑馬燈：**移除內容指紋去重**（chat-history-dedupe-template）——
+            // `a<tier>|<text>` 會誤殺後台「推廣活動」刻意重送的相同內容真實通知。相鄰輪重送的防重複
+            // 改由 TemplateAttachment 的 cursor-based backlog 分流承擔（後續輪照顯示、首輪 backlog 抑制）。
+            return nil
         case .eventJoin:
-            return "e\(item.eid ?? 0)|\(item.text)"
+            // 活動公告（`kind=event`）：**移除內容指紋去重**（chat-event-message-no-dedupe-template）——
+            // 直播主把活動公告當「循環提醒」刻意重播多次（live 實測：messages 首輪 backlog 內同 `eid`
+            // 連續多筆），`e<eid>|<text>` 內容指紋去重會把這些真實重播誤塌成一筆。比照其他真實訊息每筆都
+            // 顯示；機制性 backlog 重放的防重複改由 cursor 分流承擔（chat-history-dedupe / 跨重入保存）。
+            // CTA 顯示與否仍由 reference-ui 依 keyword（push.ek）isset 決定（event-join-cta-isset-ek）。
+            return nil
+        case .productSale:
+            // 商品開賣：**移除內容指紋去重**（同 activity 理由）。相鄰輪重送由 backlog 分流承擔。
+            return nil
         }
     }
 

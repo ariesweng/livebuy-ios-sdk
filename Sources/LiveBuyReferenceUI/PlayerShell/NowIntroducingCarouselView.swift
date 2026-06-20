@@ -63,11 +63,16 @@ struct NowIntroducingCarouselView: View {
                     pageDots(count: peeks.count, current: i)
                 }
             }
-            // Swipe left → next page, right → previous (clamped). Fire on `.onEnded` so a
-            // below-threshold drag is a no-op.
-            .gesture(
-                DragGesture()
+            // Swipe left → next page, right → previous (clamped). `.highPriorityGesture`
+            // (minDistance 10) so a committed horizontal drag wins over the card's Button
+            // AND the outer full-screen video-switch gesture (which previously swallowed it).
+            // Direction-gated: act ONLY on a predominantly-horizontal drag — a vertical drag
+            // is a no-op here so the outer up/down video-switch keeps working. A tap (< 10pt)
+            // falls through to the card Button / page dots. Fire on `.onEnded`.
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 10)
                     .onEnded { value in
+                        guard abs(value.translation.width) > abs(value.translation.height) else { return }
                         if value.translation.width <= -Self.swipeThreshold {
                             index = min(i + 1, peeks.count - 1)
                         } else if value.translation.width >= Self.swipeThreshold {
@@ -78,13 +83,19 @@ struct NowIntroducingCarouselView: View {
         }
     }
 
-    /// Page dots — one per card, the current one accent-filled, the rest dim.
+    /// Page dots — one per card, the current one accent-filled, the rest dim. Each dot is
+    /// TAPPABLE (tap → that page) — a guaranteed switch independent of drag arbitration. The
+    /// 6×6 dot keeps its exact pixels/layout; `contentShape(Rectangle().inset(by: -7))`
+    /// enlarges the tap target to ~20×20 WITHOUT rendering or changing layout (snapshot
+    /// byte-identical).
     private func pageDots(count: Int, current: Int) -> some View {
         HStack(spacing: 6) {
             ForEach(0..<count, id: \.self) { idx in
                 Circle()
                     .fill(idx == current ? theme.accent : Color.white.opacity(0.4))
                     .frame(width: 6, height: 6)
+                    .contentShape(Rectangle().inset(by: -7))
+                    .onTapGesture { index = idx }
             }
         }
     }

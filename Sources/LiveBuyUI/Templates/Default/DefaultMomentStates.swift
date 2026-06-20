@@ -124,6 +124,13 @@ public final class DefaultEndScreenState {
     private(set) public var hot: [LBHotItem] = []
     private(set) public var countdown: LBEndScreenCountdown?
 
+    /// Whether the end screen should be shown at all — mirrors core
+    /// `LBPlayerMomentState.endScreenShown` (true on live_end, REGARDLESS of next/hot).
+    /// Orthogonal to `countdown`: `endScreenVisible == true && countdown == nil` ⟺ the
+    /// no-countdown「直播已結束」end screen; `countdown != nil` ⟹ `endScreenVisible == true`.
+    /// reference-ui shows the end screen when this is true (end-screen-no-countdown).
+    private(set) public var endScreenVisible: Bool = false
+
     /// Template-owned `total`, captured at the inactive→active transition; reset to
     /// nil when the countdown goes inactive (D3 — 倒數秒數本身屬 UI).
     private var capturedTotal: Int?
@@ -135,7 +142,7 @@ public final class DefaultEndScreenState {
     /// Ingest one moment-state end-screen snapshot. Diff-then-notify on the
     /// (next ids, hot ids, countdown) tuple.
     func handleMoment(next: [LBNavItem], hot: [LBHotItem],
-                      countdownActive: Bool, remain: Int) {
+                      countdownActive: Bool, remain: Int, endScreenShown: Bool) {
         let total = resolveTotal(active: countdownActive, remain: remain)
         let newCountdown = (countdownActive && !next.isEmpty)
             ? LBEndScreenCountdown(remain: remain, total: total ?? remain)
@@ -143,10 +150,12 @@ public final class DefaultEndScreenState {
         let changed = next.map(\.id) != self.next.map(\.id)
             || hot.map(\.id) != self.hot.map(\.id)
             || newCountdown != countdown
+            || endScreenShown != endScreenVisible
         guard changed else { return }
         self.next = next
         self.hot = hot
         self.countdown = newCountdown
+        self.endScreenVisible = endScreenShown
         onMutation?()
     }
 

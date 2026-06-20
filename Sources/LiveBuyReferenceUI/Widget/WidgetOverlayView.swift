@@ -216,6 +216,15 @@ public struct WidgetOverlayView: View {
         }
     }
 
+    /// Host-wired `onTapVideo` wrapped to redirect external-platform lives
+    /// (external-live-watch): a live whose `liveurl` host is an external platform
+    /// (Facebook) opens out to that platform instead of the in-app player, so the
+    /// host's `onTapVideo` is NOT invoked for it. Non-external lives forward to
+    /// `onTapVideo` unchanged. Computed once and used by every surface below.
+    private var routedTapVideo: (LBVideoItem) -> Void {
+        externalLiveAwareTap(onTapVideo)
+    }
+
     /// The single active widget surface for `model.mode`. Mutually exclusive — the
     /// mode is authoritative (no priority stack).
     @ViewBuilder
@@ -228,7 +237,7 @@ public struct WidgetOverlayView: View {
                 model: model,
                 theme: theme,
                 live: live,
-                onTapVideo: { item in onTapVideo?(item) })
+                onTapVideo: { item in routedTapVideo(item) })
 
         case .grid:
             // LBPVideoShop — 2-col grid + load-more footer. Forwards the host-scroll
@@ -239,7 +248,7 @@ public struct WidgetOverlayView: View {
                 live: live,
                 hostScrollable: hostScrollable,
                 containerWidth: containerWidth,
-                onTapVideo: { item in onTapVideo?(item) },
+                onTapVideo: { item in routedTapVideo(item) },
                 onLoadMore: { onLoadMore?() })
 
         case .floating:
@@ -249,7 +258,7 @@ public struct WidgetOverlayView: View {
                 video: model.liveVideo,
                 theme: theme,
                 live: live,
-                onTap: { item in onTapVideo?(item) },
+                onTap: { item in routedTapVideo(item) },
                 onClose: { onClose?() })
 
         case .minimized:

@@ -75,19 +75,30 @@ public struct LBWidgetContent: Equatable {
                         liveVideo: nil, widgetColor: 1, widgetBgcolor: nil)
     }
 
+    /// Per-video diff signature for the snapshot equality guard. Beyond the stable
+    /// `id` it includes the DISPLAY-AFFECTING fields that can change mid-session —
+    /// `liveStatus` (預告 0 / 直播 1 / 回放 3) plus `type` + `liveurl` (which together
+    /// drive `widget-hide-urlless-live` visibility). Comparing only `id` (the prior
+    /// behaviour) made a refresh that flips a card's `liveStatus` 0→1 look "unchanged",
+    /// so `onChange` never fired and the card stayed on 直播預告 until a reopen
+    /// (widget-content-diff-refresh / 問題3). Pure for unit testing.
+    static func videoDiffSignature(_ v: LBVideoItem) -> String {
+        "\(v.id)|\(v.liveStatus)|\(v.type)|\(v.liveurl)"
+    }
+
     /// `Equatable` is hand-rolled because core `LBVideoItem` is NOT `Equatable`
     /// (it is a Mapper-produced model). Two snapshots are equal when the scalar
-    /// fields match AND the video / live-card IDENTITY (stable `id`) is the same —
-    /// enough for the diff-then-notify guard (a content change always changes the
-    /// videos' ids, the page cursor, the mode, the live card id, or a color).
+    /// fields match AND the video / live-card DIFF SIGNATURE (id + liveStatus + type +
+    /// liveurl) is the same — so a content change (incl. a card's live status flipping)
+    /// always makes the snapshot unequal and fires `onChange` (diff-then-notify).
     public static func == (lhs: LBWidgetContent, rhs: LBWidgetContent) -> Bool {
         lhs.mode == rhs.mode
             && lhs.currentPage == rhs.currentPage
             && lhs.lastPage == rhs.lastPage
             && lhs.widgetColor == rhs.widgetColor
             && lhs.widgetBgcolor == rhs.widgetBgcolor
-            && lhs.liveVideo?.id == rhs.liveVideo?.id
-            && lhs.videos.map(\.id) == rhs.videos.map(\.id)
+            && lhs.liveVideo.map(videoDiffSignature) == rhs.liveVideo.map(videoDiffSignature)
+            && lhs.videos.map(videoDiffSignature) == rhs.videos.map(videoDiffSignature)
     }
 }
 

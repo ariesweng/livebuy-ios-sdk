@@ -119,14 +119,7 @@ public struct LiveBuyPlayerConfig {
     /// nothing; a host that wants once-per-install behavior computes this in its config.
     public var showGestureHints: Bool = false
 
-    /// Ordered feed for swipe-to-switch-video (R3). When non-empty, an UP swipe loads the
-    /// NEXT and a DOWN swipe the PREVIOUS video in this list (in place, like a hot-pick),
-    /// independent of backend channel adjacency. Empty (default) → the shell's own
-    /// channel-adjacency swipe fallback is used (behavior unchanged). At head/tail it is a
-    /// safe no-op; if the shown video is not in this list, it falls back to channel adjacency.
-    public var swipeFeed: [LBVideoItem] = []
-
-    /// Fired when an IN-PLACE switch (swipe-feed / hot-pick / watch-next) changes the shown
+    /// Fired when an IN-PLACE switch (hot-pick / watch-next) changes the shown
     /// video, with the NEW video id (R3), so a host can keep its own "current video" state
     /// in sync (e.g. a minimized preview shows the right video). Default `nil`.
     public var onVideoSwitched: ((String) -> Void)?
@@ -139,19 +132,6 @@ public struct LiveBuyPlayerConfig {
     public var design: ReferenceUIDesign = MinimalDesign()
 
     public init() {}
-}
-
-/// Resolves the swipe-navigation target from an ordered feed. Pure (no side effects) so
-/// the container's UP/DOWN swipe wiring and the unit tests share one implementation.
-/// `forward == true` → the NEXT video (UP swipe); `false` → the PREVIOUS (DOWN swipe).
-/// Returns nil at the head/tail, when `current` is nil, or when `current` is not in `feed`
-/// (the caller then falls back to channel-adjacency).
-func swipeTarget(in feed: [LBVideoItem], current: String?, forward: Bool) -> LBVideoItem? {
-    guard let current = current,
-          let idx = feed.firstIndex(where: { $0.id == current }) else { return nil }
-    let targetIdx = forward ? idx + 1 : idx - 1
-    guard feed.indices.contains(targetIdx) else { return nil }
-    return feed[targetIdx]
 }
 
 /// 留言 pill 預設 gating（純函式，與容器 `onComment` closure 共用一份；問題 2）：暱稱**尚未選名**
@@ -227,8 +207,6 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// in place; the overlay models re-publish on `load` (the proven onPickHot pattern).
     public func updateUIViewController(_ vc: UINavigationController, context: Context) {
         let coordinator = context.coordinator
-        // Keep the LIVE swipe feed current (videos appended after open become reachable).
-        coordinator.swipeFeed = config.swipeFeed
         guard let player = coordinator.player,
               coordinator.coverVideoId != videoId else { return }
         coordinator.coverVideoId = videoId
@@ -282,6 +260,18 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// flow publishes back into these snapshots. Plus the on-demand chat composer controller.
     private func buildModels(template: DefaultPlayerTemplate, coordinator: Coordinator) {
         coordinator.model = PlayerShellModel(template: template)
+        // Swipe-navigation in-place switch → report `onVideoSwitched` (swipe-video-switched-notify),
+        // parity with the onWatchNext / onPickHot paths so a host-bound video mirror (the minimized
+        // floating preview card's `video`) tracks the shown video after a swipe. Update cover AND
+        // current id: when the host re-renders with the new bound `videoId`, `updateUIViewController`'s
+        // cover-guard (`coverVideoId != videoId`) then no-ops → no redundant reload (the swipe already
+        // loaded via the template forwarder; we MUST NOT load again here). `[weak coordinator]` breaks
+        // the coordinator → model → closure → coordinator retain cycle.
+        coordinator.model?.onDidSwitchVideo = { [weak coordinator] id in
+            coordinator?.currentVideoId = id
+            coordinator?.coverVideoId = id
+            config.onVideoSwitched?(id)
+        }
         coordinator.productModel = ProductSheetsModel(template: template)
         coordinator.feedModel = FeedWinModel(template: template)
         coordinator.momentsModel = MomentsModel(template: template)
@@ -319,7 +309,6 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         coordinator.player = player
         coordinator.coverVideoId = videoId
         coordinator.currentVideoId = videoId
-        coordinator.swipeFeed = config.swipeFeed
         player.load(videoId: videoId)
 
         let nav = UINavigationController(rootViewController: player)
@@ -372,33 +361,13 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         let momentsModel = coordinator.momentsModel!
         let feedModel = coordinator.feedModel!
 
-        // Swipe-to-switch-video using the host feed. Reads the LIVE feed off the coordinator
-        // (pagination growth after open stays reachable), sets BOTH currentVideoId AND
-        // coverVideoId (so a later re-render's updateUIViewController sees no cover change →
-        // no redundant reload), loads, and notifies the host (preview stays correct).
-        let switchToFeedNeighbor: (Bool) -> Void = { [weak player, weak coordinator, weak shellModel] forward in
-            guard let player = player, let coordinator = coordinator else { return }
-            // Base the swipe target on the video CORE is ACTUALLY playing (`player.currentVideoId`,
-            // public private(set)) — NOT the coordinator's copy. A CORE auto-advance (回放/VOD 播完
-            // 經 `load(videoId: next)` 直接接續，不經此 closure) updates core's currentVideoId but
-            // leaves coordinator.currentVideoId stale on the ENDED video; computing prev from that
-            // stale value lands one before the actually-playing video (= 前前一支). Re-sync the
-            // coordinator to core here (rb-ios-swipe-prev-after-autoadvance).
-            let current = player.currentVideoId ?? coordinator.currentVideoId
-            coordinator.currentVideoId = current
-            if let target = swipeTarget(in: coordinator.swipeFeed, current: current, forward: forward) {
-                coordinator.currentVideoId = target.id
-                coordinator.coverVideoId = target.id
-                player.load(videoId: target.id)
-                config.onVideoSwitched?(target.id)
-            } else if coordinator.swipeFeed.firstIndex(where: { $0.id == current }) == nil {
-                forward ? shellModel?.navigateToNext() : shellModel?.navigateToPrev()
-            }
-            // else: at the head/tail → safe no-op
-        }
-        let onSwipeUp: (() -> Void)? = config.swipeFeed.isEmpty ? nil : { switchToFeedNeighbor(true) }
-        let onSwipeDown: (() -> Void)? = config.swipeFeed.isEmpty ? nil : { switchToFeedNeighbor(false) }
-
+        // Vertical swipe-to-switch-video: the drop-in NO LONGER injects a host-feed override
+        // (`swipeFeed` removed — rb-ios-swipe-always-channel-adjacency). With `onSwipeUp` /
+        // `onSwipeDown` left nil, `PlayerShellView` drives the swipe via its built-in
+        // channel-adjacency fallback (`navigateToNext()` / `navigateToPrev()`, reading the
+        // backend `/sdk/video` `prev` / `next`) and raises `onCloseRequest` at the backend
+        // head / tail (swipe-nav-close-on-empty). The host-override seam is retained for hosts
+        // wiring `PlayerShellView` directly; the turnkey container just never uses it.
         return PlayerOverlayContext(
             shellModel: shellModel,
             productModel: productModel,
@@ -412,8 +381,15 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
             theme: theme,
             paintsBackgroundPlaceholder: config.paintsBackgroundPlaceholder,
             showGestureHints: config.showGestureHints,
-            onSwipeUp: onSwipeUp,
-            onSwipeDown: onSwipeDown,
+            onSwipeUp: nil,
+            onSwipeDown: nil,
+            // Swipe toward an EMPTY direction (no next / prev video) → close the player
+            // (swipe-nav-close-on-empty #7). Prefer the host's `onDismiss` (host decides
+            // dismiss / unload); fall back to core `unload()` when the host wired none.
+            onCloseRequest: { [weak player] in
+                guard let player = player else { return }
+                if let custom = config.onDismiss { custom(player) } else { player.unload() }
+            },
             // Hold-to-pause: default forwards to the existing public core engine controls
             // (reference-ui → core). Hold start pauses, release resumes.
             onHoldStart: { [weak player] in player?.pause() },
@@ -463,7 +439,18 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
             },
             // LIVE 底部 bar 暱稱按鈕 → 本地呈現 設定暱稱 modal（不走被 gating 的 core
             // requestGuestNameEdit；問題 1）。送出後不接 composer（`composeAfter: false`）。
-            onNickname: { nicknameController.present(composeAfter: false) },
+            // **登入閘**（rb-ios-nickname-login-gate）：若該場直播留言需登入（訪客 + `guest_comment==0`
+            // ⟺ `!chatEnabled`），點暱稱也比照留言先跳「請先登入」（`loginController.present()` →
+            // `config.onLogin`），MUST NOT 開暱稱 modal——非登入不可留言的訪客不該先去設一個用不到的暱稱。
+            // 與 `onComment` 共用同一純函式 `liveCommentRequiresLogin`，決策完全一致。
+            onNickname: { [weak shellModel] in
+                if liveCommentRequiresLogin(isLoggedIn: shellModel?.isLoggedIn ?? false,
+                                            chatEnabled: shellModel?.chatEnabled ?? true) {
+                    loginController.present()
+                } else {
+                    nicknameController.present(composeAfter: false)
+                }
+            },
             // 設定暱稱 modal 送出 → 以 `LiveBuy.setGuestNickname` 設訪客留言暱稱（**不**用
             // `setUser`：設名 ≠ 登入，避免誤觸 logged_in 事件 / PendingAuth 重放 / isGuest 翻 false；
             // rb-ios-nickname-modal-use-guest-nickname / set-guest-nickname-core）、關閉 modal，
@@ -568,9 +555,6 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         var coverVideoId: String?
         /// What the player actually shows — cover loads AND default in-place switches.
         var currentVideoId: String?
-        /// The LIVE swipe feed (kept in sync from `config.swipeFeed`), so swipe nav sees
-        /// videos appended after the player opened (e.g. grid load-more).
-        var swipeFeed: [LBVideoItem] = []
 
         private var bgObserver: NSObjectProtocol?
 
