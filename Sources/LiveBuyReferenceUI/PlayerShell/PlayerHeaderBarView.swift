@@ -150,6 +150,7 @@ public struct PlayerHeaderBarView: View {
                 // identical (pixel-neutral wrapper).
                 Button(action: { onTapHostBadge?() }) { hostPill }
                     .buttonStyle(PlainButtonStyle())
+                    .accessibilityIdentifier(LBAccessibilityID.playerHeaderHostPill)
                 Spacer(minLength: 8)
                 iconCluster
             }
@@ -178,6 +179,8 @@ public struct PlayerHeaderBarView: View {
             )
             .allowsHitTesting(false)
         )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.playerHeader)
     }
 
     // MARK: - Host pill (LBPTopBar / LBPHostBadge)
@@ -269,6 +272,7 @@ public struct PlayerHeaderBarView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .offset(x: 3, y: 3)
+        .accessibilityIdentifier(LBAccessibilityID.subscribeBadge)
     }
 
     /// The red LIVE pill (accent-filled) with a pulsing dot — drawn static for the
@@ -322,6 +326,7 @@ public struct PlayerHeaderBarView: View {
 
     private var iconCluster: some View {
         glassIconButton(systemName: "pip.enter", action: onMinimize)
+            .accessibilityIdentifier(LBAccessibilityID.playerMinimize)
     }
 
     /// A 36×36 round glass icon button (live-chrome.jsx iconBtn). Inert when its

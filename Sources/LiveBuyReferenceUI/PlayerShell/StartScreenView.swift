@@ -144,6 +144,8 @@ public struct StartScreenView: View {
                     .foregroundColor(.white.opacity(Self.loadingCaptionOpacity))
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.momentLoading)
     }
 
     /// The brand wordmark used by `.loading` (`LBLogo variant="wordmark"`): an
@@ -186,6 +188,8 @@ public struct StartScreenView: View {
         }
         .padding(.trailing, Self.skipTrailing)
         .padding(.bottom, Self.skipBottom)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.momentStart)
     }
 
     /// Bottom-right「略過介紹」skip button (design `LBPSkipIntroButton`). A translucent
@@ -212,6 +216,7 @@ public struct StartScreenView: View {
                     radius: Self.skipShadowRadius, x: 0, y: Self.skipShadowY)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.momentStartSkip)
     }
 
     // MARK: - Spinner ring (iOS-14-safe, mirrors design `lbp-spin`)

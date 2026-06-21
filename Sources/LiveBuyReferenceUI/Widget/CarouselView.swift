@@ -132,6 +132,8 @@ public struct CarouselView: View {
             cardRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.widgetCarousel)
     }
 
     // MARK: - Header row (title + subtitle + 查看更多 ›)

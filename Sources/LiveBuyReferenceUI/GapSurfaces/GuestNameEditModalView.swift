@@ -163,6 +163,8 @@ public struct GuestNameEditModalView: View {
                 .edgesIgnoringSafeArea(.all)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.guestNameScrim)
     }
 
     // MARK: - Centered card (LBPAlertModal — card + floating logo badge)
@@ -192,6 +194,8 @@ public struct GuestNameEditModalView: View {
                 .fill(theme.background))
         .shadow(color: Color.black.opacity(0.3), radius: 30, x: 0, y: 20)
         .padding(.horizontal, 28)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.guestNameModal)
     }
 
     // MARK: - Floating logo badge (44×44 white circle, accent monogram, soft shadow)
@@ -277,10 +281,12 @@ public struct GuestNameEditModalView: View {
                         nickname = String(newValue.prefix(Self.maxLength))
                     }
                 }
+                .accessibilityIdentifier(LBAccessibilityID.guestNameField)
         } else {
             TextField(Self.inputPlaceholder, text: $nickname)
                 .font(.system(size: 13 * theme.fontScale))
                 .foregroundColor(theme.text)
+                .accessibilityIdentifier(LBAccessibilityID.guestNameField)
         }
     }
 
@@ -314,6 +320,7 @@ public struct GuestNameEditModalView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .disabled(!canSubmit)
+        .accessibilityIdentifier(LBAccessibilityID.guestNameSubmit)
     }
 
     // MARK: - Decorative design tokens (literal minimal hex via Color(hex:))

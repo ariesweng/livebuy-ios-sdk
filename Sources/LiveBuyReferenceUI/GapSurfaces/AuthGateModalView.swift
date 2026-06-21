@@ -96,6 +96,8 @@ public struct AuthGateModalView: View {
             Color.black.opacity(0.55)
                 .edgesIgnoringSafeArea(.all)
                 .onTapGesture { onDismiss?() }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.authGateScrim)
 
             // Centered alert card (LBPAuthGate) with an overhanging accent lock badge.
             VStack(spacing: 0) {
@@ -127,6 +129,8 @@ public struct AuthGateModalView: View {
             .overlay(lockBadge.offset(y: -30), alignment: .top)
             .shadow(color: Color.black.opacity(0.3), radius: 30, x: 0, y: 20)
             .padding(.horizontal, 36)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.authGateModal)
         }
     }
 
@@ -167,6 +171,7 @@ public struct AuthGateModalView: View {
                             .fill(theme.accent))
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.authGateLogin)
 
             // Plain「稍後再說」(LBPButton plain).
             Button(action: { onDismiss?() }) {
@@ -182,6 +187,7 @@ public struct AuthGateModalView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.authGateLater)
         }
     }
 

@@ -23,7 +23,7 @@ import LiveBuyUI
 
 /// The VOD now-introducing products carousel. Renders the current full-width card + page dots,
 /// swipe to change the page. Container passes the (dismissed-filtered) peeks and the live flag.
-struct NowIntroducingCarouselView: View {
+public struct NowIntroducingCarouselView: View {
 
     let theme: ReferenceUITheme
 
@@ -42,7 +42,22 @@ struct NowIntroducingCarouselView: View {
 
     @State private var index: Int = 0
 
-    var body: some View {
+    /// Public init — same shape as the synthesized memberwise init (so the internal
+    /// player-shell composition keeps compiling), exposed so a host / QA gallery can
+    /// mount this surface like its public siblings (`OperationRailView`, etc.).
+    public init(theme: ReferenceUITheme,
+                peeks: [LBMiniCartPeek],
+                live: Bool,
+                onDismiss: ((String) -> Void)? = nil,
+                onOpenDetail: ((String) -> Void)? = nil) {
+        self.theme = theme
+        self.peeks = peeks
+        self.live = live
+        self.onDismiss = onDismiss
+        self.onOpenDetail = onOpenDetail
+    }
+
+    public var body: some View {
         if peeks.isEmpty {
             EmptyView()
         } else {
@@ -58,6 +73,7 @@ struct NowIntroducingCarouselView: View {
                     live: live,
                     fullWidth: true,
                     tag: Self.introducingTag)
+                    .accessibilityIdentifier(LBAccessibilityID.nowIntroducingCard)
 
                 if peeks.count > 1 {
                     pageDots(count: peeks.count, current: i)
@@ -80,6 +96,8 @@ struct NowIntroducingCarouselView: View {
                         }
                     }
             )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.nowIntroCarousel)
         }
     }
 
@@ -96,6 +114,7 @@ struct NowIntroducingCarouselView: View {
                     .frame(width: 6, height: 6)
                     .contentShape(Rectangle().inset(by: -7))
                     .onTapGesture { index = idx }
+                    .accessibilityIdentifier(LBAccessibilityID.nowIntroducingDot(idx))
             }
         }
     }

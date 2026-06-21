@@ -503,6 +503,7 @@ public struct PlayerShellView: View {
                         .onChanged { value in handleDragChanged(value.translation) }
                         .onEnded { value in handleDragEnded(value.translation) }
                 )
+                .accessibilityIdentifier(LBAccessibilityID.playerVideoSurface)
 
             // Mode-branched chrome (design screens.jsx「VOD vs LIVE switches here」):
             //   UPCOMING → nothing drawn here (the UpcomingCountdownView background IS the
@@ -804,6 +805,8 @@ public struct PlayerShellView: View {
         .onChange(of: model.announceText) { text in
             onHasAnnounceChange?(!text.isEmpty)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.playerShell)
     }
 
     /// Forward a side-rail tap to its turnkey destination (TK-3). Every kind is now

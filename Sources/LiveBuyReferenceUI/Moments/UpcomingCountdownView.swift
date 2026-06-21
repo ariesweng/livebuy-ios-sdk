@@ -66,6 +66,8 @@ public struct UpcomingCountdownView: View {
             .shadow(color: Color.black.opacity(0.55), radius: 10, x: 0, y: 2)
             .padding(24)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.momentCountdownRoot)
     }
 
     private var coverURL: URL? {

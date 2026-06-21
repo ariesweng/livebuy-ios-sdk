@@ -64,6 +64,8 @@ public struct ContactMerchantModalView: View {
             Color.black.opacity(0.55)
                 .edgesIgnoringSafeArea(.all)
                 .onTapGesture { onDismiss?() }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.contactScrim)
 
             // Centered alert card (LBPAlertModal): title + body + horizontal 2-button row.
             VStack(spacing: 0) {
@@ -93,6 +95,8 @@ public struct ContactMerchantModalView: View {
             .shadow(color: Color.black.opacity(0.3), radius: 30, x: 0, y: 20)
             .padding(.horizontal, 36)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.contactModal)
     }
 
     // MARK: - Horizontal two-button footer (LBPAlertModal row: [plain][primary])
@@ -117,6 +121,7 @@ public struct ContactMerchantModalView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.contactCancel)
 
             // Primary「確定」(LBPButton primary).
             Button(action: { onConfirm?() }) {
@@ -130,6 +135,7 @@ public struct ContactMerchantModalView: View {
                             .fill(theme.accent))
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.contactConfirm)
         }
     }
 

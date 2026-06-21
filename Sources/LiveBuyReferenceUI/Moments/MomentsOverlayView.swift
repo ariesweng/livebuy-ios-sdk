@@ -203,6 +203,8 @@ public struct MomentsOverlayView: View {
         ZStack {
             activeMoment
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.momentRoot)
     }
 
     /// The single active moment by priority, or `EmptyView` for stable playback.

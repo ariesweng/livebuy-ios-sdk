@@ -311,6 +311,8 @@ struct BottomSheetChrome<SheetContent: View>: View {
                 .edgesIgnoringSafeArea(.all)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.bottomSheetScrim)
     }
 
     private var card: some View {

@@ -202,6 +202,8 @@ public struct ProductDetailSheetView: View {
                 selectVariantPrompt
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.productDetail)
     }
 
     // MARK: - Sheet content (header + scrollable body + sticky footer)
@@ -343,6 +345,7 @@ public struct ProductDetailSheetView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .padding(10)
+        .accessibilityIdentifier(LBAccessibilityID.zoomBadge)
     }
 
     // MARK: - Compact product card (AddToCartSheet 96×96 thumb + name + price — design AddToCartSheet)
@@ -466,6 +469,7 @@ public struct ProductDetailSheetView: View {
                         .font(.system(size: 13 * theme.fontScale, weight: .semibold))
                         .foregroundColor(theme.text)
                     WrapChips(
+                        groupIndex: gi,
                         options: group.options,
                         selected: variant.selection[gi],
                         theme: theme,
@@ -504,6 +508,7 @@ public struct ProductDetailSheetView: View {
             stepButton(systemName: "minus", enabled: !isSoldOut && qty.qty > qty.min) {
                 onDec?()
             }
+            .accessibilityIdentifier(LBAccessibilityID.qtyMinus)
             Text("\(qty.qty)")
                 .font(.system(size: 16 * theme.fontScale, weight: .bold))
                 .foregroundColor(qty.qty > 0 ? theme.accent : Self.textFaint)
@@ -512,6 +517,7 @@ public struct ProductDetailSheetView: View {
             stepButton(systemName: "plus", enabled: !isSoldOut && qty.qty < qty.max) {
                 onInc?()
             }
+            .accessibilityIdentifier(LBAccessibilityID.qtyPlus)
         }
     }
 
@@ -597,6 +603,7 @@ public struct ProductDetailSheetView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .disabled(isSoldOut)
+        .accessibilityIdentifier(LBAccessibilityID.addToCartCta)
     }
 
     /// 收藏（到貨追蹤 type=1）toggle — LBPFavButton (vertical icon+label, width 56).
@@ -616,6 +623,7 @@ public struct ProductDetailSheetView: View {
             .frame(width: 56)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.favButton)
     }
 
     /// 分享 button — the design's 3-slot footer middle slot (between 收藏 and the CTA).
@@ -635,6 +643,7 @@ public struct ProductDetailSheetView: View {
             .frame(width: 56)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.shareButton)
     }
 
     /// LBPCartCTA — accent bag button with the per-session add count.
@@ -696,6 +705,8 @@ public struct ProductDetailSheetView: View {
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(theme.accent.opacity(0.08)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.addToCartRetry)
     }
 
     // MARK: - 「請選規格」prompt (LBPAlertModal / LBPCenterPopup)
@@ -742,6 +753,8 @@ public struct ProductDetailSheetView: View {
             .shadow(color: Color.black.opacity(0.3), radius: 30, x: 0, y: 20)
             .padding(.horizontal, 28)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.variantPrompt)
     }
 
     // MARK: - Hairline divider (AddToCartSheet section divider)
@@ -811,6 +824,7 @@ public struct ProductDetailSheetView: View {
 // accent-tinted when selected, neutral stroke otherwise.
 
 private struct WrapChips: View {
+    let groupIndex: Int
     let options: [String]
     let selected: Int?
     let theme: ReferenceUITheme
@@ -864,6 +878,7 @@ private struct WrapChips: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.variantChip(groupIndex, i))
     }
 }
 

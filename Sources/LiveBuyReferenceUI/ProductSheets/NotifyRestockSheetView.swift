@@ -131,6 +131,9 @@ public struct NotifyRestockSheetView: View {
                 // （rb-ios-compact-sheet-cap-and-footer）。
                 .overlay(Rectangle().fill(Self.stroke).frame(height: 1), alignment: .top)
         }
+        // E2E: the restock-notify sheet root (visual-only container).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.notifyRestockSheet)
     }
 
     // MARK: - Sheet header (NotifyRestockSheet — trailing close only, NO title)
@@ -209,6 +212,8 @@ public struct NotifyRestockSheetView: View {
             .frame(width: 24, height: 24)
         }
         .buttonStyle(PlainButtonStyle())
+        // E2E: tappable zoom badge → open the product-image lightbox (zoom-badge).
+        .accessibilityIdentifier(LBAccessibilityID.zoomBadge)
         .padding(6)
     }
 
@@ -293,6 +298,8 @@ public struct NotifyRestockSheetView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        // E2E: the 補貨通知 CTA (restock-notice-cta).
+        .accessibilityIdentifier(LBAccessibilityID.restockNoticeCta)
     }
 
     // MARK: - Decorative design tokens (literal minimal hex via Color(hex:))

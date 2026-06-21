@@ -170,12 +170,15 @@ public struct LiveBottomBarView: View {
                     // badge, design `live-chrome.jsx` ≈224), not SF `person.fill`
                     // (rb-align-nickname-icon-person-edit).
                     iconButton(action: onNickname) { PersonEditGlyph(size: Self.iconGlyphSize, color: .white) }
+                        .accessibilityIdentifier(LBAccessibilityID.livePersonEdit)
                 }
 
                 // Share draws the hand-drawn `ShareGlyph` (design `Icons.share`),
                 // not SF `square.and.arrow.up` (rb-ios-share-icon-design-align).
                 iconButton(action: onShare) { ShareGlyph(size: Self.iconGlyphSize, color: .white) }
+                    .accessibilityIdentifier(LBAccessibilityID.liveShare)
                 iconButton(symbol: Self.likeSymbol, tint: theme.accent, action: onLike)
+                    .accessibilityIdentifier(LBAccessibilityID.liveHeart)
             }
         }
         .padding(.horizontal, Self.barHPadding)
@@ -212,6 +215,7 @@ public struct LiveBottomBarView: View {
             }
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.liveBagButton)
     }
 
     private var cartBadge: some View {
@@ -242,6 +246,7 @@ public struct LiveBottomBarView: View {
             .background(Capsule().fill(Self.commentBackground))
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.liveCommentPill)
     }
 
     // MARK: - Icon button (`LBLiveBottomBar` iconBtn)

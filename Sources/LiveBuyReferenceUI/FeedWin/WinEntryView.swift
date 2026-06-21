@@ -141,6 +141,7 @@ public struct WinEntryView: View {
         // (a fresh win arriving re-draws attention). iOS-14-safe.
         .onAppear { startPulse() }
         .onChange(of: unclaimedCount) { _ in startPulse() }
+        .accessibilityIdentifier(LBAccessibilityID.winEntry)
     }
 
     /// The count chip (`LBWinEntry` badge): white background, accent text, 2pt

@@ -145,12 +145,16 @@ public struct CarouselCardView: View {
             // Replaces the VOD duration pill (kindBadge returns EmptyView for upcoming).
             if isUpcoming {
                 upcomingOverlay
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(LBAccessibilityID.cardUpcomingOverlay)
             }
 
             // Kind badge top-left: LIVE red tag, else VOD「▶ mm:ss」duration pill
             // (EmptyView for upcoming — the centre overlay is the indicator).
             kindBadge
                 .padding(6)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.cardKindBadge)
 
             // Bottom dark-glass product overlay (only when goods != nil).
             if let goods = item.goods {
@@ -179,6 +183,8 @@ public struct CarouselCardView: View {
                 coverPlaceholder
                 LoopingVideoView(url: url)
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.loopingPreview)
         } else if live, let url = coverURL {
             ZStack {
                 coverPlaceholder
@@ -277,6 +283,8 @@ public struct CarouselCardView: View {
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(Self.liveRed))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.cardLiveBadge)
     }
 
     /// VOD「▶ mm:ss」duration pill (LBPCarouselCard 110-124) over a translucent
@@ -296,6 +304,8 @@ public struct CarouselCardView: View {
         .background(
             RoundedRectangle(cornerRadius: 999)
                 .fill(Color.black.opacity(0.55)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.cardDurationPill)
     }
 
     // MARK: - Bottom dark-glass product overlay (goods != nil)

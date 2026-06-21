@@ -150,6 +150,8 @@ public struct FloatingWidgetView: View {
         // drop-shadow(0 8px 24px rgba(0,0,0,0.28)) — the floating window lifts off the
         // host content.
         .shadow(color: Self.windowShadow, radius: 12, x: 0, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.floatingWidget)
     }
 
     /// Top-right round close button (LBPFloatingWidget 398-416): a 24×24 dark-glass
@@ -170,6 +172,7 @@ public struct FloatingWidgetView: View {
             .shadow(color: Color.black.opacity(0.35), radius: 4, x: 0, y: 2)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.floatingClose)
     }
 
     // MARK: - Decorative design tokens (literal widgets.jsx values)

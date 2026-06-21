@@ -155,6 +155,8 @@ public struct ErrorScreenView: View {
             .frame(maxWidth: 320)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.momentError)
     }
 
     // MARK: - Icon badge (tinted circle + kind glyph — LBPErrorScreen icon disc)
@@ -240,6 +242,7 @@ public struct ErrorScreenView: View {
                     .fill(theme.accent))
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.momentErrorRetry)
     }
 
     /// `.outdated` primary 前往更新 — accent fill, NO retry glyph (it's an upgrade CTA,
@@ -256,6 +259,7 @@ public struct ErrorScreenView: View {
                         .fill(theme.accent))
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.momentErrorBack)
     }
 
     /// 返回 — forwards `onDismiss`. `filled` (no primary present, `.notFound`) draws the
@@ -281,6 +285,7 @@ public struct ErrorScreenView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.momentErrorBack)
     }
 
     // MARK: - Decorative design tokens (literal minimal hex via Color(hex:))

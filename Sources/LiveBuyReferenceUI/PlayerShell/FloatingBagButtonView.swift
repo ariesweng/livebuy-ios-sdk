@@ -64,6 +64,7 @@ public struct FloatingBagButtonView: View {
             }
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.playerBag)
     }
 
     /// Cart count badge (`LBPBagButton` count chip). Consistent with the rail /

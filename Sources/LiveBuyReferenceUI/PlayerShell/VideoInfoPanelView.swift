@@ -120,6 +120,8 @@ public struct VideoInfoPanelView: View {
         } footer: {
             footer
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.infoPanel)
     }
 
     // MARK: - Sheet header (LBPSheetHeader — centered title + trailing close)
@@ -194,6 +196,7 @@ public struct VideoInfoPanelView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .disabled(!enabled)
+        .accessibilityIdentifier(tab == .info ? LBAccessibilityID.infoTabDetail : LBAccessibilityID.infoTabNotice)
     }
 
     // MARK: - Content (info-tab vs notice-tab)
@@ -415,6 +418,7 @@ public struct VideoInfoPanelView: View {
             .background(RoundedRectangle(cornerRadius: 12).fill(bg))
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(kind == .primary ? LBAccessibilityID.infoPanelHome : LBAccessibilityID.infoFooterContact)
     }
 
     // MARK: - Decorative design tokens (literal minimal hex via Color(hex:))

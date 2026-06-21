@@ -147,6 +147,8 @@ public struct EndScreenView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.momentEnd)
     }
 
     // MARK: - 倒數變體 (preview card + ring + 立即觀看 / 取消)
@@ -284,6 +286,7 @@ public struct EndScreenView: View {
                                     .stroke(Self.onDarkStroke, lineWidth: 1)))
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.momentEndCancel)
 
             // 立即觀看 — accent filled button with a play glyph.
             Button(action: { onWatchNext?() }) {
@@ -302,6 +305,7 @@ public struct EndScreenView: View {
                         .fill(theme.accent))
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.momentEndWatch)
         }
         .frame(maxWidth: 320)
     }
@@ -371,6 +375,7 @@ public struct EndScreenView: View {
                         .fill(Self.onDarkFill))
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.momentEndReshuffle)
         }
         .padding(.bottom, 12)
     }
@@ -392,10 +397,13 @@ public struct EndScreenView: View {
             .padding(.vertical, 40)
         } else {
             HStack(alignment: .top, spacing: 12) {
-                ForEach(hotCards, id: \.id) { item in
+                ForEach(Array(hotCards.enumerated()), id: \.element.id) { index, item in
                     hotCard(item)
+                        .accessibilityIdentifier(LBAccessibilityID.momentHotCard(index))
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.momentEndHotRow)
         }
     }
 

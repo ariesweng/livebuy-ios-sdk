@@ -139,13 +139,14 @@ public struct CarouselRowView: View {
 
     private var strip: some View {
         HStack(alignment: .top, spacing: 12) {
-            ForEach(cards, id: \.id) { item in
+            ForEach(Array(cards.enumerated()), id: \.element.id) { index, item in
                 CarouselCardView(
                     item: item,
                     theme: theme,
                     width: cardWidth,
                     live: live,
                     onTap: { onTapVideo?(item) })
+                    .accessibilityIdentifier(LBAccessibilityID.carouselCard(index))
             }
         }
         .fixedSize(horizontal: true, vertical: false)

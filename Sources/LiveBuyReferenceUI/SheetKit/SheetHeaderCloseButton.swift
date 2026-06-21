@@ -48,5 +48,6 @@ public struct SheetHeaderCloseButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.sheetHeaderClose)
     }
 }

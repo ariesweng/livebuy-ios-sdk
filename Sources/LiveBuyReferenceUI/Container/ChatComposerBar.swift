@@ -47,7 +47,7 @@ public final class ChatComposerController: ObservableObject {
 /// The on-demand「留言...」input bar. Internal: the container composes it inside
 /// `PlayerOverlayRootView`; hosts drive it via `ChatComposerController` rather than
 /// instantiating the bar directly.
-struct ChatComposerBar: View {
+public struct ChatComposerBar: View {
 
     /// Presentation/focus state — driven by the LIVE「留言...」pill's `onComment`.
     @ObservedObject var controller: ChatComposerController
@@ -59,12 +59,23 @@ struct ChatComposerBar: View {
 
     @State private var text = ""
 
+    /// Public init — same shape as the synthesized memberwise init (so the internal
+    /// composition keeps compiling), exposed so a host / QA gallery can mount the
+    /// composer like the public reference-ui surfaces.
+    public init(controller: ChatComposerController,
+                theme: ReferenceUITheme,
+                onSend: @escaping (String) -> Void) {
+        self._controller = ObservedObject(wrappedValue: controller)
+        self.theme = theme
+        self.onSend = onSend
+    }
+
     /// Non-empty (after trimming) → the send button is enabled / return submits.
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    var body: some View {
+    public var body: some View {
         // On-demand: shown only after the design's「留言...」pill opens it. VOD has no
         // pill (side rail), so the composer never opens there.
         // QA / demo hook: launch with `SIMCTL_CHILD_LB_QA_FORCE_CHAT_BAR=1` to force the
@@ -82,6 +93,7 @@ struct ChatComposerBar: View {
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier(LBAccessibilityID.chatComposerDismiss)
                 composer
             }
         }
@@ -103,6 +115,7 @@ struct ChatComposerBar: View {
                 // Solid input field on the opaque bar (was a 0.55 translucent pill that
                 // let the video show through) — rb-ios-chat-composer-opaque-hide-bottom-bar.
                 .background(Capsule().fill(Self.inputFieldFill))
+                .accessibilityIdentifier(LBAccessibilityID.chatComposer)
 
             Button(action: send) {
                 Image(systemName: "arrow.up.circle.fill")
@@ -110,6 +123,7 @@ struct ChatComposerBar: View {
                     .foregroundColor(canSend ? theme.accent : Color.white.opacity(0.35))
             }
             .disabled(!canSend)
+            .accessibilityIdentifier(LBAccessibilityID.chatSend)
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)

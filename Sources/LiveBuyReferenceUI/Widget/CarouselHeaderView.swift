@@ -126,6 +126,7 @@ public struct CarouselHeaderView: View {
                 .lineLimit(1)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.widgetSeeMore)
     }
 
     // MARK: - Fixed localized copy (static presentation strings)

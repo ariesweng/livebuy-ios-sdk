@@ -103,6 +103,7 @@ public struct MinimizedWidgetView: View {
             pill
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.minimizedExpand)
     }
 
     // MARK: - The 96pt 9:16 pill (cover + LIVE tag + close + drag handle)
@@ -154,6 +155,8 @@ public struct MinimizedWidgetView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Self.hairline, lineWidth: 1))
         .shadow(color: Self.shadow, radius: 12, x: 0, y: 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.minimizedWidget)
     }
 
     /// 9:16 deterministic dark cover placeholder (the design's `<VideoBG>`) — a
@@ -212,6 +215,7 @@ public struct MinimizedWidgetView: View {
             .frame(width: 20, height: 20)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.minimizedClose)
     }
 
     // MARK: - Drag-handle hint (bottom center, decorative)

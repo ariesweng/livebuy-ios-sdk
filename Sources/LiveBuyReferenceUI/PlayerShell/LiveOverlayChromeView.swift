@@ -185,6 +185,7 @@ public struct LiveOverlayChromeView: View {
                             announceBanner
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .accessibilityIdentifier(LBAccessibilityID.announceBanner)
                     }
                     Spacer(minLength: 0)
                     pinnedCardCarousel
@@ -222,6 +223,7 @@ public struct LiveOverlayChromeView: View {
                     pinnedCard(product)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .accessibilityIdentifier(LBAccessibilityID.pinnedCard)
             }
             // 水平 swipe 切頁（方向 gate：僅在水平位移 > 垂直位移時切頁；垂直交給外層上下換片）。
             // `highPriorityGesture` minDistance 10 讓水平拖曳勝過卡片 Button / 外層手勢。單卡時 no-op。
@@ -237,6 +239,8 @@ public struct LiveOverlayChromeView: View {
                         }
                     }
             )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.pinnedCarousel)
         }
     }
 
@@ -251,6 +255,7 @@ public struct LiveOverlayChromeView: View {
                     .frame(width: 6, height: 6)
                     .contentShape(Rectangle().inset(by: -7))
                     .onTapGesture { pinnedIndex = idx }
+                    .accessibilityIdentifier(LBAccessibilityID.livePinnedDot(idx))
             }
         }
     }

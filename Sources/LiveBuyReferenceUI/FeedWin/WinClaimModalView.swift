@@ -118,6 +118,8 @@ public struct WinClaimModalView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture { onDismiss?() }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.winClaimScrim)
             card
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -152,6 +154,8 @@ public struct WinClaimModalView: View {
         .background(theme.background)
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .shadow(color: Color.black.opacity(0.35), radius: 32, x: 0, y: 24)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.winClaimSheet)
     }
 
     // MARK: - Top-right close circle (LBWinSheet close-only header)
@@ -167,6 +171,7 @@ public struct WinClaimModalView: View {
             .frame(width: 28, height: 28)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.winClaimClose)
     }
 
     // MARK: - Confetti (LBWinSheet — 22 static fan-out squares behind the badge)
@@ -307,6 +312,8 @@ public struct WinClaimModalView: View {
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Self.successColor.opacity(0.10)))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.winClaimResultBanner)
         } else {
             // Failure (retryable).
             HStack(spacing: 8) {
@@ -325,6 +332,8 @@ public struct WinClaimModalView: View {
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(theme.accent.opacity(0.08)))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.winClaimResultBanner)
         }
     }
 
@@ -347,6 +356,7 @@ public struct WinClaimModalView: View {
                             .fill(theme.accent))
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.winClaimPrimary)
 
             Button(action: { onDismiss?() }) {
                 Text(Self.laterLabel)
@@ -356,6 +366,7 @@ public struct WinClaimModalView: View {
                     .padding(.vertical, 10)
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityIdentifier(LBAccessibilityID.winClaimSecondary)
         }
     }
 

@@ -163,6 +163,8 @@ public struct VideoShopGridView: View {
             content(containerWidth: containerWidth)
                 .frame(maxWidth: .infinity, alignment: .top)
                 .background(theme.background)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.widgetGrid)
         } else {
             // GeometryReader makes the 2-column grid FOLLOW the live embed width — a host
             // page, an iPad column, or a host-controlled embed need not be 360pt wide, and
@@ -177,6 +179,8 @@ public struct VideoShopGridView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .background(theme.background)
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.widgetGrid)
         }
     }
 
@@ -202,7 +206,7 @@ public struct VideoShopGridView: View {
         let cw = cellWidth(forContainerWidth: containerWidth)
         return VStack(spacing: Self.gridGap) {
             ForEach(rows.indices, id: \.self) { rowIndex in
-                gridRow(rows[rowIndex], cellWidth: cw)
+                gridRow(rows[rowIndex], rowIndex: rowIndex, cellWidth: cw)
             }
         }
     }
@@ -212,15 +216,16 @@ public struct VideoShopGridView: View {
     /// invisible spacer column so the row keeps the 2-col rhythm. REUSES the shared
     /// `CarouselCardView` primitive (never re-draws a card).
     @ViewBuilder
-    private func gridRow(_ row: [LBVideoItem], cellWidth: CGFloat) -> some View {
+    private func gridRow(_ row: [LBVideoItem], rowIndex: Int, cellWidth: CGFloat) -> some View {
         HStack(alignment: .top, spacing: Self.gridGap) {
-            ForEach(row, id: \.id) { item in
+            ForEach(Array(row.enumerated()), id: \.element.id) { colIndex, item in
                 CarouselCardView(
                     item: item,
                     theme: theme,
                     width: cellWidth,
                     live: live,
                     onTap: { onTapVideo?(item) })
+                    .accessibilityIdentifier(LBAccessibilityID.gridCard(rowIndex * 2 + colIndex))
             }
             // Keep the 2-col grid rhythm when the final row has a single (odd) cell.
             if row.count == 1 {
@@ -282,6 +287,8 @@ public struct VideoShopGridView: View {
                 Text(Self.endOfListLabel)
                     .font(.system(size: 12 * theme.fontScale))
                     .foregroundColor(theme.text.opacity(0.5))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(LBAccessibilityID.gridEndLabel)
             }
             Spacer(minLength: 0)
         }
@@ -300,6 +307,7 @@ public struct VideoShopGridView: View {
                 .foregroundColor(theme.accent)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.gridLoadMoreFooter)
     }
 
     // MARK: - Layout tokens (LBPVideoShop literal spacing)

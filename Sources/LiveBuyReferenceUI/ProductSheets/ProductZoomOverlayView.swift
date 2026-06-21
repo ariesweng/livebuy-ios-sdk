@@ -84,6 +84,10 @@ public struct ProductZoomOverlayView: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .onAppear { withAnimation(.easeOut(duration: 0.2)) { shown = true } }
+        // E2E: the full-frame zoom overlay/backdrop root (visual-only container;
+        // the dim backdrop tap-to-close Button is a child).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.zoomOverlay)
     }
 
     // MARK: - Backdrop (tap to close)
@@ -113,6 +117,8 @@ public struct ProductZoomOverlayView: View {
             .contentShape(Rectangle())
             .onTapGesture { toggleZoom() }
             .gesture(dragGesture)
+            // E2E: the zoomable product image (image-zoom-image).
+            .accessibilityIdentifier(LBAccessibilityID.imageZoomImage)
     }
 
     /// The product photo — gradient + monogram placeholder, with the real image overlaid
@@ -176,6 +182,8 @@ public struct ProductZoomOverlayView: View {
                     .frame(width: 36, height: 36)
                 }
                 .buttonStyle(PlainButtonStyle())
+                // E2E: the top-right zoom close button (zoom-close).
+                .accessibilityIdentifier(LBAccessibilityID.zoomClose)
                 .padding(.top, 14)
                 .padding(.trailing, 14)
             }

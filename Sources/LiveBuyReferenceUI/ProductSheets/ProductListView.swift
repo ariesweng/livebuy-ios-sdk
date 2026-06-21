@@ -209,7 +209,12 @@ public struct ProductListView: View {
                         Spacer(minLength: 0)
                     }
                 )
+                // E2E: bottom 查看購物車 CTA footer (cart-cta-footer).
+                .accessibilityIdentifier(LBAccessibilityID.cartCtaFooter)
         }
+        // E2E: the product list drawer root (visual-only container).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.productList)
     }
 
     // MARK: - Sheet header (LBPSheetHeader / ProductListSheet — search two-state)
@@ -243,6 +248,8 @@ public struct ProductListView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
+            // E2E: tap to open/trigger search (product-search-button).
+            .accessibilityIdentifier(LBAccessibilityID.productSearchButton)
 
             Text(headerTitle)
                 .font(.system(size: 15 * theme.fontScale, weight: .bold))
@@ -270,6 +277,8 @@ public struct ProductListView: View {
                     .font(.system(size: 14 * theme.fontScale))
                     .foregroundColor(theme.text)
                     .disableAutocorrection(true)
+                    // E2E: the search input field (sheet-search-field).
+                    .accessibilityIdentifier(LBAccessibilityID.sheetSearchField)
                 if !query.isEmpty {
                     Button(action: { query = "" }) {
                         ZStack {
@@ -281,6 +290,8 @@ public struct ProductListView: View {
                         .frame(width: 18, height: 18)
                     }
                     .buttonStyle(PlainButtonStyle())
+                    // E2E: clear the search query (sheet-search-clear).
+                    .accessibilityIdentifier(LBAccessibilityID.sheetSearchClear)
                 }
             }
             .padding(.horizontal, 14)
@@ -295,6 +306,8 @@ public struct ProductListView: View {
                     .foregroundColor(theme.accent)
             }
             .buttonStyle(PlainButtonStyle())
+            // E2E: cancel/close search (sheet-search-cancel).
+            .accessibilityIdentifier(LBAccessibilityID.sheetSearchCancel)
         }
         .padding(.horizontal, 14)
         .padding(.top, 10)
@@ -335,8 +348,8 @@ public struct ProductListView: View {
             // `displayedProducts` applies the user search filter (rb-ios-product-list-search) —
             // a presentation filter only; the underlying `products` snapshot is untouched.
             VStack(spacing: 0) {
-                ForEach(displayedProducts, id: \.id) { product in
-                    productRow(product)
+                ForEach(Array(displayedProducts.enumerated()), id: \.element.id) { index, product in
+                    productRow(product, index: index)
                 }
             }
         }
@@ -357,7 +370,7 @@ public struct ProductListView: View {
     // `onShareProduct(product)` (→ host → system share with `?t=beginTime`, issue 6) —
     // both host-wired (nil → no-op for demo / snapshot, byte-identical baselines).
 
-    private func productRow(_ product: LBProduct) -> some View {
+    private func productRow(_ product: LBProduct, index: Int) -> some View {
         // 狀態標籤改吃後端結論欄 `label`（rb-ios-goods-label-unified ③，單一優先序）；label 空
         // （舊後端 / demo）經 raw fallback 仍正確 → baseline 不變。
         let statusBadge = ProductStatusBadge.resolve(product)
@@ -425,6 +438,8 @@ public struct ProductListView: View {
             // `onSeek`（issue 5）。整個 64×64 可點（`contentShape`）。snapshot 無互動 → 像素不變。
             .contentShape(Rectangle())
             .onTapGesture { onSeekToIntro?(product) }
+            // E2E: per-item product thumbnail (seek-to-intro affordance).
+            .accessibilityIdentifier(LBAccessibilityID.productRowThumb(index))
 
             // Name + price column (tap → open detail via host/core).
             Button(action: { onOpenProduct?(product) }) {
@@ -464,6 +479,8 @@ public struct ProductListView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(PlainButtonStyle())
+            // E2E: per-item name/price column → open detail (product-row-detail).
+            .accessibilityIdentifier(LBAccessibilityID.productRowDetail(index))
 
             // Trailing action group (detail · share · cart/bell).
             HStack(spacing: 8) {
@@ -474,7 +491,11 @@ public struct ProductListView: View {
                 rowOutlineGlyph(action: { onShareProduct?(product) }) {
                     ShareGlyph(size: 16, color: theme.accent)
                 }
+                // E2E: per-item share circle (product-row-share).
+                .accessibilityIdentifier(LBAccessibilityID.productRowShare(index))
                 rowCartButton(soldOut: soldOut, product: product)
+                    // E2E: per-item cart/bell circle (product-row-cart).
+                    .accessibilityIdentifier(LBAccessibilityID.productRowCart(index))
             }
         }
         .padding(.horizontal, 16)

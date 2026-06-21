@@ -119,6 +119,11 @@ public struct MiniCartView: View {
         // mini-cart peek: a fixed-width 260pt floating card (`.frame(width: 260)` — exact,
         // byte-identical baseline). VOD now-introducing card (`fullWidth`): fill the width to
         // the left (rb-ios-now-introducing-real-image-carousel, 問題 9 — container handles padding).
+        cardBody
+    }
+
+    @ViewBuilder
+    private var cardBody: some View {
         if fullWidth {
             cardButton.frame(maxWidth: .infinity)
         } else {

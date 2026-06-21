@@ -132,8 +132,12 @@ public struct ChatFeedView: View {
     private var feedBody: some View {
         if hostScrollable {
             scrollableBody
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.chatFeed)
         } else {
             staticBody
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.chatFeed)
         }
     }
 
@@ -142,6 +146,8 @@ public struct ChatFeedView: View {
     private var pinnedBanner: some View {
         if let pinned = pinned {
             PinnedMessageBanner(theme: theme, pinned: pinned)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(LBAccessibilityID.pinnedBanner)
         }
     }
 
@@ -152,8 +158,14 @@ public struct ChatFeedView: View {
             // `Spacer` pins the rows to the bottom so the NEWEST (last) row sits
             // lowest — matching the design's bottom-anchored newest-at-bottom flow.
             Spacer(minLength: 0)
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 row(for: item)
+                    // `.contain` keeps the row a single addressable container while
+                    // leaving its inline controls (eventJoinCta / saleBuy) as
+                    // separately-queryable children — without it the row id shadows
+                    // the inner button (rb-ios-e2e-feed-row-contain).
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(Self.rowAccessibilityID(for: item, index: index))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -180,8 +192,11 @@ public struct ChatFeedView: View {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: Self.rowGap) {
                             Spacer(minLength: 0)   // bottom-pin short content
-                            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                                 row(for: item)
+                                    // `.contain` — see staticBody (rb-ios-e2e-feed-row-contain).
+                                    .accessibilityElement(children: .contain)
+                                    .accessibilityIdentifier(Self.rowAccessibilityID(for: item, index: index))
                             }
                             // Zero-height bottom anchor for scrollTo(anchor: .bottom) AND the
                             // scroll-position probe: its `maxY` in the scroll coordinate space
@@ -256,10 +271,23 @@ public struct ChatFeedView: View {
             }
             .buttonStyle(.plain)
             .padding(.bottom, 6)
+            .accessibilityIdentifier(LBAccessibilityID.chatScrollToBottom)
         }
     }
 
     // MARK: - Row dispatch by LBFeedItem.kind (D-2)
+
+    /// Per-item E2E accessibility id, routed by `kind`: a `.chat` row → `chatLine`,
+    /// every activity / notification / event-join / product-sale row → `activityLine`
+    /// (the index is the feed loop offset). Pure — no side effects.
+    static func rowAccessibilityID(for item: LBFeedItem, index: Int) -> String {
+        switch item.kind {
+        case .chat:
+            return LBAccessibilityID.chatLine(index)
+        case .eventJoin, .activity, .productSale:
+            return LBAccessibilityID.activityLine(index)
+        }
+    }
 
     /// Dispatch a feed item to its row renderer by `kind`.
     @ViewBuilder
@@ -650,6 +678,7 @@ struct LBEventJoinLineRow: View {
                 .background(Capsule().fill(theme.accent))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(LBAccessibilityID.eventJoinCta)
     }
 
     /// 已參加 chip (`padding 11/5`, white 0.16 capsule, white 0.72 text) + checkmark.
@@ -664,6 +693,8 @@ struct LBEventJoinLineRow: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 5)
         .background(Capsule().fill(Color.white.opacity(0.16)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.eventJoinJoined)
     }
 
     /// 加入活動 CTA label.
@@ -888,8 +919,10 @@ struct LBProductSaleCardRow: View {
             // `.buttonStyle(.plain)` 不加任何 chrome → 與靜態 label 像素一致，只是變可點。
             Button(action: onTapBuy) { buyButtonLabel }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(LBAccessibilityID.saleBuy)
         } else {
             buyButtonLabel
+                .accessibilityIdentifier(LBAccessibilityID.saleBuy)
         }
     }
 

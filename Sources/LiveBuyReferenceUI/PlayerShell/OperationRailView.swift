@@ -113,6 +113,8 @@ public struct OperationRailView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.operationRail)
     }
 
     // MARK: - Rail items
@@ -143,6 +145,25 @@ public struct OperationRailView: View {
             .frame(width: Self.pillSize, height: Self.pillSize)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(Self.accessibilityID(for: kind))
+    }
+
+    /// Maps a rail `kind` to its E2E `accessibilityIdentifier` (registry constant).
+    /// Only `.subtitle` / `.share` / `.serviceLink` are drawn by the aligned VOD rail
+    /// (`presentationOrder`); the rest map to their matching registry id for
+    /// exhaustiveness should they ever be drawn (`.more` has no dedicated rail id →
+    /// reuses the rail-container id, but it is never drawn by this rail).
+    static func accessibilityID(for kind: LBSideRailKind) -> String {
+        switch kind {
+        case .subtitle:      return LBAccessibilityID.railSubtitle
+        case .share:         return LBAccessibilityID.railShare
+        case .serviceLink:   return LBAccessibilityID.railService
+        case .goods:         return LBAccessibilityID.railGoods
+        case .chat:          return LBAccessibilityID.railComment
+        case .like:          return LBAccessibilityID.railLike
+        case .guestNameEdit: return LBAccessibilityID.livePersonEdit
+        case .more:          return LBAccessibilityID.operationRail
+        }
     }
 
     // MARK: - Kind → SF Symbol mapping

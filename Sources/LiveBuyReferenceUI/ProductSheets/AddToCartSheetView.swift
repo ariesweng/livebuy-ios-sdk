@@ -98,6 +98,10 @@ public struct AddToCartSheetView: View {
             onOpenCart: onOpenCart,
             onDismiss: onDismiss,
             onZoomImage: onZoomImage)
+        // E2E: the compact add-to-cart sheet root (visual-only container; the
+        // CTA / retry affordances live inside the wrapped ProductDetailSheetView).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.addToCartSheet)
     }
 }
 
