@@ -86,6 +86,10 @@ public struct ProductDetailSheetView: View {
     public let needsVariantSelection: Bool
     /// Add-to-cart failure flag (`DefaultPlayerTemplate.addToCartFailed`). Read-only.
     public let addToCartFailed: Bool
+    /// Add-to-cart「請求進行中」flag (`addToCartInFlight`, cart-add-loading-state). When true the
+    /// CTA shows a spinner +「加入中…」(keeping the accent fill) and the qty stepper / variant
+    /// chips lock. Read-only; default false → snapshot-neutral.
+    public let addToCartInFlight: Bool
     /// 收藏（到貨追蹤 type=1）旗標（`DefaultGoodsTracking.awaitEnabled(for: goodsGpn)`）. Read-only.
     public let faved: Bool
     /// Presentation mode (`.detail` browse vs `.addToCart` compact purchase). Read-only.
@@ -139,6 +143,7 @@ public struct ProductDetailSheetView: View {
         cartCount: Int,
         needsVariantSelection: Bool,
         addToCartFailed: Bool,
+        addToCartInFlight: Bool = false,
         faved: Bool = false,
         presentation: Presentation = .detail,
         live: Bool = false,
@@ -161,6 +166,7 @@ public struct ProductDetailSheetView: View {
         self.cartCount = cartCount
         self.needsVariantSelection = needsVariantSelection
         self.addToCartFailed = addToCartFailed
+        self.addToCartInFlight = addToCartInFlight
         self.faved = faved
         self.presentation = presentation
         self.live = live
@@ -473,6 +479,7 @@ public struct ProductDetailSheetView: View {
                         options: group.options,
                         selected: variant.selection[gi],
                         theme: theme,
+                        disabled: addToCartInFlight,
                         onSelect: { oi in onSelectVariant?(gi, oi) })
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -505,7 +512,7 @@ public struct ProductDetailSheetView: View {
     /// LBPQtyStepper: `-`  value  `+`. Disabled entirely when sold out.
     private var qtyStepper: some View {
         HStack(spacing: 10) {
-            stepButton(systemName: "minus", enabled: !isSoldOut && qty.qty > qty.min) {
+            stepButton(systemName: "minus", enabled: !isSoldOut && qty.qty > qty.min && !addToCartInFlight) {
                 onDec?()
             }
             .accessibilityIdentifier(LBAccessibilityID.qtyMinus)
@@ -514,7 +521,7 @@ public struct ProductDetailSheetView: View {
                 .foregroundColor(qty.qty > 0 ? theme.accent : Self.textFaint)
                 .frame(minWidth: 22)
                 .multilineTextAlignment(.center)
-            stepButton(systemName: "plus", enabled: !isSoldOut && qty.qty < qty.max) {
+            stepButton(systemName: "plus", enabled: !isSoldOut && qty.qty < qty.max && !addToCartInFlight) {
                 onInc?()
             }
             .accessibilityIdentifier(LBAccessibilityID.qtyPlus)
@@ -583,26 +590,36 @@ public struct ProductDetailSheetView: View {
     /// Primary 加入購物車 CTA (LBPButton primary). DISABLED when sold out (qty.max == 0)
     /// — disabled fill = strokeStrong (mirrors LBPButton's disabled style).
     private var addToCartButton: some View {
-        Button(action: { guard !isSoldOut else { return }; onAddToCart?() }) {
+        Button(action: { guard !isSoldOut && !addToCartInFlight else { return }; onAddToCart?() }) {
             HStack(spacing: 8) {
-                // glyph size 18 對齊補貨 CTA bell glyph 與設計 `LBPButton` `Icons size 18`，
-                // 使加購 CTA 與補貨 CTA 等高（rb-ios-product-sheet-detail-polish 問題 2）。
-                Image(systemName: "cart")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-                Text(Self.addToCartLabel)
-                    .font(.system(size: 15 * theme.fontScale, weight: .bold))
-                    .foregroundColor(.white)
+                if addToCartInFlight {
+                    // 請求中（cart-add-loading-state）：spinner 取代 cart glyph、文字「加入中…」、
+                    // 背景仍維持 accent（不退灰），對齊設計 `LBPButton.loading` / `LBPSpinner`。
+                    SpinnerRingView(size: 18, lineWidth: 2, color: .white)
+                    Text(Self.addingLabel)
+                        .font(.system(size: 15 * theme.fontScale, weight: .bold))
+                        .foregroundColor(.white)
+                } else {
+                    // glyph size 18 對齊補貨 CTA bell glyph 與設計 `LBPButton` `Icons size 18`，
+                    // 使加購 CTA 與補貨 CTA 等高（rb-ios-product-sheet-detail-polish 問題 2）。
+                    Image(systemName: "cart")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text(Self.addToCartLabel)
+                        .font(.system(size: 15 * theme.fontScale, weight: .bold))
+                        .foregroundColor(.white)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .background(
                 // 統一按鈕圓角 → theme.cornerRadius（= 設計稿 LBPButton radius 12，rb-ios-button-corner-radius-unify）。
+                // in-flight 維持 accent（只有售完退灰）→ 對齊設計「loading 保品牌色」。
                 RoundedRectangle(cornerRadius: theme.cornerRadius)
                     .fill(isSoldOut ? Self.strokeStrong : theme.accent))
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(isSoldOut)
+        .disabled(isSoldOut || addToCartInFlight)
         .accessibilityIdentifier(LBAccessibilityID.addToCartCta)
     }
 
@@ -791,6 +808,9 @@ public struct ProductDetailSheetView: View {
     static let stockCaptionPrefix = "只剩庫存 "
     static let stockCaptionSuffix = " 組"
     static let addToCartLabel = "加入購物車"
+    /// CTA label while an addcart request is in flight (cart-add-loading-state). Design
+    /// `LBPButton.loading` fallback「加入中…」.
+    static let addingLabel = "加入中…"
     static let viewCartLabel = "查看購物車"
     static let favLabel = "收藏"
     static let favedLabel = "已收藏"
@@ -828,6 +848,9 @@ private struct WrapChips: View {
     let options: [String]
     let selected: Int?
     let theme: ReferenceUITheme
+    /// Locked while an addcart request is in flight (cart-add-loading-state) — chips dim and
+    /// stop accepting taps so the payload can't change mid-send. Default false → unchanged.
+    var disabled: Bool = false
     let onSelect: (Int) -> Void
 
     /// Chips per row — fixed so the layout is deterministic (no GeometryReader,
@@ -845,6 +868,7 @@ private struct WrapChips: View {
                 }
             }
         }
+        .opacity(disabled ? 0.5 : 1)
     }
 
     /// Index rows, chunked `perRow` wide (pure).
@@ -878,6 +902,7 @@ private struct WrapChips: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(disabled)
         .accessibilityIdentifier(LBAccessibilityID.variantChip(groupIndex, i))
     }
 }

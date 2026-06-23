@@ -128,6 +128,12 @@ public final class ProductSheetsModel: ObservableObject {
     /// (cart-needs-login-gate).
     @Published public private(set) var addToCartNeedsLogin: Bool
 
+    /// Add-to-cart「請求進行中」flag (`DefaultPlayerTemplate.addToCartInFlight`,
+    /// cart-add-loading-state-template) — set true while an addcart request is in
+    /// flight, false on any outcome. Drives the CTA loading state (spinner +「加入中…」,
+    /// locked stepper / variant). Orthogonal to `addToCartFailed` / `addToCartNeedsLogin`.
+    @Published public private(set) var addToCartInFlight: Bool
+
     // MARK: - Live binding
 
     /// The bound template, when constructed from a live player. nil for demo /
@@ -176,7 +182,8 @@ public final class ProductSheetsModel: ObservableObject {
             cartCount: t.cartCTA.state.count,
             needsVariantSelection: t.needsVariantSelection,
             addToCartFailed: t.addToCartFailed,
-            addToCartNeedsLogin: t.addToCartNeedsLogin
+            addToCartNeedsLogin: t.addToCartNeedsLogin,
+            addToCartInFlight: t.addToCartInFlight
         )
     }
 
@@ -205,7 +212,8 @@ public final class ProductSheetsModel: ObservableObject {
         cartCount: Int = 0,
         needsVariantSelection: Bool = false,
         addToCartFailed: Bool = false,
-        addToCartNeedsLogin: Bool = false
+        addToCartNeedsLogin: Bool = false,
+        addToCartInFlight: Bool = false
     ) {
         self.products = products
         self.introducingProductId = introducingProductId
@@ -220,6 +228,7 @@ public final class ProductSheetsModel: ObservableObject {
         self.needsVariantSelection = needsVariantSelection
         self.addToCartFailed = addToCartFailed
         self.addToCartNeedsLogin = addToCartNeedsLogin
+        self.addToCartInFlight = addToCartInFlight
     }
 
     deinit {
@@ -249,6 +258,7 @@ public final class ProductSheetsModel: ObservableObject {
         needsVariantSelection = t.needsVariantSelection
         addToCartFailed = t.addToCartFailed
         addToCartNeedsLogin = t.addToCartNeedsLogin
+        addToCartInFlight = t.addToCartInFlight
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)

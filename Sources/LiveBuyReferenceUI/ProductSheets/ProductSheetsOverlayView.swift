@@ -224,6 +224,29 @@ public struct ProductSheetsOverlayView: View {
     /// then re-sets the flag) and re-presents (cart-needs-login-gate).
     @State private var cartLoginGatePresented = false
 
+    /// Add-to-cart success toast presentation (rb-ios-cart-add-success-toast). A LOCAL
+    /// transient flag (NOT a model snapshot): set true by `showCartToast` on a `cartCount`
+    /// rise, auto-cleared ~1.8s later. Default false → snapshot-neutral (baselines
+    /// byte-identical).
+    @State private var cartToastVisible = false
+
+    /// Pending auto-dismiss work for the success toast — cancelled + re-armed on each rise
+    /// so rapid successive successes EXTEND the toast rather than truncate it.
+    @State private var cartToastDismiss: DispatchWorkItem?
+
+    /// Last observed `model.cartCount`, seeded in `onAppear` so the FIRST real rise (not the
+    /// bind-time value) flashes the toast. `-1` = not yet seeded.
+    @State private var lastCartCount: Int = -1
+
+    /// CTA loading visibility with a ~320ms anti-flicker floor (cart-add-loading-state D-2):
+    /// mirrors `model.addToCartInFlight` but holds the spinner for a minimum display so a fast
+    /// resolve (esp. a synchronous dedup) doesn't strobe. Passed to the sheets as their
+    /// `addToCartInFlight`. Default false → snapshot-neutral.
+    @State private var cartLoadingVisible = false
+    @State private var cartLoadingDismiss: DispatchWorkItem?
+    /// Monotonic clock stamp of when loading began, for the min-display floor.
+    @State private var cartLoadingStart: DispatchTime?
+
     public init(
         model: ProductSheetsModel,
         theme: ReferenceUITheme,
@@ -275,11 +298,33 @@ public struct ProductSheetsOverlayView: View {
                     },
                     onDismiss: { cartLoginGatePresented = false })
             }
+            // Add-to-cart success toast (rb-ios-cart-add-success-toast) — flashed ~1.8s above
+            // the sheet stack when an add SUCCEEDS (`model.cartCount` ticks up). PURE
+            // confirmation: bottom-aligned over the player frame, slides up (`lbp-toast-in`),
+            // never eats taps (`allowsHitTesting(false)`). Default-hidden → snapshot-neutral.
+            if cartToastVisible {
+                CartToastView(theme: theme)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 96)
+                    .allowsHitTesting(false)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(100)
+            }
         }
         // Present the gate on the template flag's false→true transition (iOS-14-safe
         // `onChange`; mirrors `syncPresentation`). A local flag — not direct gating —
         // so 稍後再說 can dismiss without reference-ui resetting the template flag.
         .presentCartLoginGate(on: model.addToCartNeedsLogin, into: $cartLoginGatePresented)
+        // Seed the cartCount watermark once on appear so the first genuine rise (not the
+        // bind-time value) flashes the toast (D-1).
+        .onAppear { if lastCartCount < 0 { lastCartCount = model.cartCount } }
+        // Flash the success toast on each cartCount rise (success → incrementOnAdd). dedup /
+        // needsLogin / failure leave the count unchanged → no toast (D-1 known limitation).
+        .flashCartToast(onCartCount: model.cartCount, last: $lastCartCount) { showCartToast() }
+        // Mirror the template's addToCartInFlight into a floored loading flag (anti-flicker; a
+        // synchronous dedup resolves within a frame). The sheets read `cartLoadingVisible` as
+        // their CTA loading state (cart-add-loading-state D-2).
+        .syncCartLoading(on: model.addToCartInFlight) { syncCartLoading($0) }
     }
 
     /// The product sheet-stack proper (mini-cart peek + the `lbBottomSheet` list / detail /
@@ -409,6 +454,7 @@ public struct ProductSheetsOverlayView: View {
                 cartCount: model.cartCount,
                 needsVariantSelection: model.needsVariantSelection,
                 addToCartFailed: model.addToCartFailed,
+                addToCartInFlight: cartLoadingVisible,
                 live: live,
                 onSelectVariant: { groupIndex, optionIndex in
                     model.selectVariant(groupIndex: groupIndex, optionIndex: optionIndex)
@@ -429,6 +475,7 @@ public struct ProductSheetsOverlayView: View {
                 cartCount: model.cartCount,
                 needsVariantSelection: model.needsVariantSelection,
                 addToCartFailed: model.addToCartFailed,
+                addToCartInFlight: cartLoadingVisible,
                 // 收藏（到貨追蹤 type=1）— model resolves goodsGpn from productId, same
                 // as the restock-notify above. The await switch reconciled here from
                 // the retired family-6 dual-switch sheet (design 2026-06-06).
@@ -460,6 +507,75 @@ public struct ProductSheetsOverlayView: View {
     // `LBProduct.goodsGpn` via its `products` snapshot (`resolveGoodsGpn`) before
     // hitting `goodsTracking` — keying off `productId` directly would query/toggle
     // the wrong subscription at runtime.
+
+    /// Flash the add-to-cart success toast and (re)schedule its ~1.8s auto-dismiss. Mirrors
+    /// `PlayerShellView.showMuteToast`: cancel any pending dismiss, animate in (the
+    /// `.transition` slides the pill up), re-arm the dismiss so a rapid second success
+    /// extends rather than truncates. @State setters are nonmutating, so this stays a plain
+    /// method.
+    private func showCartToast() {
+        cartToastDismiss?.cancel()
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) {
+            cartToastVisible = true
+        }
+        let work = DispatchWorkItem {
+            withAnimation(.easeIn(duration: 0.18)) { cartToastVisible = false }
+        }
+        cartToastDismiss = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: work)
+    }
+
+    /// Drive the floored CTA loading flag from the template's `addToCartInFlight`
+    /// (cart-add-loading-state D-2). Going in-flight shows immediately; leaving holds the
+    /// spinner until a ~320ms minimum so a fast resolve (synchronous dedup) doesn't strobe.
+    private func syncCartLoading(_ inFlight: Bool) {
+        cartLoadingDismiss?.cancel()
+        if inFlight {
+            cartLoadingStart = DispatchTime.now()
+            cartLoadingVisible = true
+            return
+        }
+        let elapsed = cartLoadingStart.map {
+            DispatchTime.now().uptimeNanoseconds &- $0.uptimeNanoseconds
+        } ?? CartLoadingFloor.minDisplayNanos
+        let remaining = CartLoadingFloor.remainingHoldNanos(elapsedNanos: elapsed)
+        if remaining == 0 {
+            cartLoadingVisible = false
+        } else {
+            let work = DispatchWorkItem { cartLoadingVisible = false }
+            cartLoadingDismiss = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + .nanoseconds(Int(remaining)), execute: work)
+        }
+    }
+}
+
+// MARK: - CartToastTrigger — pure rise-detection for the success toast
+//
+// The add-to-cart success toast (rb-ios-cart-add-success-toast, D-1) flashes ONLY on a
+// STRICT increase of `cartCount` past a seeded watermark (`last >= 0`, set in the
+// container's `onAppear`). `cartCount` rises only via `cartCTA.incrementOnAdd()` (add
+// success); dedup / needsLogin / failure leave it unchanged → never flash. Extracted as a
+// pure function so the trigger rule is unit-testable without a SwiftUI host
+// (unit-test-discipline).
+enum CartToastTrigger {
+    static func shouldFlash(newCount: Int, lastCount: Int) -> Bool {
+        lastCount >= 0 && newCount > lastCount
+    }
+}
+
+// MARK: - CartLoadingFloor — pure anti-flicker min-display for the CTA loading (D-2)
+//
+// The add-to-cart CTA loading mirrors the template's `addToCartInFlight`, but a fast resolve
+// (especially a synchronous dedup) would flip it true→false within a frame and strobe the
+// spinner. The floor holds the spinner for a ~320ms minimum (design `ADD_TO_CART_MIN_MS`).
+// Pure so the hold computation is unit-testable without a SwiftUI host.
+enum CartLoadingFloor {
+    static let minDisplayNanos: UInt64 = 320_000_000
+    /// Remaining hold (nanos) before the spinner may hide, given elapsed nanos since it began.
+    /// `0` = hide immediately (already shown ≥ the floor).
+    static func remainingHoldNanos(elapsedNanos: UInt64) -> UInt64 {
+        elapsedNanos >= minDisplayNanos ? 0 : minDisplayNanos - elapsedNanos
+    }
 }
 
 // MARK: - iOS-14-safe presentation sync helper
@@ -495,6 +611,35 @@ private extension View {
             self.onChange(of: needsLogin) { newValue in
                 if newValue { binding.wrappedValue = true }
             }
+        } else {
+            self
+        }
+    }
+
+    /// Flash the add-to-cart success toast on a `cartCount` RISE (cart-add-tier2 success →
+    /// `cartCTA.incrementOnAdd()`). Mirrors `presentCartLoginGate`: iOS-14-safe `onChange`;
+    /// only a strict increase past the last observed count fires (so bind-time / non-add
+    /// refreshes never flash). `last` is seeded by the call site's `onAppear`; dedup /
+    /// needsLogin / failure leave the count unchanged so they never trigger (D-1).
+    @ViewBuilder
+    func flashCartToast(onCartCount cartCount: Int, last: Binding<Int>, _ onRise: @escaping () -> Void) -> some View {
+        if #available(iOS 14.0, *) {
+            self.onChange(of: cartCount) { newCount in
+                defer { last.wrappedValue = newCount }
+                guard CartToastTrigger.shouldFlash(newCount: newCount, lastCount: last.wrappedValue) else { return }
+                onRise()
+            }
+        } else {
+            self
+        }
+    }
+
+    /// iOS-14-safe mirror of the template's `addToCartInFlight` into the container's floored
+    /// loading flag (cart-add-loading-state D-2). Mirrors `presentCartLoginGate` / `flashCartToast`.
+    @ViewBuilder
+    func syncCartLoading(on inFlight: Bool, _ onChange: @escaping (Bool) -> Void) -> some View {
+        if #available(iOS 14.0, *) {
+            self.onChange(of: inFlight) { onChange($0) }
         } else {
             self
         }

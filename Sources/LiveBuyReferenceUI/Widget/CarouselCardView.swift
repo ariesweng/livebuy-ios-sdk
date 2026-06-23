@@ -651,7 +651,12 @@ struct RemoteStillImageView: UIViewRepresentable {
         private var task: URLSessionDataTask?
         private var loadedURL: URL?
 
-        func load(url: URL, into imageView: UIImageView) {
+        func load(url rawURL: URL, into imageView: UIImageView) {
+            // Single http→https upgrade point for ALL remote images (every call site routes
+            // through RemoteStillImageView). A cleartext `http` pic would be blocked by iOS
+            // ATS and never load → placeholder; the LiveBuy host serves the same path over
+            // TLS. https / non-http schemes pass through unchanged (ReferenceUIImageURL).
+            let url = rawURL.lbHTTPSUpgraded
             guard url != loadedURL else { return }
             loadedURL = url
             task?.cancel()

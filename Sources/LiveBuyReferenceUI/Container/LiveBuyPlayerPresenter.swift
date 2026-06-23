@@ -50,6 +50,21 @@ public func shouldReopenOnVideoChange(newVideoId: String?, isMinimized: Bool) ->
     newVideoId != nil && isMinimized
 }
 
+/// Whether `onChange(of: video?.id)` SHALL auto-restore full-screen on a `video` id change.
+/// True ONLY for a HOST-driven swap (`isInternalSwitch == false`) that
+/// `shouldReopenOnVideoChange` accepts (a new, non-nil video while minimized). An in-player
+/// in-place switch we caused (`isInternalSwitch == true`) MUST NOT auto-restore — it keeps the
+/// current minimize/full phase and only re-binds the shown video (D-2). Pure so the gate is
+/// unit-testable without SwiftUI (internal-testability).
+func shouldAutoRestoreOnBindingChange(
+    isInternalSwitch: Bool,
+    newVideoId: String?,
+    isMinimized: Bool
+) -> Bool {
+    guard !isInternalSwitch else { return false }
+    return shouldReopenOnVideoChange(newVideoId: newVideoId, isMinimized: isMinimized)
+}
+
 /// Clamp the floating preview card's committed-plus-live drag offset so the card can be
 /// dragged to reposition but never pushed off-screen. The card is anchored bottom-right
 /// (`alignment: .bottomTrailing` + `bottomTrailingInset` padding), so its resting offset is
@@ -122,6 +137,13 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
     /// drag offset so the card can't be dragged fully off-screen. nil until first measured.
     @State private var floatingCardSize: CGSize = .zero
 
+    /// Latch distinguishing a `video` id change WE caused (an in-player in-place switch —
+    /// swipe / hot-pick / watch-next, synced via the composed `onVideoSwitched`) from a
+    /// HOST-driven swap (the host setting the binding to another video). Set right before we
+    /// mutate `video` on an internal switch; consumed (and cleared) in `onChange(of: video?.id)`
+    /// so an internal switch does NOT trip the host-swap auto-restore (D-2). False at rest.
+    @State private var isInternalSwitch: Bool = false
+
     public func body(content: Content) -> some View {
         content
             // KEEP-ALIVE full player overlay (issue 5): the player is composed as a PERSISTENT
@@ -143,7 +165,17 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
             // `isMinimized` via the card's own onTap), so it never trips this. Reset the drag
             // offset so the new video re-minimizes at the default corner.
             .onChange(of: video?.id) { newId in
-                if shouldReopenOnVideoChange(newVideoId: newId, isMinimized: isMinimized) {
+                // An IN-PLAYER in-place switch (swipe / hot-pick / watch-next) updates `video`
+                // OURSELVES (composed `onVideoSwitched`) and latches `isInternalSwitch`. That is
+                // NOT a host-driven swap, so it MUST NOT auto-restore full-screen — it keeps the
+                // current minimize/full phase and only re-binds the shown video (D-2). Consume the
+                // latch and bail. (A host swap leaves the latch false → falls through to restore.)
+                let restore = shouldAutoRestoreOnBindingChange(
+                    isInternalSwitch: isInternalSwitch,
+                    newVideoId: newId,
+                    isMinimized: isMinimized)
+                isInternalSwitch = false   // consume the latch on every id change
+                if restore {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                         isMinimized = false
                     }
@@ -185,6 +217,25 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
             isMinimized = false
             committedOffset = .zero
             dragTranslation = .zero
+        }
+        // In-player in-place switch (swipe / hot-pick / watch-next) → re-bind `video` to the
+        // SWITCHED video as the REAL item the container resolved (id + REAL `cover` / `title`
+        // from the adjacency nav / hot / next item that drove the switch), so the floating
+        // preview card shows the switched video's REAL thumbnail — NOT a placeholder. Without
+        // this the binding stays on the ENTRY video: the keep-alive player gets reloaded back to
+        // it on the next re-render (`updateUIViewController` cover-guard mismatch) and the floating
+        // card shows the wrong (entry) thumbnail. The container fires this on every in-place switch
+        // (alongside the host's id-only `config.onVideoSwitched`, which passes through unchanged).
+        // Latch `isInternalSwitch` so `onChange(of: video?.id)` keeps the current minimize/full
+        // phase instead of treating it as a host-driven swap (D-2). Guard `item.id != current` so a
+        // same-id no-op neither re-binds nor leaks the latch (onChange wouldn't fire to clear it).
+        // Keep-alive does NOT double-load: `LiveBuyPlayer`'s coordinator already set its cover/
+        // current id to the new id before firing this, so the new `videoId` prop makes
+        // `updateUIViewController`'s cover-guard a no-op (D-4).
+        c.onVideoSwitchedItem = { item in
+            guard item.id != video?.id else { return }
+            isInternalSwitch = true
+            video = item
         }
         return c
     }

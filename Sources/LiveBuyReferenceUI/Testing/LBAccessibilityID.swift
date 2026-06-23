@@ -111,6 +111,8 @@ public enum LBAccessibilityID {
     public static let addToCartSheet = "lb_add_to_cart_sheet"
     public static let addToCartCta = "lb_add_to_cart_cta"
     public static let addToCartRetry = "lb_add_to_cart_retry"
+    /// Add-to-cart success toast (`CartToastView`, rb-ios-cart-add-success-toast).
+    public static let cartToast = "lb_cart_toast"
 
     public static let zoomBadge = "lb_zoom_badge"
     public static let zoomOverlay = "lb_zoom_overlay"

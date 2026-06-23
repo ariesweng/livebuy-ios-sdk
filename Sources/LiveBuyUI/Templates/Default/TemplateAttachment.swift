@@ -259,6 +259,10 @@ enum TemplateWiring {
             // Forward to the core public guest-name-edit exit (weak-capture vc,
             // parity with onProductTap/onError below — no retain cycle).
             guestNameEditRequester: { [weak vc] in vc?.requestGuestNameEdit() },
+            // Forward the cart CTA「openCart」to the core public `requestViewCart`
+            // exit (emit `VIEW_CART`, notification / non-navigation / no auto-PiP).
+            // productId carried from the template's current product detail.
+            viewCartRequester: { [weak vc] productId in vc?.requestViewCart(productId: productId) },
             // goods-tracking toggles delegate to the core public async endpoints
             // (headless: the template never builds an HTTP request itself). The
             // authoritative `AWAIT/NOTICE_GOODS_CHANGED` broadcasts correct the
@@ -283,7 +287,8 @@ enum TemplateWiring {
                     shopId: request.shopId,
                     goodsId: Int(request.goodsId),
                     num: request.num,
-                    specificationId: request.specificationId.flatMap { Int($0) })
+                    specificationId: request.specificationId.flatMap { Int($0) },
+                    videoId: request.videoId)
             }
         )
 

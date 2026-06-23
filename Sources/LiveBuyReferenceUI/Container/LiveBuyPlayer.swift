@@ -124,6 +124,15 @@ public struct LiveBuyPlayerConfig {
     /// in sync (e.g. a minimized preview shows the right video). Default `nil`.
     public var onVideoSwitched: ((String) -> Void)?
 
+    /// Like `onVideoSwitched`, but carries the new video as a full `LBVideoItem` — the id PLUS
+    /// the REAL `cover` / `title` resolved from the adjacency nav item (swipe) / hot item
+    /// (hot-pick) / next item (watch-next) that drove the switch. A host-bound video mirror (the
+    /// `liveBuyPlayer(video:)` minimized floating preview card's `video`) consumes this so the
+    /// card shows the SWITCHED video's REAL thumbnail — not a placeholder. Fired together with
+    /// `onVideoSwitched(id)` on every in-place switch (with an empty `cover` only in the rare
+    /// case the switch target is not an adjacency / hot / next item). Default `nil`.
+    public var onVideoSwitchedItem: ((LBVideoItem) -> Void)?
+
     /// The design that composes the overlay surfaces (D-decouple). DEFAULT: `MinimalDesign` —
     /// the existing minimal composition, pixel-for-pixel unchanged. A host supplies a custom
     /// `ReferenceUIDesign` to compose a whole different design (layout + surfaces, beyond what
@@ -271,6 +280,11 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
             coordinator?.currentVideoId = id
             coordinator?.coverVideoId = id
             config.onVideoSwitched?(id)
+            // Report the SWITCHED video as a full item carrying its REAL cover / title so a bound
+            // floating preview shows the right thumbnail. The swipe target IS the current channel's
+            // `next.first` / `prev.first` (resolved by id); empty cover only if it isn't found.
+            config.onVideoSwitchedItem?(coordinator?.switchedItemForSwipe(id: id)
+                ?? switchedVideoItem(id: id, cover: "", title: "", duration: 0, liveStatus: 1))
         }
         coordinator.productModel = ProductSheetsModel(template: template)
         coordinator.feedModel = FeedWinModel(template: template)
@@ -502,11 +516,16 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
                 if let custom = config.onWatchNext {
                     custom(player, momentsModel)
                 } else {
-                    guard let nextId = momentsModel.next.first?.id else { return }
-                    coordinator?.currentVideoId = nextId
-                    coordinator?.coverVideoId = nextId
-                    player.load(videoId: nextId)
-                    config.onVideoSwitched?(nextId)
+                    guard let next = momentsModel.next.first else { return }
+                    coordinator?.currentVideoId = next.id
+                    coordinator?.coverVideoId = next.id
+                    player.load(videoId: next.id)
+                    config.onVideoSwitched?(next.id)
+                    // Carry the next item's REAL cover / title (+ preview once backend sends it).
+                    config.onVideoSwitchedItem?(switchedVideoItem(
+                        id: next.id, cover: next.cover, title: next.title ?? "",
+                        duration: next.duration, liveStatus: player.channel?.liveStatus ?? 1,
+                        preview: next.preview))
                 }
             },
             // 熱門卡 tap → switch in place (`LBHotItem.id` is the target video id).
@@ -519,6 +538,12 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
                     coordinator?.coverVideoId = hot.id
                     player.load(videoId: hot.id)
                     config.onVideoSwitched?(hot.id)
+                    // Carry the hot item's REAL cover / title (+ preview once backend sends it)
+                    // (`LBHotItem.duration` is a formatted String, not seconds → pass 0).
+                    config.onVideoSwitchedItem?(switchedVideoItem(
+                        id: hot.id, cover: hot.cover, title: hot.title,
+                        duration: 0, liveStatus: player.channel?.liveStatus ?? 1,
+                        preview: hot.preview))
                 }
             },
             // 取消 → stop the auto-next countdown (NOT a dismiss).
@@ -560,6 +585,16 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
 
         public init() {}
 
+        /// Resolve the SWITCHED-to video's display item for a SWIPE, with its REAL cover / title,
+        /// from the CURRENT channel's adjacency nav items (at switch time that channel is still the
+        /// pre-switch one, so its `next.first` / `prev.first` ARE the swipe targets). Delegates the
+        /// pure lookup to `resolveSwipeSwitchItem`; returns nil with no channel (caller falls back).
+        func switchedItemForSwipe(id: String) -> LBVideoItem? {
+            guard let ch = player?.channel else { return nil }
+            return resolveSwipeSwitchItem(id: id, next: ch.next, prev: ch.prev,
+                                          liveStatus: ch.liveStatus)
+        }
+
         /// Forward the genuine background transition to core's existing `requestAutoPiP()`
         /// (task 4.1). `didEnterBackground` fires only on a real background (not transient
         /// interruptions), so this never over-triggers; core guards `enablePiP` + capability
@@ -582,3 +617,49 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
 // (ProductListSheet was removed — the product list now opens via the in-shell SheetKit
 //  `.lbBottomSheet` slide-up presenter driven by `ProductSheetsModel.listPresented`, not a
 //  separately-presented `UIHostingController(.pageSheet)`. rb-ios-product-list-slide-sheet.)
+
+/// Resolve a SWIPE switch target's display item from the channel's adjacency nav arrays. The
+/// swipe target is the channel's `next.first` (swipe-up) / `prev.first` (swipe-down); match by id
+/// and carry that nav item's REAL `cover` / `title` / `duration`. Returns nil when `id` is not an
+/// adjacency target (caller falls back to an empty-cover placeholder item). `prev[]` items carry
+/// no `title` (backend omits it) → "". Pure (no UIKit / VC) so the lookup is unit-testable.
+func resolveSwipeSwitchItem(id: String, next: [LBNavItem], prev: [LBNavItem],
+                            liveStatus: Int) -> LBVideoItem? {
+    guard let nav = next.first(where: { $0.id == id })
+            ?? prev.first(where: { $0.id == id }) else { return nil }
+    return switchedVideoItem(id: id, cover: nav.cover, title: nav.title ?? "",
+                             duration: nav.duration, liveStatus: liveStatus,
+                             preview: nav.preview)
+}
+
+/// Build the `LBVideoItem` reported via `onVideoSwitchedItem` after an in-place switch, from the
+/// switch target's display fields — the REAL `cover` / `title` (+ `preview` once the backend
+/// returns it) taken from the adjacency nav item (swipe) / hot item (hot-pick) / next item
+/// (watch-next) that drove the switch. So the bound floating preview card shows the switched
+/// video's REAL thumbnail — and, when `preview` is non-empty, its animated preview loop
+/// (`rb-ios-collapsible-player-track-switch` + core `nav-hot-item-preview-decode-core`). KIND is
+/// derived from `liveStatus` (`type == 2` when live, else `1`); `goods` left empty. `preview`
+/// stays "" until the backend adds it to `/sdk/video` nav / hot items, then the card animates with
+/// no further SDK change. Pure (no UIKit / I/O) so it is unit-testable.
+func switchedVideoItem(id: String, cover: String, title: String,
+                       duration: Int, liveStatus: Int, preview: String = "") -> LBVideoItem {
+    LBVideoItem(
+        id: id,
+        type: liveStatus == 1 ? 2 : 1,
+        title: title,
+        sessionName: nil,
+        cover: cover,
+        preview: preview,
+        duration: duration,
+        publishAt: "",
+        watchNum: 0,
+        pvNum: 0,
+        liveStatus: liveStatus,
+        pin: 0,
+        showPvNum: 0,
+        liveurl: "",
+        playbackurl: "",
+        previewTime: "",
+        showStock: false,
+        goods: nil)
+}

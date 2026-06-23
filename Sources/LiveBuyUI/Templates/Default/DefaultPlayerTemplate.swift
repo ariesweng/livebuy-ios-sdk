@@ -35,6 +35,14 @@ public final class DefaultPlayerTemplate {
     /// `GuestNameEditRequester` / Flutter's typedef / RN's `requestGuestNameEdit`.
     private let guestNameEditRequester: (() -> Void)?
 
+    /// 查看購物車 intent forwarder (ui-template-foundation §查看購物車意圖 passthrough).
+    /// Injected so the wiring hands the template a closure that reaches the core's
+    /// `Player.requestViewCart(productId:)` exit (emit `VIEW_CART` — notification,
+    /// non-navigation, no auto-PiP). `productId` is the current product detail's id
+    /// (detail CTA) or nil (list-bottom CTA). nil requester → `openCart` is an inert
+    /// no-op (headless-safe). EXACT parity with the `guestNameEditRequester` model.
+    private let viewCartRequester: ((String?) -> Void)?
+
     // MARK: - Host-bindable behaviour view-models (reconcile-activity-notification-contract-template)
 
     /// §1 — merged activity + chat feed (data-layer merge; host draws the rows).
@@ -184,6 +192,14 @@ public final class DefaultPlayerTemplate {
     /// attempt / sheet (re-)open. Purely additive (false by default).
     private(set) public var addToCartNeedsLogin: Bool = false
 
+    /// Add-to-cart「請求進行中」flag (cart-add-loading-state). Set true the moment
+    /// `addToCart()` actually fires an addcart request (after all guards), false on ANY
+    /// outcome (success / dedupe / failure / needs-login). Orthogonal to `addToCartFailed`
+    /// / `addToCartNeedsLogin`. Lets a host / reference-ui disable the add-to-cart CTA for
+    /// the request lifecycle (`cart-checkout`「加購按鈕 loading 綁請求生命週期」). Pixels are
+    /// reference-ui's (another change); this is the zero-pixel data layer.
+    private(set) public var addToCartInFlight: Bool = false
+
     /// 置頂留言（chat-message-kind ⑤，messages `data.top`）。由 `handlePollReceived` 從
     /// `poll.top` 設定，供 reference-ui 渲染。冪等：每輪以當前釘選狀態覆蓋，取消釘選 → nil。
     /// 預設 nil（無置頂）。
@@ -198,6 +214,11 @@ public final class DefaultPlayerTemplate {
     /// incomplete spec selection (D5 guard); cleared when a valid add is attempted
     /// or a new product detail opens. Lets the host prompt the user.
     private(set) public var needsVariantSelection: Bool = false
+
+    /// Current video id, tracked from `ingestChannel` (cart-add-tier2). Threaded
+    /// into `addToCart` → `LBCartRequest.videoId` so the core `CART_ADD_REQUEST`
+    /// carries the correct `video_id`. nil until a channel is ingested.
+    private(set) public var currentVideoId: String?
 
     /// Injected route-B add-to-cart requester (default throwing stub for headless
     /// unit tests, mirroring `DefaultGoodsTracking`'s `setAwait`/`setNotice`
@@ -222,6 +243,7 @@ public final class DefaultPlayerTemplate {
         hostOptions: LBUIOptions?,
         openInAppBrowser: InAppBrowserOpener? = nil,
         guestNameEditRequester: (() -> Void)? = nil,
+        viewCartRequester: ((String?) -> Void)? = nil,
         setAwaitGoods: ((String, Bool) -> Void)? = nil,
         setNoticeGoods: ((String, Bool) -> Void)? = nil,
         addToCartRequester: ((LBCartRequest) async throws -> LBCartResult)? = nil
@@ -229,6 +251,7 @@ public final class DefaultPlayerTemplate {
         self.player = player
         self.effectiveConfig = EffectiveConfig(sdkConfig: sdkConfig, hostOptions: hostOptions)
         self.guestNameEditRequester = guestNameEditRequester
+        self.viewCartRequester = viewCartRequester
         // Default: a throwing stub so a headless unit test that does NOT inject a
         // requester sees `addToCart()` fail cleanly (no HTTP, no count change),
         // mirroring DefaultGoodsTracking's no-op closures.
@@ -277,6 +300,14 @@ public final class DefaultPlayerTemplate {
                   let product = self.productOverlay.products.first(where: { $0.id == productId })
             else { return }
             self.openProductDetail(product)
+        }
+        // cart CTA「openCart」→ core seam `Player.requestViewCart(productId:)` via the
+        // injected `viewCartRequester` (ui-template-foundation §查看購物車意圖 passthrough).
+        // productId = current detail's id (detail CTA) or nil (list-bottom CTA → seam
+        // omits `product_id`). nil requester → inert no-op (demo / headless-safe).
+        cartCTA.openCartForwarder = { [weak self] in
+            guard let self = self else { return }
+            self.viewCartRequester?(self.productSheet.detail?.productId)
         }
         // #3 — surface backend layout keys this template version doesn't recognise.
         DefaultLayoutKeys.logUnknown(scope: "player", incoming: sdkConfig.layout?.player)
@@ -423,6 +454,10 @@ public final class DefaultPlayerTemplate {
     /// drive it with a fabricated `LBChannel` without a live load. Coalesced so a
     /// single channel ingest fires at most one onChange.
     func ingestChannel(_ ch: LBChannel) {
+        // cart-add-tier2: track the current video id from the channel-injection path
+        // so addToCart can thread it as CART_ADD_REQUEST.video_id (the template's
+        // view-model truth; mirrors player.channel without reaching into player state).
+        currentVideoId = ch.id
         coalescing {
             handleHeaderChrome(title: ch.title, hostName: ch.shop.name,
                                shopLogo: ch.shop.logo, shareUrl: ch.shareUrl)
@@ -772,6 +807,7 @@ public final class DefaultPlayerTemplate {
             needsVariantSelection = false
             addToCartFailed = false
             addToCartNeedsLogin = false
+            addToCartInFlight = false
             productSheet.openDetail(product)
             guard let detail = productSheet.detail else { return }
             variantPicker.reset(for: detail)
@@ -842,11 +878,17 @@ public final class DefaultPlayerTemplate {
             return
         }
         needsVariantSelection = false
+        // cart-add-loading-state: a request is about to fire → enter in-flight and notify so
+        // the host / reference-ui can disable the CTA for the request lifecycle. (Guards above
+        // return early without firing, so they never enter in-flight.)
+        addToCartInFlight = true
+        notifyChange()
         let request = LBCartRequest(
             shopId: player?.channel?.shop.id ?? "",
             goodsId: detail.productId,
             num: qtyStepper.qty,
-            specificationId: variantPicker.selectedSpecificationId)
+            specificationId: variantPicker.selectedSpecificationId,
+            videoId: currentVideoId ?? player?.channel?.id)
         let peek = LBMiniCartPeek(productId: detail.productId, name: detail.name,
                                   priceShow: detail.priceShow, soldOut: detail.soldOut)
         // Capture the requester before the Task so the closure stays self-contained.
@@ -856,12 +898,19 @@ public final class DefaultPlayerTemplate {
                 _ = try await requester(request)
                 await MainActor.run { [weak self] in self?.applyAddSuccess(peek: peek) }
             } catch {
-                // Branch the thrown error: the core「needs login」signal
-                // (`serverError(code:401)` for an empty `buy_no`) → needs-login;
-                // any other error → genuine failure.
-                let needsLogin = Self.isAddToCartAuthRequired(error)
+                // Branch the thrown error (cart-add-tier2): dedupe-hit
+                // (`LBError.cartAddDeduplicated`, 30s 重複加購) → 已加入 UX;
+                // 「needs login」(`serverError(code:401)` for an empty `buy_no`) →
+                // needs-login; any other error → genuine failure.
                 await MainActor.run { [weak self] in
-                    if needsLogin { self?.applyAddNeedsLogin() } else { self?.applyAddFailure() }
+                    guard let self else { return }
+                    if case LBError.cartAddDeduplicated = error {
+                        self.applyAddDeduplicated(peek: peek)
+                    } else if Self.isAddToCartAuthRequired(error) {
+                        self.applyAddNeedsLogin()
+                    } else {
+                        self.applyAddFailure()
+                    }
                 }
             }
         }
@@ -871,13 +920,30 @@ public final class DefaultPlayerTemplate {
     /// onChange (D6 — single add success = single notification).
     private func applyAddSuccess(peek: LBMiniCartPeek) {
         coalescing {
+            addToCartInFlight = false
             miniCart.setPeek(peek)
             cartCTA.incrementOnAdd()
         }
     }
 
+    /// Dedupe-hit branch (main thread, cart-add-tier2): the same product was added
+    /// within the 30s window so core skipped a duplicate addcart. Treat as「已加入
+    /// 購物車」— refresh the mini-cart peek, but DO NOT increment the CTA count
+    /// (the count was already bumped on the original add) and DO NOT set the
+    /// add-failed flag.
+    private func applyAddDeduplicated(peek: LBMiniCartPeek) {
+        // Coalesce so the peek refresh is ONE onChange (mirrors applyAddSuccess; the
+        // mini-cart sub-state notifies on its own, so an extra notifyChange would
+        // double-fire).
+        coalescing {
+            addToCartInFlight = false
+            miniCart.setPeek(peek)
+        }
+    }
+
     /// Failure branch (main thread): expose the add-failed flag, count unchanged.
     private func applyAddFailure() {
+        addToCartInFlight = false
         addToCartFailed = true
         notifyChange()
     }
@@ -886,6 +952,7 @@ public final class DefaultPlayerTemplate {
     /// `addToCartFailed`), count unchanged. The reference-ui presents a login gate
     /// (host `config.onLogin`) instead of the「加入購物車失敗」retry banner.
     private func applyAddNeedsLogin() {
+        addToCartInFlight = false
         addToCartNeedsLogin = true
         notifyChange()
     }

@@ -7,19 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> 🚀 **下一個發版 = v2.0.0（major / breaking）。** 自 `v1.2.0-rc.2` 以來累積的所有 breaking
-> 與散佈姿態改變一次發。完整對外說明見 [release notes](../docs/release-notes/v2.0.0.md)，升級照
-> [migration 總入口](../docs/migration/v2.0.0.md)。**發版時本 `[Unreleased]` → `[2.0.0] - <date>`**；
-> 未 tag 的 `[1.3.0]`（api-version）內容一併併入 v2.0.0。
+> 🚀 **下一個發版 = v3.0.0（major / breaking）。** v2.0.0 從未發過正式版（只到 `v2.0.0-rc.5`）；
+> 其累積的 breaking（headless / token / rename）與後續的 **Tier 2 統一加購** breaking 一次發為 v3.0.0。
+> 完整對外說明見 [release notes](../docs/release-notes/v2.0.0.md)，升級照
+> [migration 總入口](../docs/migration/v2.0.0.md)。**發版時本 `[Unreleased]` → `[3.0.0] - <date>`**；
+> 未 tag 的 `[1.3.0]`（api-version）內容一併併入。
 
-### v2.0.0 — major / breaking（總覽）
+### v3.0.0 — major / breaking（總覽）
 
-**⚠ BREAKING**
+**⚠ BREAKING — Tier 2 統一加購（`cart-add-tier2`）**
+- **加購收斂為單一流程** — drop-in 播放器內加購由 SDK 自動 `addToCart` → 成功後派**通知型** `CART_ADD_REQUEST`（無 callback）交 host 加入自家購物車，取代舊「XOR 雙路線」。
+- **`LBCartResultCallback` 退役** — `onEventTriggered` 的 `cartCallback` 恆 `nil`（保留簽章僅為 ABI 相容）；加購歸因改走 `reportCartTrack` + 訂單 webhook，不再經 callback。
+- **`notifyCheckoutCompleted` deprecated** — 不再是歸因主路徑（成交歸因強制走 host 後端 order webhook，server-to-server）；下一 major 移除。
+- **`CART_ADD_REQUEST` params 擴充** — 帶 `goods_no` / `specification_no`（= host 商品庫如 WooCommerce 的 product / variation id）、`buy_no`、`track`、`specification_id`、`sdk_track_code`，使 host 能對應自家目錄、寫入歸因欄位並呼叫 `reportCartTrack`。
+
+**⚠ BREAKING — v2.0.0 累積（從未發正式版，併入 v3.0.0）**
 - **Headless 化（`decouple-ui-from-logic`）** — 移除 Player / Widget / 9 sub-component 的所有像素渲染；class 簽章保留故能編譯但 view tree 空，UI callback 不攔為 no-op。改用 reference-ui drop-in 或自組 UI（**必聽 `dismissRequest`**）。
 - **Token 模型（`session-token-migration`）** — per-video token 移除；`POST /sdk/video` 不回 token；改用 login session token。
 - **裸 widget / player 改名 → `…Core`（`rename-bare-widget-to-core`）** — 黃金名 `LiveBuyWidget` / `LiveBuyPlayer` 讓給 reference-ui drop-in 容器；**iOS 因 module 分割不留 alias**。
 - **音訊預設有聲** — 主播放 + 開場 intro 預設不靜音。
-- （下方 widget-decode 區的 `LBVideoItem.goods?` / `LBWidgetResponse.widgetBgcolor?` BREAKING 一併入 v2.0.0。）
+- （下方 widget-decode 區的 `LBVideoItem.goods?` / `LBWidgetResponse.widgetBgcolor?` BREAKING 一併入。）
 
 **Added**
 - **AWS IVS Player 直播低延遲引擎** — live `.m3u8` glass-to-glass ~15s → ~5s（iPhone 13 真機驗）；回放 `.m3u8` / intro MP4 / 非 `.m3u8` VOD 仍走 AVPlayer，引擎依 `selectPlaybackEngineKind(url, isLive)` 選。**散佈改變：SDK 含 binary（IVS XCFramework v1.52.0、checksum 鎖定）；改以三 product 出貨（binary `LiveBuySDK` + source `LiveBuyUI` / `LiveBuyReferenceUI`）。**

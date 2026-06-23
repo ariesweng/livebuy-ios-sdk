@@ -29,6 +29,9 @@ public struct AddToCartSheetView: View {
     public let cartCount: Int
     public let needsVariantSelection: Bool
     public let addToCartFailed: Bool
+    /// Add-to-cart「請求進行中」flag — forwarded to the wrapped `ProductDetailSheetView`'s CTA
+    /// loading state (cart-add-loading-state). Default false → snapshot-neutral.
+    public let addToCartInFlight: Bool
     /// `false` (snapshot / demo) → gradient placeholder; `true` (runtime) → real photo.
     public let live: Bool
 
@@ -51,6 +54,7 @@ public struct AddToCartSheetView: View {
         cartCount: Int,
         needsVariantSelection: Bool,
         addToCartFailed: Bool,
+        addToCartInFlight: Bool = false,
         live: Bool = false,
         onSelectVariant: ((_ groupIndex: Int, _ optionIndex: Int) -> Void)? = nil,
         onSetQty: ((Int) -> Void)? = nil,
@@ -68,6 +72,7 @@ public struct AddToCartSheetView: View {
         self.cartCount = cartCount
         self.needsVariantSelection = needsVariantSelection
         self.addToCartFailed = addToCartFailed
+        self.addToCartInFlight = addToCartInFlight
         self.live = live
         self.onSelectVariant = onSelectVariant
         self.onSetQty = onSetQty
@@ -88,6 +93,7 @@ public struct AddToCartSheetView: View {
             cartCount: cartCount,
             needsVariantSelection: needsVariantSelection,
             addToCartFailed: addToCartFailed,
+            addToCartInFlight: addToCartInFlight,
             presentation: .addToCart,
             live: live,
             onSelectVariant: onSelectVariant,

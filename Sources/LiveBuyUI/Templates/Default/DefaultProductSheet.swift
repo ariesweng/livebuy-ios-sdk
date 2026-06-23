@@ -44,12 +44,16 @@ public struct LBCartRequest: Equatable {
     public let goodsId: String
     public let num: Int
     public let specificationId: String?
+    /// 當前影片短碼（cart-add-tier2）。透傳給 `LiveBuySDK.addToCart(videoId:)`，使
+    /// 後續 `CART_ADD_REQUEST.video_id` 為當前影片。無 player / channel 時為 nil。
+    public let videoId: String?
 
-    public init(shopId: String, goodsId: String, num: Int, specificationId: String?) {
+    public init(shopId: String, goodsId: String, num: Int, specificationId: String?, videoId: String? = nil) {
         self.shopId = shopId
         self.goodsId = goodsId
         self.num = num
         self.specificationId = specificationId
+        self.videoId = videoId
     }
 }
 
