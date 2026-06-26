@@ -224,6 +224,17 @@ public struct ProductSheetsOverlayView: View {
     /// then re-sets the flag) and re-presents (cart-needs-login-gate).
     @State private var cartLoginGatePresented = false
 
+    /// Whether the「請選規格」prompt is currently presented (ios-variant-prompt-overlay-fix). A
+    /// LOCAL presentation flag (NOT a model snapshot), mirroring `cartLoginGatePresented`: set true
+    /// on the template's `needsVariantSelection` false→true transition; cleared on「我知道了」/ scrim.
+    /// Default false → snapshot-neutral. The prompt is mounted at the player overlay root (above the
+    /// sheet stack, full-frame centered modal + own scrim) — NOT inside the bottom-sheet card, whose
+    /// `GeometryReader` height measurement a full-bleed scrim would distort (the layout bug this
+    /// fixes). Using a local flag (not gating directly on `model.needsVariantSelection`) lets the
+    /// acknowledge button dismiss the prompt even though reference-ui cannot reset the template flag;
+    /// the user then reaches the variant chips and `selectVariant` clears `needsVariantSelection`.
+    @State private var variantPromptPresented = false
+
     /// Add-to-cart success toast presentation (rb-ios-cart-add-success-toast). A LOCAL
     /// transient flag (NOT a model snapshot): set true by `showCartToast` on a `cartCount`
     /// rise, auto-cleared ~1.8s later. Default false → snapshot-neutral (baselines
@@ -298,6 +309,20 @@ public struct ProductSheetsOverlayView: View {
                     },
                     onDismiss: { cartLoginGatePresented = false })
             }
+            // 「請選規格」prompt (ios-variant-prompt-overlay-fix) — presented at the overlay root
+            // (above the sheet stack, with its OWN full-frame scrim — same idiom as the
+            // cart-needs-login gate above) when a spec product is added without a complete variant
+            // selection (`model.needsVariantSelection` false→true). Mounting it HERE (not inside the
+            // sheet card) is the fix: a full-bleed scrim inside the card distorted the card's
+            // GeometryReader height and broke the sheet layout. 「我知道了」/ scrim → dismiss the
+            // local flag so the user can reach the variant chips; `selectVariant` then clears the
+            // template flag. Mutually exclusive with the needs-login gate in practice (the variant
+            // guard early-returns from `addToCart()` before any request, so no 401 needs-login).
+            if variantPromptPresented {
+                SelectVariantPromptModalView(
+                    theme: theme,
+                    onDismiss: { variantPromptPresented = false })
+            }
             // Add-to-cart success toast (rb-ios-cart-add-success-toast) — flashed ~1.8s above
             // the sheet stack when an add SUCCEEDS (`model.cartCount` ticks up). PURE
             // confirmation: bottom-aligned over the player frame, slides up (`lbp-toast-in`),
@@ -315,6 +340,11 @@ public struct ProductSheetsOverlayView: View {
         // `onChange`; mirrors `syncPresentation`). A local flag — not direct gating —
         // so 稍後再說 can dismiss without reference-ui resetting the template flag.
         .presentCartLoginGate(on: model.addToCartNeedsLogin, into: $cartLoginGatePresented)
+        // Present the「請選規格」prompt on the template flag's false→true transition
+        // (ios-variant-prompt-overlay-fix; mirrors `presentCartLoginGate`). A local flag — not
+        // direct gating — so the acknowledge button can dismiss without reference-ui resetting the
+        // template flag; selecting a spec then clears `needsVariantSelection` in the template.
+        .presentVariantPrompt(on: model.needsVariantSelection, into: $variantPromptPresented)
         // Seed the cartCount watermark once on appear so the first genuine rise (not the
         // bind-time value) flashes the toast (D-1).
         .onAppear { if lastCartCount < 0 { lastCartCount = model.cartCount } }
@@ -609,6 +639,22 @@ private extension View {
     func presentCartLoginGate(on needsLogin: Bool, into binding: Binding<Bool>) -> some View {
         if #available(iOS 14.0, *) {
             self.onChange(of: needsLogin) { newValue in
+                if newValue { binding.wrappedValue = true }
+            }
+        } else {
+            self
+        }
+    }
+
+    /// Present the「請選規格」prompt on the template flag's false→true transition
+    /// (ios-variant-prompt-overlay-fix). Identical shape to `presentCartLoginGate`: iOS-14-safe
+    /// `onChange`; only a rising edge sets the local presentation flag (so an acknowledge dismiss,
+    /// which leaves the template flag true until a `selectVariant`, does not re-present until the
+    /// next add attempt re-fires false→true).
+    @ViewBuilder
+    func presentVariantPrompt(on needsVariant: Bool, into binding: Binding<Bool>) -> some View {
+        if #available(iOS 14.0, *) {
+            self.onChange(of: needsVariant) { newValue in
                 if newValue { binding.wrappedValue = true }
             }
         } else {

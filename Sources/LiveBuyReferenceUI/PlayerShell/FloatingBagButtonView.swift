@@ -52,7 +52,7 @@ public struct FloatingBagButtonView: View {
                     Circle()
                         .fill(Color.white)
                         .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 6)
-                    Image(systemName: "bag.fill")
+                    Image(systemName: "bag")
                         .font(.system(size: Self.glyphSize, weight: .semibold))
                         .foregroundColor(theme.accent)
                 }

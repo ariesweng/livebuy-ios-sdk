@@ -559,7 +559,7 @@ public struct ProductListView: View {
         }) {
             ZStack {
                 Circle().fill(theme.accent)
-                Image(systemName: soldOut ? "bell.fill" : "cart.fill")
+                Image(systemName: soldOut ? "bell" : "cart")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
             }
@@ -573,9 +573,7 @@ public struct ProductListView: View {
     private var cartCTA: some View {
         Button(action: { onOpenCart?() }) {
             HStack(spacing: 10) {
-                Image(systemName: "bag.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+                ShopBagGlyph(size: 20, color: .white)
                 Text(Self.cartLabel)
                     .font(.system(size: 16 * theme.fontScale, weight: .bold))
                     .foregroundColor(.white)

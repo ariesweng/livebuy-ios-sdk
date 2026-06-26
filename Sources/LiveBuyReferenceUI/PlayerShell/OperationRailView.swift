@@ -175,7 +175,7 @@ public struct OperationRailView: View {
 
     static func symbolName(for kind: LBSideRailKind) -> String {
         switch kind {
-        case .goods:          return "bag.fill"          // FloatingBagButtonView
+        case .goods:          return "bag"               // FloatingBagButtonView
         case .chat:           return "bubble.left.fill"  // Icons.chat
         case .like:           return "heart.fill"        // Icons.heartFill
         case .share:          return "square.and.arrow.up" // unused for .share — pillButton draws ShareGlyph (Icons.share)

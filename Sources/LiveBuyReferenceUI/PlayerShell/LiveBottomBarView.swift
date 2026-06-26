@@ -313,7 +313,7 @@ private extension LiveBottomBarView {
     static let commentPlaceholder = "留言..."
 
     // glyphs (match OperationRailView.symbolName mapping)
-    static let bagSymbol = "bag.fill"               // Icons.bag
+    static let bagSymbol = "bag"                    // Icons.bag
     // 設定暱稱 改用自繪 PersonEditGlyph（人頭 + 鉛筆 badge），不再用 SF `person.fill`
     // （rb-align-nickname-icon-person-edit）。
     // share 改用自繪 ShareGlyph（Icons.share 三節點），不再用 SF symbol（rb-ios-share-icon-design-align）。

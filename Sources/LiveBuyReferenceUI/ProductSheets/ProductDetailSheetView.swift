@@ -44,8 +44,12 @@ import LiveBuyUI
 //   • `LBPQtyStepper` is bound to `qty.qty` within `[qty.min, qty.max]`; it is
 //     DISABLED when `qty.max == 0` (sold out). `-`/value/`+` → `onDec`/`onSetQty`/`onInc`.
 //   • The primary 加入購物車 CTA is DISABLED when sold out (`qty.max == 0`).
-//   • When `needsVariantSelection` is true, a centered「請選規格」prompt
-//     (`LBPAlertModal` / `LBPCenterPopup`) overlays the sheet.
+//   • `needsVariantSelection` is retained as an input but the「請選規格」prompt is NO
+//     LONGER rendered here — it is hoisted to the CONTAINER (`ProductSheetsOverlayView`)
+//     as a full-frame centered modal at the player overlay root (`SelectVariantPromptModalView`,
+//     same overlay-root idiom as the cart-needs-login `AuthGateModalView`). Mounting its
+//     full-bleed scrim INSIDE this sheet card distorted the card's `GeometryReader` height
+//     measurement and broke the sheet layout (ios-variant-prompt-overlay-fix).
 //   • When `addToCartFailed` is true, a retryable error banner is shown.
 //
 // iOS-14-safe SwiftUI only. `VStack` / `HStack` / `ZStack` / `Text` / `Button` /
@@ -199,17 +203,16 @@ public struct ProductDetailSheetView: View {
         // Content only — the shared `.lbBottomSheet(item:)` presenter (SheetKit) draws the
         // grab handle + `theme.background` + `TopRoundedRectangle(20)` + shadow + dim scrim +
         // drag-to-dismiss (sheetkit-migrate, replacing the prior system `.sheet(item:)`).
-        ZStack {
-            sheetContent
-
-            // 「請選規格」prompt — centered alert overlay (LBPAlertModal /
-            // LBPCenterPopup), only when the add-to-cart guard tripped (D-3).
-            if needsVariantSelection {
-                selectVariantPrompt
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(LBAccessibilityID.productDetail)
+        // 「請選規格」prompt is NOT rendered here: it is hoisted to the CONTAINER
+        // (`ProductSheetsOverlayView`) as a full-frame centered modal at the player overlay root
+        // (`SelectVariantPromptModalView`, same idiom as the cart-needs-login `AuthGateModalView`).
+        // Mounting its full-bleed scrim INSIDE this sheet card distorted the card's GeometryReader
+        // height measurement and broke the sheet layout (ios-variant-prompt-overlay-fix). The
+        // `needsVariantSelection` input is retained (wrapper / call-site / test signatures unchanged);
+        // the container reads `model.needsVariantSelection` to drive the hoisted prompt.
+        sheetContent
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.productDetail)
     }
 
     // MARK: - Sheet content (header + scrollable body + sticky footer)
@@ -726,53 +729,8 @@ public struct ProductDetailSheetView: View {
         .accessibilityIdentifier(LBAccessibilityID.addToCartRetry)
     }
 
-    // MARK: - 「請選規格」prompt (LBPAlertModal / LBPCenterPopup)
-    //
-    // Centered alert over a dim scrim. Single primary「我知道了」dismisses the prompt
-    // — but the prompt's lifecycle is template-owned (`needsVariantSelection` is a
-    // read-only flag the template clears on the next valid `addToCart` / selection),
-    // so the button is a no-op affordance here (reference-ui never flips the flag).
-    // Mirrors `LBPAlertModal`.
-
-    private var selectVariantPrompt: some View {
-        ZStack {
-            Color.black.opacity(0.55)
-                .edgesIgnoringSafeArea(.all)
-            VStack(spacing: 0) {
-                Text(Self.selectVariantTitle)
-                    .font(.system(size: 17 * theme.fontScale, weight: .bold))
-                    .foregroundColor(theme.text)
-                    .multilineTextAlignment(.center)
-                Text(Self.selectVariantBody)
-                    .font(.system(size: 13 * theme.fontScale))
-                    .foregroundColor(Self.textDim)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .padding(.top, 10)
-
-                Text(Self.selectVariantPrimary)
-                    .font(.system(size: 15 * theme.fontScale, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        // 統一按鈕圓角 → theme.cornerRadius（rb-ios-button-corner-radius-unify）。
-                        RoundedRectangle(cornerRadius: theme.cornerRadius)
-                            .fill(theme.accent))
-                    .padding(.top, 22)
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 22)
-            .frame(maxWidth: 300)
-            .background(
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(theme.background))
-            .shadow(color: Color.black.opacity(0.3), radius: 30, x: 0, y: 20)
-            .padding(.horizontal, 28)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(LBAccessibilityID.variantPrompt)
-    }
+    // 「請選規格」prompt (LBPAlertModal) is no longer a sub-view here — it is hoisted to the
+    // container's player overlay root as `SelectVariantPromptModalView` (ios-variant-prompt-overlay-fix).
 
     // MARK: - Hairline divider (AddToCartSheet section divider)
 
@@ -817,9 +775,8 @@ public struct ProductDetailSheetView: View {
     static let shareLabel = "分享"
     static let retryLabel = "重試"
     static let failureTitle = "加入購物車失敗,請稍後再試"
-    static let selectVariantTitle = "請選規格"
-    static let selectVariantBody = "請先選擇商品規格,再加入購物車。"
-    static let selectVariantPrimary = "我知道了"
+    // 「請選規格」copy moved to `SelectVariantPromptModalView` (prompt hoisted to the container's
+    // overlay root — ios-variant-prompt-overlay-fix).
 
     /// First product photo as a non-empty URL, or nil (empty / whitespace → placeholder).
     static func photoURL(_ detail: LBProductDetailState) -> URL? {
@@ -976,16 +933,8 @@ struct ProductDetailSheetView_Previews: PreviewProvider {
                 addToCartFailed: false)
                 .previewDisplayName("no variant group")
 
-            // 「請選規格」prompt overlay.
-            ProductDetailSheetView(
-                theme: theme,
-                detail: ProductSheetsModel.demoDetail(),
-                variant: ProductSheetsModel.demoVariantWithGroup,
-                qty: ProductSheetsModel.demoQtyInStock,
-                cartCount: 1,
-                needsVariantSelection: true,
-                addToCartFailed: false)
-                .previewDisplayName("請選規格 prompt")
+            // 「請選規格」prompt is now a container overlay-root modal — see
+            // `SelectVariantPromptModalView` previews (ios-variant-prompt-overlay-fix).
 
             // Add-to-cart failure banner (retryable).
             ProductDetailSheetView(

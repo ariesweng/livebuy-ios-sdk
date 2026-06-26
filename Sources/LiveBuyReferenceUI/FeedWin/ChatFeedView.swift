@@ -768,7 +768,7 @@ struct LBActivityLineRow: View {
         switch tier {
         case .join: return "person.fill.badge.plus"
         case .browse: return "magnifyingglass"
-        case .purchase: return "bag.fill"
+        case .purchase: return "bag"
         case .intro: return "megaphone.fill"
         case .win: return "trophy.fill"
         }
@@ -929,7 +929,7 @@ struct LBProductSaleCardRow: View {
     /// 「立即搶購」按鈕的視覺內容（按鈕化前後共用，確保像素不變）。
     private var buyButtonLabel: some View {
         HStack(spacing: 6) {
-            Image(systemName: "bag.fill")
+            Image(systemName: "bag")
                 .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
             Text("立即搶購")
                 .font(.system(size: 12 * theme.fontScale, weight: .heavy))
