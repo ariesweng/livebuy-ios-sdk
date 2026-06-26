@@ -168,10 +168,11 @@ public struct GapSurfacesOverlayView: View {
                 AuthGateModalView(
                     theme: theme,
                     triggerAction: triggerAction,
-                    // 登入 is the HOST's job (host wires its own flow + setUser) —
-                    // the container forwards to the host-wired closure, never logs
-                    // in itself.
-                    onLogin: { onRequestLogin?() },
+                    // 登入 is the HOST's job (host wires its own flow + setUser) — forward
+                    // the optional AS-IS (no extra dismiss here) so an unwired
+                    // `config.onLogin` reaches the modal as nil and the「前往登入」CTA is
+                    // hidden rather than dead (dropin-hide-unwired-affordances).
+                    onLogin: onRequestLogin,
                     onDismiss: { model.dismissAuthGate() })
             }
 

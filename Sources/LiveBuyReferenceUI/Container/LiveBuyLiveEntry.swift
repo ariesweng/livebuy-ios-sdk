@@ -200,8 +200,10 @@ final class LiveBuyLiveEntryController: ObservableObject {
 /// 行為旗標帶 production-safe 預設。Promote 自 Example 的 floating-live 樣板參數。
 public struct LiveBuyLiveEntryConfig {
 
-    /// 點整張浮窗。DEFAULT `nil` ＝ inert：容器**不自己開播放器**，導頁是 host 的決策。
-    /// 外部平台直播（`externalLiveWatchURL` 非 nil）一樣交給 host 決定（容器不開 URL）。
+    /// 點整張浮窗。DEFAULT `nil` → 容器**預設以 `fullScreenCover` 開全螢幕 in-app `LiveBuyPlayer`**
+    /// （載入該浮窗影片；對齊 `LiveBuyWidget.onTapVideo` 的預設開播放器，dropin-live-entry-default-open-player）。
+    /// host 設了 → 完全覆蓋預設導頁；`{ _ in }` = 真 no-op。外部平台直播（`externalLiveWatchURL` 非 nil）
+    /// → **預設開平台 URL**（優先序最高，與 widget 一致）；host 想自管外部直播設 `onTap` 即覆蓋整條。
     public var onTap: ((LBVideoItem) -> Void)?
 
     /// 關閉鈕。DEFAULT `nil`。預設行為＝隱藏到「下一場」（換新 `video.id` 才重新出現）；
@@ -252,6 +254,19 @@ public struct LiveBuyLiveEntry: View {
     @State private var dragTranslation: CGSize = .zero
     @State private var cardSize: CGSize = .zero
 
+    /// Default-open player presentation (dropin-live-entry-default-open-player)：點非外部浮窗
+    /// 只在 host **未接** `config.onTap` 時設此 → body 的 `.fullScreenCover` 開全螢幕 `LiveBuyPlayer`。
+    /// 用 `fullScreenCover`（而非 self-attach 持久 `.liveBuyPlayer` overlay）讓 player 不被浮窗的小尺寸
+    /// 框限、全螢幕呈現（design D1，同 widget change）。host 設了 `onTap` → 永不設此（cover 不 arm）。
+    /// `LBVideoItem` 非 `Identifiable` → 私有 wrapper。
+    @State private var defaultPresented: PresentedVideo?
+
+    /// `fullScreenCover(item:)` 用的 `Identifiable` wrapper（`LBVideoItem` 本身非 Identifiable）。
+    private struct PresentedVideo: Identifiable {
+        let id: String
+        let item: LBVideoItem
+    }
+
     public init(shopId: String, config: LiveBuyLiveEntryConfig = LiveBuyLiveEntryConfig()) {
         _controller = StateObject(wrappedValue: LiveBuyLiveEntryController(
             shopId: shopId, pollInterval: config.pollInterval))
@@ -262,6 +277,13 @@ public struct LiveBuyLiveEntry: View {
         content
             .onAppear { controller.start() }
             .onDisappear { controller.stop() }
+            // Default-open player (dropin-live-entry-default-open-player)。`defaultPresented == nil`
+            // 時 inert（host 接了 onTap，或尚未點）→ 靜止時不加任何可見像素，既有 live-entry /
+            // FloatingWidgetView baseline byte-identical。
+            .fullScreenCover(item: $defaultPresented) { p in
+                LiveBuyPlayer(videoId: p.id, config: defaultPlayerConfig)
+                    .ignoresSafeArea()
+            }
     }
 
     /// `dismissed == false` 且 `live != nil` 才渲染入口，否則（含 live == nil）為 `EmptyView`。
@@ -300,19 +322,41 @@ public struct LiveBuyLiveEntry: View {
         }
     }
 
-    /// reuse 既有 `FloatingWidgetView` 像素。`onTap` 直接轉交 host（含外部平台直播——
-    /// URL **不**由容器開，沿用「導頁全由 host 決定」哲學）；`onClose` 轉交 host 後標記 dismissed。
+    /// reuse 既有 `FloatingWidgetView` 像素。`onTap` 路由（dropin-live-entry-default-open-player）：
+    /// 外部平台直播 → 開平台 URL（`externalLiveAwareTap`，優先序最高，與 widget 一致）；非外部 →
+    /// host `config.onTap` 若接、否則預設開 in-app player（`effectiveOnTap`）。`onClose` 轉交 host 後
+    /// 標記 dismissed。
     private func card(_ live: LBVideoItem) -> some View {
         FloatingWidgetView(
             video: live,
             theme: controller.theme,
             width: config.width,
             live: true,
-            onTap: { config.onTap?($0) },
+            onTap: externalLiveAwareTap(effectiveOnTap),
             onClose: {
                 config.onClose?()
                 controller.dismiss()
             })
+    }
+
+    /// 非外部浮窗的點擊 handler（dropin-live-entry-default-open-player）：host 的 `config.onTap`
+    /// 若接（完全覆蓋，預設 cover 永不 arm），否則預設開 in-app player（`fullScreenCover`）。host 想讓
+    /// 點擊真 no-op 設 `onTap = { _ in }`。外部平台直播不會走到這（由外層 `externalLiveAwareTap` 處理）。
+    private var effectiveOnTap: (LBVideoItem) -> Void {
+        if let hostTap = config.onTap { return hostTap }
+        return { item in defaultPresented = PresentedVideo(id: item.id, item: item) }
+    }
+
+    /// 預設開播放器的 config。entry 無 `design` 欄位（用 sdkConfig theme 同源 resolver 解析），故
+    /// player 沿用預設 `MinimalDesign`，品牌與入口卡一致。`onDismiss` / `onMinimize` 清
+    /// `defaultPresented` 以關 `fullScreenCover`——cover 無 floating-preview target（minimize→floating
+    /// 收合需 root 級 `.liveBuyPlayer` presenter，design D1 取捨），故 minimize 即關；player 自身的
+    /// `dismiss(animated:)` 預設無法關 SwiftUI cover。
+    private var defaultPlayerConfig: LiveBuyPlayerConfig {
+        var c = LiveBuyPlayerConfig()
+        c.onDismiss = { _ in defaultPresented = nil }
+        c.onMinimize = { defaultPresented = nil }
+        return c
     }
 
     /// 拖曳手勢——比照 Example floating-live / 最小化播放器卡：進行中追位移，結束時 clamp 後 commit

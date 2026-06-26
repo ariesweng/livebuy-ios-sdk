@@ -108,8 +108,16 @@ public struct CarouselHeaderView: View {
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 8)
-            seeMoreLink
+            // 「查看更多 ›」renders ONLY when the host wired `onSeeMore`
+            // (dropin-hide-unwired-affordances): with no host list-navigation target there
+            // is no sensible default, so an unwired link would be a dead button. The Spacer
+            // stays (title remains leading) but collapses its min-length when there is no
+            // link to push to. `onSeeMore != nil` → unchanged layout (`minLength: 8` + link)
+            // → existing carousel baseline byte-identical.
+            Spacer(minLength: onSeeMore == nil ? 0 : 8)
+            if onSeeMore != nil {
+                seeMoreLink
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)

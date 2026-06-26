@@ -228,6 +228,21 @@ public struct LiveBuyWidget: View {
     private let mode: WidgetMode
     private let config: LiveBuyWidgetConfig
 
+    /// Default-open player presentation (dropin-widget-default-open-player): a tap on a
+    /// NON-external card sets this ONLY when the host did NOT wire `config.onTapVideo`; the
+    /// `.fullScreenCover` in `body` then presents a full-screen `LiveBuyPlayer`. `fullScreenCover`
+    /// (not a self-attached persistent `.liveBuyPlayer` overlay) so the player is full-screen
+    /// regardless of how small the widget is embedded (design D1). Stays `nil` when the host set
+    /// `onTapVideo` (override) → the cover never arms. Wrapped because `LBVideoItem` is not
+    /// `Identifiable`.
+    @State private var defaultPresented: PresentedVideo?
+
+    /// `Identifiable` wrapper for `fullScreenCover(item:)` (LBVideoItem itself is not Identifiable).
+    private struct PresentedVideo: Identifiable {
+        let id: String
+        let item: LBVideoItem
+    }
+
     public init(shopId: String,
                 mode: WidgetMode = .carousel,
                 config: LiveBuyWidgetConfig = LiveBuyWidgetConfig()) {
@@ -249,6 +264,13 @@ public struct LiveBuyWidget: View {
                 }
             }
             .onDisappear { controller.stopAutoRefresh() }
+            // Default-open player (dropin-widget-default-open-player). Inert while
+            // `defaultPresented == nil` (host wired `onTapVideo`, or no tap yet) → at rest this
+            // adds nothing visible, so existing widget snapshots stay byte-identical.
+            .fullScreenCover(item: $defaultPresented) { p in
+                LiveBuyPlayer(videoId: p.id, config: defaultPlayerConfig)
+                    .ignoresSafeArea()
+            }
     }
 
     /// The drop-in scrollable wrapper for the host-chosen mode, composed via the resolved
@@ -261,10 +283,11 @@ public struct LiveBuyWidget: View {
             model: controller.model,
             theme: controller.theme,
             live: config.live,
-            // Redirect external-platform lives (Facebook) out to their platform on
-            // tap instead of opening the in-app player (external-live-watch);
-            // non-external lives forward to the host `onTapVideo` unchanged.
-            onTapVideo: externalLiveAwareTap(config.onTapVideo),
+            // Tap routing (dropin-widget-default-open-player):
+            //   external-platform live → open platform URL (externalLiveAwareTap, highest
+            //   precedence, unchanged); non-external → host `onTapVideo` if wired, else the
+            //   DEFAULT in-app player (effectiveOnTapVideo).
+            onTapVideo: externalLiveAwareTap(effectiveOnTapVideo),
             onSeeMore: config.onSeeMore,
             onLoadMore: { controller.requestLoadMore() })
         switch mode {
@@ -280,6 +303,29 @@ public struct LiveBuyWidget: View {
     /// follow-up change.
     private func resolveDesign() -> ReferenceUIDesign {
         config.design
+    }
+
+    /// Non-external card tap handler (dropin-widget-default-open-player): the host's
+    /// `config.onTapVideo` when wired (full override — the default cover never arms), else the
+    /// DEFAULT that opens the in-app player via `fullScreenCover`. A host wanting tap to be a true
+    /// no-op sets `onTapVideo = { _ in }`. External-platform lives never reach here (handled by
+    /// the enclosing `externalLiveAwareTap`).
+    private var effectiveOnTapVideo: (LBVideoItem) -> Void {
+        if let hostTap = config.onTapVideo { return hostTap }
+        return { item in defaultPresented = PresentedVideo(id: item.id, item: item) }
+    }
+
+    /// Config for the default-open player. Inherits the widget's `design` so the player matches
+    /// the widget visually (D4). `onDismiss` / `onMinimize` clear `defaultPresented` to dismiss the
+    /// `fullScreenCover` — the default cover has no floating-preview target (the minimize→floating
+    /// collapse needs the root-level `.liveBuyPlayer` presenter; design D1 tradeoff), so minimize
+    /// closes. The player's own `dismiss(animated:)` default would not dismiss a SwiftUI cover.
+    private var defaultPlayerConfig: LiveBuyPlayerConfig {
+        var c = LiveBuyPlayerConfig()
+        c.design = config.design
+        c.onDismiss = { _ in defaultPresented = nil }
+        c.onMinimize = { defaultPresented = nil }
+        return c
     }
 
     @ViewBuilder

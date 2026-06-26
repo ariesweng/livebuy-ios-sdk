@@ -42,6 +42,23 @@ import LiveBuyUI
 // `.foregroundStyle` / `.tint` / SwiftUI `Toggle`. The two footer buttons use
 // `.buttonStyle(PlainButtonStyle())` (mirrors `LBPButton`).
 
+// MARK: - Login-CTA optional forwarding (dropin-hide-unwired-affordances, design D2.5)
+
+/// Forwards a host login closure through a gate that ALSO dismisses itself, while
+/// PRESERVING optional-ness: `nil → nil` (so `AuthGateModalView` hides the「前往登入」
+/// CTA instead of showing a dead button), non-nil → a closure that runs `dismiss`
+/// FIRST, then the host login. Used by the gates that wrap their own dismissal
+/// (`MinimalDesign` 留言閘 / `ProductSheetsOverlayView` cart-needs-login). Without this
+/// the container would wrap the optional into an always-non-nil closure and the
+/// modal could never tell that the host left `config.onLogin` unwired. Pure +
+/// `internal` so the container and unit tests share one implementation.
+func lbForwardLogin(
+    _ onRequestLogin: (() -> Void)?,
+    dismiss: @escaping () -> Void
+) -> (() -> Void)? {
+    onRequestLogin.map { hostLogin in { dismiss(); hostLogin() } }
+}
+
 /// The family-6「請先登入」alert modal for one pending `AUTH_REQUIRED`. Renders a
 /// centered `LBPAuthGate` card (overhanging accent lock badge / title /
 /// trigger-specific body / vertical two-button footer) over a black-0.55 scrim.
@@ -159,19 +176,25 @@ public struct AuthGateModalView: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
-            // Primary「前往登入」(LBPButton primary).
-            Button(action: { onLogin?() }) {
-                Text(Self.loginLabel)
-                    .font(.system(size: 15 * theme.fontScale, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 13)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(theme.accent))
+            // Primary「前往登入」(LBPButton primary). Rendered ONLY when the host wired
+            // login (`onLogin != nil`) — reference-ui NEVER logs in itself, so an unwired
+            // CTA would be a dead button. When `nil`, the modal degrades to inform +
+            // 「稍後再說」(dropin-hide-unwired-affordances). The container forwards the
+            // host's `config.onLogin` optional-ness down to here (design D2.5).
+            if let onLogin = onLogin {
+                Button(action: onLogin) {
+                    Text(Self.loginLabel)
+                        .font(.system(size: 15 * theme.fontScale, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(theme.accent))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityIdentifier(LBAccessibilityID.authGateLogin)
             }
-            .buttonStyle(PlainButtonStyle())
-            .accessibilityIdentifier(LBAccessibilityID.authGateLogin)
 
             // Plain「稍後再說」(LBPButton plain).
             Button(action: { onDismiss?() }) {

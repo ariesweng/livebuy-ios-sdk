@@ -303,10 +303,11 @@ public struct ProductSheetsOverlayView: View {
                 AuthGateModalView(
                     theme: theme,
                     triggerAction: .cartAdd,
-                    onLogin: {
-                        cartLoginGatePresented = false
-                        onRequestLogin?()
-                    },
+                    // Forward optional-ness (design D2.5): unwired `config.onLogin` → nil →
+                    // the「前往登入」CTA is hidden, not dead. When wired, clear the gate first,
+                    // then run the host login. (Dismiss is not lost — 稍後再說 / scrim still
+                    // clears `cartLoginGatePresented`.)
+                    onLogin: lbForwardLogin(onRequestLogin) { cartLoginGatePresented = false },
                     onDismiss: { cartLoginGatePresented = false })
             }
             // 「請選規格」prompt (ios-variant-prompt-overlay-fix) — presented at the overlay root

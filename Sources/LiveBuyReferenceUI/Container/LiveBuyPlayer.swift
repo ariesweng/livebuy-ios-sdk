@@ -77,8 +77,11 @@ public struct LiveBuyPlayerConfig {
     /// Product-row / pinned-card tap. Default: the core product-tap flow (`performProductTap`).
     public var onProductTap: ((LiveBuyPlayerViewController, LBProduct) -> Void)?
 
-    /// Detail-footer 分享. Default: re-emit the SDK share event (`performShare`) so the
-    /// listener's share handling fires.
+    /// 頻道 / detail-footer 分享. Default (dropin-player-default-share-sheet, B 案): 先派
+    /// `VIDEO_SHARE_REQUEST`（`performShare()`）讓有接事件的 host 自畫分享——**未被攔截**時才
+    /// 退回預設，以 `PlayerShellModel.shareUrl`（= `channel.share_url`，頻道級不加 `?t=`）present
+    /// 系統 `UIActivityViewController`（`shareUrl` 空 → no-op，不開空 sheet）。已 intercept 事件的
+    /// host 零變更；未接者新增可用的預設分享。host 設此 closure → 完全覆蓋預設。
     public var onShare: ((LiveBuyPlayerViewController) -> Void)?
 
     /// 商品列表列**縮圖**點擊 → 影片跳轉到該商品介紹時間（issue 5）. Default: `player.seek(seconds:
@@ -352,6 +355,26 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         presenter.present(activity, animated: true)
     }
 
+    /// 預設頻道分享（dropin-player-default-share-sheet, B 案）：當頻道 / footer 分享的
+    /// `VIDEO_SHARE_REQUEST` **未被 host 攔截**（`performShare()` 回 `false`）時，以 `shareUrl`
+    /// （= `channel.share_url`，頻道級**不**加 `?t=`——那是商品介紹時間，僅商品分享有意義）present
+    /// 系統 `UIActivityViewController`。`shareUrl` 空 → no-op（不開空 sheet；事件已派發、host 自決）。
+    /// iPad popover anchor 在播放區底部中央（避免 crash），呈現樣板對齊 `presentProductShare`。
+    static func presentChannelShare(from player: LiveBuyPlayerViewController, shareUrl: String) {
+        guard !shareUrl.isEmpty else { return }
+
+        let items: [Any] = URL(string: shareUrl).map { [$0] } ?? [shareUrl]
+        let activity = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        if let pop = activity.popoverPresentationController {
+            pop.sourceView = player.view
+            pop.sourceRect = CGRect(x: player.view.bounds.midX,
+                                    y: player.view.bounds.maxY - 80, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+        let presenter = player.presentedViewController ?? player
+        presenter.present(activity, animated: true)
+    }
+
     /// Wire every seam to `config.onX ?? default` and bundle them into a `PlayerOverlayContext`
     /// (the inputs `design.playerOverlay(...)` composes; for `MinimalDesign` that is the same
     /// `PlayerOverlayRootView` ZStack as before).
@@ -390,8 +413,10 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
             composerController: composerController,
             nicknameController: nicknameController,
             loginController: loginController,
-            // 「前往登入」CTA → host 的登入流程（reference-ui NEVER 自登入）。host 未接 → inert。
-            onRequestLogin: { config.onLogin?() },
+            // 「前往登入」CTA → host 的登入流程（reference-ui NEVER 自登入）。**轉發 optional**
+            // （非包成恆非 nil 閉包）：host 未接 `config.onLogin` → nil 一路傳到 `AuthGateModalView`
+            // → 不畫死按鈕（dropin-hide-unwired-affordances，design D2.5）。
+            onRequestLogin: config.onLogin,
             theme: theme,
             paintsBackgroundPlaceholder: config.paintsBackgroundPlaceholder,
             showGestureHints: config.showGestureHints,
@@ -479,11 +504,18 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
                 guard let player = player else { return }
                 if let custom = config.onProductTap { custom(player, product) } else { player.performProductTap(product) }
             },
-            // Share is presented by the host on the videoShareRequest event; the footer 分享
-            // just re-emits it.
-            onShare: { [weak player] in
+            // Footer / channel 分享 (dropin-player-default-share-sheet, B 案): host override wins;
+            // else re-emit `VIDEO_SHARE_REQUEST` and, ONLY if the host did NOT intercept it
+            // (`performShare()` returns false), present the default system share sheet for the
+            // channel. Hosts that intercept the event keep their own UI (zero change); unwired
+            // hosts now get a working share instead of a no-op.
+            onShare: { [weak player, weak shellModel] in
                 guard let player = player else { return }
-                if let custom = config.onShare { custom(player) } else { player.performShare() }
+                if let custom = config.onShare {
+                    custom(player)
+                } else if !player.performShare() {
+                    Self.presentChannelShare(from: player, shareUrl: shellModel?.shareUrl ?? "")
+                }
             },
             // 商品列表列縮圖點擊 → 影片跳轉到商品介紹時間（issue 5）。預設 seek 到 `beginTime`
             // （VOD / replay；live 由 core `seek` gate 略過；`beginTime == nil` 不 seek）。

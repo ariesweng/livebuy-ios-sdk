@@ -308,10 +308,11 @@ struct PlayerOverlayRootView: View {
                 AuthGateModalView(
                     theme: theme,
                     triggerAction: .commentSend,
-                    onLogin: {
-                        loginController.dismiss()
-                        onRequestLogin?()
-                    },
+                    // Forward optional-ness (design D2.5): unwired `config.onLogin` → nil →
+                    // the「前往登入」CTA is hidden, not dead. When wired, dismiss the login
+                    // prompt first, then run the host login. (Dismiss is not lost when the
+                    // CTA hides — 稍後再說 / scrim still dismisses.)
+                    onLogin: lbForwardLogin(onRequestLogin) { loginController.dismiss() },
                     onDismiss: { loginController.dismiss() })
             }
 
