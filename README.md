@@ -52,9 +52,9 @@ Embed live shopping experiences â€” live streams, replays, and shoppable VODs â€
 
 ```swift
 dependencies: [
-    // Released:    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", from: "3.0.0")
-    // Pre-release: pin the exact rc tag
-    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", exact: "3.0.0-rc.1")
+    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", from: "3.0.0")
+    // Pre-release testing: pin an exact rc tag instead, e.g.
+    // .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", exact: "3.0.0-rc.3")
 ],
 targets: [
     .target(
