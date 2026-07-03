@@ -78,6 +78,12 @@ public struct VideoInfoPanelView: View {
     /// had NO explicit close icon, only drag / scrim / host-badge re-tap). nil → tap is a no-op.
     private let onClose: (() -> Void)?
 
+    /// Host-wired 訂閱 pill tap → 走 core 既有訂閱路徑（`PlayerShellModel.toggleSubscribe`
+    /// → template → `performSubscribe` → `toggleSubscribe`）。已登入 → 訂閱 / 取消訂閱 API；
+    /// 未登入 → core emit `AUTH_REQUIRED`，host 攔截跳登入（videoinfo-subscribe-pill-wire-refui）。
+    /// nil → demo / snapshot 時 pill 仍渲染但點擊 no-op。
+    private let onSubscribe: (() -> Void)?
+
     public init(
         theme: ReferenceUITheme,
         info: LBInfoTabState,
@@ -88,7 +94,8 @@ public struct VideoInfoPanelView: View {
         onSelectTab: ((LBInfoPanelTab) -> Void)? = nil,
         onOpenStorefront: (() -> Void)? = nil,
         onContactMerchant: (() -> Void)? = nil,
-        onClose: (() -> Void)? = nil
+        onClose: (() -> Void)? = nil,
+        onSubscribe: (() -> Void)? = nil
     ) {
         self.theme = theme
         self.info = info
@@ -100,6 +107,7 @@ public struct VideoInfoPanelView: View {
         self.onOpenStorefront = onOpenStorefront
         self.onContactMerchant = onContactMerchant
         self.onClose = onClose
+        self.onSubscribe = onSubscribe
     }
 
     public var body: some View {
@@ -291,18 +299,25 @@ public struct VideoInfoPanelView: View {
     }
 
     /// Subscribe affordance — outlined accent pill. The label reflects
-    /// `info.isSubscribed` (already-subscribed vs subscribe). Presentation only;
-    /// the actual subscribe action is host-wired through core, not owned here.
+    /// `info.isSubscribed` (already-subscribed vs subscribe). Tappable: wrapped in a
+    /// `Button` firing `onSubscribe` → `PlayerShellModel.toggleSubscribe()` → core
+    /// (logged-in → subscribe API; NOT-logged-in → core emits `AUTH_REQUIRED` and the
+    /// host shows login). Same entry as the header avatar subscribe badge
+    /// (videoinfo-subscribe-pill-wire-refui). Appearance is UNCHANGED — `PlainButtonStyle`
+    /// keeps the exact pill layout so snapshot baselines stay byte-identical.
     private var subscribePill: some View {
-        Text(info.isSubscribed ? Self.subscribedLabel : Self.subscribeLabel)
-            .font(.system(size: 13 * theme.fontScale, weight: .bold))
-            .foregroundColor(info.isSubscribed ? Self.textDim : theme.accent)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .overlay(
-                RoundedRectangle(cornerRadius: 999)
-                    .stroke(info.isSubscribed ? Self.strokeStrong : theme.accent, lineWidth: 1)
-            )
+        Button(action: { onSubscribe?() }) {
+            Text(info.isSubscribed ? Self.subscribedLabel : Self.subscribeLabel)
+                .font(.system(size: 13 * theme.fontScale, weight: .bold))
+                .foregroundColor(info.isSubscribed ? Self.textDim : theme.accent)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 999)
+                        .stroke(info.isSubscribed ? Self.strokeStrong : theme.accent, lineWidth: 1)
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 
     // MARK: Notice tab (公告 content)

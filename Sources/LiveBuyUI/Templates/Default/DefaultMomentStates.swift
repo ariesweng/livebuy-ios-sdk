@@ -218,9 +218,9 @@ public final class DefaultProductOverlayState {
 // MARK: - 4. PlayerHeader — `{ isSubscribed, viewerCount, muted }`
 
 /// PlayerHeader view-model for `LBPHostBadge` + `LBLiveTopBar` / `LBPTopBar`.
-/// `isSubscribed` / `viewerCount` are sourced from momentState; `muted` from the
-/// player mute flag (momentState does NOT carry muted — see the iOS mute wiring
-/// gap in the change notes). The top-bar chrome fields (`title` / `hostName` /
+/// `isSubscribed` / `viewerCount` / `viewerCountVisible` are sourced from momentState;
+/// `muted` from the player mute flag (momentState does NOT carry muted — see the iOS
+/// mute wiring gap in the change notes). The top-bar chrome fields (`title` / `hostName` /
 /// `shopLogo` / `shareUrl`) are STATIC values read from the public `channel` once
 /// loaded (player-chrome-template D3); they coexist with the dynamic mirrors and
 /// MUST NOT be re-stored in `LBPlayerMomentState`. Each field diff-then-notify.
@@ -228,12 +228,26 @@ public final class DefaultPlayerHeaderState {
 
     private(set) public var isSubscribed: Bool = false
     private(set) public var viewerCount: Int = 0
+    /// 觀看人數是否「允許顯示」——後端 `channel.show_pv_num == 1` 的**純資料鏡像**
+    /// （來源 core `LBPlayerMomentState.viewerCountVisible`）。view-model **只搬運、不 gate**：
+    /// 是否 / 何時 / 如何渲染觀看數 badge（含與 `isLive` / 回放等條件的組合判斷）由下游
+    /// reference-ui 決定。與 `viewerCount`（人數**數值**）正交——旗標為 false 時 `viewerCount`
+    /// 數值仍原樣搬運、不歸零。預設 `false`（pre-channel：後端未宣稱允許前保守不顯示）。
+    private(set) public var viewerCountVisible: Bool = false
     private(set) public var muted: Bool = false  // unmuted by default (sound on; Player States)
     /// LIVE vs VOD flag — `channel.liveStatus == 1`. Host reads this to branch the
     /// top-bar chrome (LIVE pill / viewer count / 直播限定 chrome only when live;
     /// plain top bar for VOD). Channel-derived (fed by `ingestChannel`); default
     /// `false` (neutral/VOD) pre-channel. NOT in `LBPlayerMomentState` (single source).
     private(set) public var isLive: Bool = false
+
+    /// 回放旗標 — 一場**已結束的直播**（`channel.type == 2 && channel.liveStatus == 3`）。
+    /// Channel-derived（由 `ingestChannel` 餵入），與 `isLive` 並列但**語意分離且互斥**
+    /// （`liveStatus` 不可能同時 1 與 3）：`isLive` 嚴格 `liveStatus == 1`（正在直播），
+    /// `isFinishedLiveReplay` 標示「回放」。下游 reference-ui 讀此旗標把回放渲染成與直播
+    /// 相同的 LIVE 版型；純 VOD 點播（`type == 1`）兩旗標皆 `false` → 維持 VOD 版型。
+    /// 預設 `false`（pre-channel / 直播中 / 預告 / 純 VOD）。NOT in `LBPlayerMomentState`。
+    private(set) public var isFinishedLiveReplay: Bool = false
 
     // MARK: - Top-bar chrome (player-chrome-template D3) — from public `channel`
     /// Host pill 標題 — `channel.title`.
@@ -249,11 +263,16 @@ public final class DefaultPlayerHeaderState {
 
     init() {}
 
-    /// momentState-sourced fields (live subscribe mirror + pv_num).
-    func handleHeader(isSubscribed: Bool, viewerCount: Int) {
-        guard isSubscribed != self.isSubscribed || viewerCount != self.viewerCount else { return }
+    /// momentState-sourced fields (live subscribe mirror + pv_num + pv-visibility flag).
+    /// `viewerCountVisible` 帶預設值，向後相容既有兩參呼叫點；view-model 只搬運後端
+    /// `show_pv_num` 鏡像，**不**做任何顯示 gate（顯示判斷屬 reference-ui）。三欄任一改變
+    /// 即 diff-then-notify（含僅 `viewerCountVisible` 翻轉的情況）。
+    func handleHeader(isSubscribed: Bool, viewerCount: Int, viewerCountVisible: Bool = false) {
+        guard isSubscribed != self.isSubscribed || viewerCount != self.viewerCount
+            || viewerCountVisible != self.viewerCountVisible else { return }
         self.isSubscribed = isSubscribed
         self.viewerCount = viewerCount
+        self.viewerCountVisible = viewerCountVisible
         onMutation?()
     }
 
@@ -270,6 +289,15 @@ public final class DefaultPlayerHeaderState {
     func handleLive(_ isLive: Bool) {
         guard isLive != self.isLive else { return }
         self.isLive = isLive
+        onMutation?()
+    }
+
+    /// 回放旗標 from the public `channel`（`type == 2 && liveStatus == 3`）。Diff-then-notify；
+    /// re-feeding the same value is a no-op. Fed inside `ingestChannel`'s coalescing batch so a
+    /// single channel ingest fires `onMutation` at most once (與 `handleLive` 同形、同批次)。
+    func handleFinishedLiveReplay(_ value: Bool) {
+        guard value != self.isFinishedLiveReplay else { return }
+        self.isFinishedLiveReplay = value
         onMutation?()
     }
 

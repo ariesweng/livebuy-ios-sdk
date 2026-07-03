@@ -7,13 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.0.0] - 2026-07-01
-
-> 🚀 **v3.0.0（major / breaking）— 首個正式版。** v2.0.0 從未發過正式版（只到 `v2.0.0-rc.5`）；
+> 🚀 **下一個發版 = v3.0.0（major / breaking）。** v2.0.0 從未發過正式版（只到 `v2.0.0-rc.5`）；
 > 其累積的 breaking（headless / token / rename）與後續的 **Tier 2 統一加購** breaking 一次發為 v3.0.0。
 > 完整對外說明見 [release notes](../docs/release-notes/v2.0.0.md)，升級照
-> [migration 總入口](../docs/migration/v2.0.0.md)。未 tag 的 `[1.3.0]`（api-version）內容一併併入。
-> 出貨 binary 與 `v3.0.0-rc.3` 位元等價（checksum `21ba7ee…`；rc.3 已通過內部真機 E2E + N2 抓封包 + QA）。
+> [migration 總入口](../docs/migration/v2.0.0.md)。**發版時本 `[Unreleased]` → `[3.0.0] - <date>`**；
+> 未 tag 的 `[1.3.0]`（api-version）內容一併併入。
 
 ### v3.0.0 — major / breaking（總覽）
 

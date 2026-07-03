@@ -622,7 +622,11 @@ public struct ProductDetailSheetView: View {
                     .fill(isSoldOut ? Self.strokeStrong : theme.accent))
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(isSoldOut || addToCartInFlight)
+        // 只在售完時 `.disabled`（退灰）。in-flight 不用 `.disabled`（否則 SwiftUI 會把整顆鈕連 accent
+        // 底一起退成淡粉，違背設計「loading 保品牌色」）— 點擊已由 action 內 `guard !addToCartInFlight`
+        // 擋住，故 in-flight 維持全 accent 填色 + 設計的 `opacity 0.96`（LBPButton.loading）。
+        .disabled(isSoldOut)
+        .opacity(addToCartInFlight ? 0.96 : 1)
         .accessibilityIdentifier(LBAccessibilityID.addToCartCta)
     }
 
@@ -697,7 +701,7 @@ public struct ProductDetailSheetView: View {
 
     private var failureBanner: some View {
         HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(theme.accent)
             Text(Self.failureTitle)

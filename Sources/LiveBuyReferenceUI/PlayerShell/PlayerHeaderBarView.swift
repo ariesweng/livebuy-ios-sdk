@@ -53,13 +53,15 @@ public struct PlayerHeaderBarView: View {
     /// `RemoteStillImageView` when the URL is non-empty / parseable, and falls back
     /// to the monogram when it is empty / invalid (no logo → default).
     public let shopLogo: String
-    /// Live viewer count (`DefaultPlayerHeaderState.viewerCount`). Shown only when `isLive`.
+    /// Live viewer count (`DefaultPlayerHeaderState.viewerCount`). Shown only when
+    /// `isLive && viewerCountVisible && showViewerCount` (see `showsViewerBadge`).
     public let viewerCount: Int
     /// Subscribe affordance state (`DefaultPlayerHeaderState.isSubscribed`).
     public let isSubscribed: Bool
     /// LIVE vs VOD flag (`DefaultPlayerHeaderState.isLive`, channel `liveStatus == 1`).
-    /// Drives the viewer-count (shown ⟺ `isLive`) and — together with `isReplay` — the
-    /// LIVE pill (shown ⟺ `isLive && !isReplay`). VOD (`isLive == false`) shows neither.
+    /// Drives the viewer-count (shown ⟺ `isLive && viewerCountVisible && showViewerCount`,
+    /// see `showsViewerBadge`) and — together with `isReplay` — the LIVE pill (shown ⟺
+    /// `isLive && !isReplay`). VOD (`isLive == false`) shows neither.
     public let isLive: Bool
 
     /// Replay (回放) flag — a LIVE stream scrubbed behind the live edge
@@ -76,6 +78,26 @@ public struct PlayerHeaderBarView: View {
     /// `false` (demo / snapshot / `ImageRenderer` path) → avatar stays the monogram
     /// placeholder so the baseline never touches the network.
     public let live: Bool
+
+    /// Host-controllable viewer-count visibility gate (rb-ios-hide-viewer-count-config).
+    /// A by-value presentation flag fed from `PlayerShellModel` (sourced from
+    /// `LiveBuyPlayerConfig.showViewerCount`; default `true`, NOT a header view-model field).
+    /// The viewer count shows ⟺ `isLive && viewerCountVisible && showViewerCount`; `false`
+    /// HIDES the viewer count even while `isLive` (incl. replay), WITHOUT affecting the LIVE
+    /// pill or the core / view-model `viewerCount` data pipeline.
+    public let showViewerCount: Bool
+
+    /// Backend-driven viewer-count visibility mirror (rb-ios-viewer-count-show-pv-num).
+    /// A by-value presentation flag fed from `PlayerShellModel.viewerCountVisible`, which
+    /// mirrors the view-model `DefaultPlayerHeaderState.viewerCountVisible` (= core
+    /// `LBPlayerMomentState.viewerCountVisible` = backend `channel.show_pv_num == 1`).
+    /// Default `true` keeps existing preview / snapshot construction byte-identical. The
+    /// viewer count shows ⟺ `isLive && viewerCountVisible && showViewerCount`: `false`
+    /// (backend `show_pv_num != 1`) HIDES the viewer count even while `isLive` (incl. replay,
+    /// which wears LIVE chrome — so replay honours the original live-time setting), WITHOUT
+    /// affecting the LIVE pill or the core / view-model `viewerCount` data pipeline. Distinct
+    /// from `showViewerCount` (host config): BOTH must be true to draw the badge.
+    public let viewerCountVisible: Bool
 
     // -- Optional action closures (LAST, each defaulting to nil) ----------------
     //
@@ -106,6 +128,8 @@ public struct PlayerHeaderBarView: View {
         isLive: Bool,
         isReplay: Bool = false,
         live: Bool = false,
+        showViewerCount: Bool = true,
+        viewerCountVisible: Bool = true,
         onMinimize: (() -> Void)? = nil,
         onSubscribe: (() -> Void)? = nil,
         onTapHostBadge: (() -> Void)? = nil
@@ -119,6 +143,8 @@ public struct PlayerHeaderBarView: View {
         self.isLive = isLive
         self.isReplay = isReplay
         self.live = live
+        self.showViewerCount = showViewerCount
+        self.viewerCountVisible = viewerCountVisible
         self.onMinimize = onMinimize
         self.onSubscribe = onSubscribe
         self.onTapHostBadge = onTapHostBadge
@@ -201,13 +227,24 @@ public struct PlayerHeaderBarView: View {
                         .lineLimit(1)
                     // Per design `LBPHostBadge` (`isLive && !upcoming` outer gate; inner
                     // `hideLivePill = isReplay` / `hideViewerCount = upcoming`): the LIVE
-                    // pill shows ⟺ `isLive && !isReplay`; the viewer count shows ⟺ `isLive`
-                    // (replay KEEPS the viewer count, only HIDES the pill). VOD shows neither.
+                    // pill shows ⟺ `isLive && !isReplay` (replay HIDES the pill). VOD shows
+                    // neither. The viewer count is gated by `showsViewerBadge` (the pure
+                    // truth-table helper): it shows ⟺ `isLive && viewerCountVisible &&
+                    // showViewerCount` — backend `show_pv_num == 1` (viewerCountVisible,
+                    // rb-ios-viewer-count-show-pv-num) AND host `showViewerCount` (default
+                    // true, rb-ios-hide-viewer-count-config). Either being false hides the
+                    // count even while `isLive` (incl. replay, which wears LIVE chrome →
+                    // replay honours the original live-time `show_pv_num`), without touching
+                    // the LIVE pill.
                     if isLive {
                         if !isReplay {
                             livePill
                         }
-                        viewerBadge
+                        if Self.showsViewerBadge(isLive: isLive,
+                                                 viewerCountVisible: viewerCountVisible,
+                                                 hostShowViewerCount: showViewerCount) {
+                            viewerBadge
+                        }
                     }
                 }
             }
@@ -306,7 +343,7 @@ public struct PlayerHeaderBarView: View {
     /// to "12...."); only the title / host name ellipsize under squeeze.
     private var viewerBadge: some View {
         HStack(spacing: 3) {
-            Image(systemName: "person.2.fill")
+            Image(systemName: "person.2")
                 .font(.system(size: 9 * theme.fontScale))
                 .foregroundColor(onGlassDim)
             Text(Self.formatViewerCount(viewerCount))
@@ -343,6 +380,22 @@ public struct PlayerHeaderBarView: View {
     }
 
     // MARK: - Pure helpers
+
+    /// Viewer-count badge visibility gate (rb-ios-viewer-count-show-pv-num). Pure /
+    /// deterministic truth table — extracted so the gate is unit-testable without
+    /// rendering. The viewer count draws ⟺ ALL THREE hold:
+    ///   - `isLive` — live-chrome family (true live OR finished-live replay; VOD shows none).
+    ///   - `viewerCountVisible` — backend `channel.show_pv_num == 1` (mirrored from the
+    ///     view-model `DefaultPlayerHeaderState.viewerCountVisible`). Replay reuses the LIVE
+    ///     chrome so it honours the original live-time setting.
+    ///   - `hostShowViewerCount` — host config `LiveBuyPlayerConfig.showViewerCount` (default
+    ///     true); a host may force-hide regardless of the backend flag.
+    /// Any one being `false` hides the badge; the LIVE pill is unaffected (separate gate).
+    static func showsViewerBadge(isLive: Bool,
+                                 viewerCountVisible: Bool,
+                                 hostShowViewerCount: Bool) -> Bool {
+        isLive && viewerCountVisible && hostShowViewerCount
+    }
 
     /// Compact viewer-count formatting (e.g. `12345` → `12.3K`). Pure / deterministic.
     static func formatViewerCount(_ count: Int) -> String {

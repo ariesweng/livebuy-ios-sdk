@@ -348,6 +348,17 @@ enum TemplateWiring {
         vc.onChannelRefresh = { [weak template] channel in
             template?.ingestChannel(channel)
         }
+        // Replay chat bridge (replay-chat-feed-bridge-template, Depends On -core) →
+        // route the core notification seam `onReplayChatRevealed` (回放當前已揭露前綴，
+        // public [LBComment]) into the SAME `activityFeed` that live chat fills via
+        // `onPollReceived`, so the reference-ui ChatFeedView shows replay history as
+        // playback advances. core fires this ONLY during replay (non-replay no-op), so
+        // there is NO double-feed with the live `onPollReceived` path. weak-capture
+        // (parity with onPollReceived/onChannelRefresh — no retain cycle); coexists with
+        // the host's unified listener (does not shadow).
+        vc.onReplayChatRevealed = { [weak template] comments in
+            template?.handleReplayChatRevealed(comments)
+        }
         // Seed the PlayerHeader mute flag = false (unmuted by default / sound on,
         // matching the core engines' default-unmuted main playback). momentState
         // carries no `muted`; the tap-to-unmute gesture / host toggle subsequent

@@ -85,6 +85,12 @@ public struct ChatFeedView: View {
     /// demo / snapshot）→ 不出任何置頂像素（baseline byte-identical）。
     public let pinned: LBPinnedMessage?
 
+    /// 主播名稱（`FeedWinModel.hostName` ← `DefaultPlayerTemplate.header.hostName`），純顯示 —
+    /// 餵給 `.eventJoin` 列的主播名 + 「主播」badge header（`rb-ios-loading-announce-restyle`）。
+    /// 預設 `""` 維持既有呼叫端（未接 `FeedWinModel` 的 demo / snapshot）原始碼相容；空字串 →
+    /// `LBEventJoinLineRow` 不畫名字列，其餘 row kind 不受影響。
+    public let hostName: String
+
     /// Auto-stick to the newest row. Starts true; a manual scroll-up (drag) stops it
     /// so the user can read history without being yanked back. Scrollable variant only.
     /// NOTE: this flag now ONLY governs whether a NEW message auto-scrolls to the
@@ -107,12 +113,14 @@ public struct ChatFeedView: View {
                 items: [LBFeedItem],
                 hostScrollable: Bool = false,
                 pinned: LBPinnedMessage? = nil,
+                hostName: String = "",
                 onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)? = nil,
                 onTapSaleBuy: ((_ name: String) -> Void)? = nil) {
         self.theme = theme
         self.items = items
         self.hostScrollable = hostScrollable
         self.pinned = pinned
+        self.hostName = hostName
         self.onJoinEvent = onJoinEvent
         self.onTapSaleBuy = onTapSaleBuy
     }
@@ -300,6 +308,9 @@ public struct ChatFeedView: View {
             LBEventJoinLineRow(
                 theme: theme,
                 text: item.text,
+                // 主播名（純顯示，rb-ios-loading-announce-restyle）：`ChatFeedView.hostName` ←
+                // `FeedWinModel.hostName`；空字串（未接 model 的呼叫端）→ 不畫名字列。
+                userName: hostName,
                 // 後端「ek isset 才顯示 CTA」：keyword 非空 → 加入活動 CTA；空（活動結束 / goods 未含
                 // 該 event，template 帶入 "")→ 純活動公告無 CTA（問題 1）。
                 hasCTA: !(item.keyword ?? "").isEmpty,
@@ -514,11 +525,13 @@ struct LBChatLineRow: View {
                 .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.26)))
                 .fixedSize(horizontal: false, vertical: true)
             }
-            // 訊息文字。
+            // 訊息文字。主播 / AI / 引用回覆屬權威訊息 → 不限行數完整顯示
+            // （chat-host-message-full-lines-refui）。一般觀眾留言的 `bubble` 仍維持
+            // `.lineLimit(2)`（避免洗頻 / 版面爆量），此處只放開角色氣泡 `roleBubble`。
             Text(text)
                 .font(.system(size: 11.5 * theme.fontScale, weight: .regular))
                 .foregroundColor(.white)
-                .lineLimit(2)
+                .lineLimit(nil)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 5)
@@ -600,17 +613,27 @@ struct LBChatLineRow: View {
 
 // MARK: - LBEventJoinLineRow — event-join row (LBEventJoinLine)
 //
-// Mirrors `moments.jsx` `LBEventJoinLine` with the feed's shared message-row language
-// (`ACT_ROW` + `ACT_SLOT`, same as `LBActivityLineRow`): a 24×24 round accent sparkle SLOT
-// OUTSIDE the bubble (on the shared 24px icon rail), then an accent-wash bubble (black 0.46 +
-// accent 0.23 wash + 1px solid accent border, radius 12) wrapping ONLY the 2-line keyword copy
-// + a trailing「加入活動」CTA that flips to a「已參加」chip when joined. The ONLY interactive
-// row in the stream — its tap is FORWARDED via `onJoin` (host wired); this layer never joins
-// itself. (rb-ios-event-message-design-align.)
+// Mirrors the UPDATED `moments.jsx` `LBEventJoinLine` (design re-sync `c3c98733`,
+// `rb-ios-loading-announce-restyle`): the row is now styled like the主播留言 host bubble
+// (`LBChatLineRow.roleBubble`) rather than a standalone invite card — a 24×24 round accent
+// SLOT OUTSIDE the bubble using the SAME `crown.fill` glyph as `LBChatLineRow.roleBubble`'s
+// isHost avatar (the design's slot SVG path is byte-identical to the host crown path —
+// confirmed against the RN/Android siblings — NOT a checkmark), on the shared 24px icon
+// rail (same language as `LBActivityLineRow`), then a FLAT `theme.accent` bubble (radius 12, same fill formula as
+// the host chat bubble — no gradient wash / border anymore) stacking a name+「主播」badge
+// header (when `userName` is non-empty) above the 2-line keyword copy, with the「加入活動」/
+// 「已參加」CTA moved BELOW the text as its own row (was inline beside the text). The ONLY
+// interactive row in the stream — its tap is FORWARDED via `onJoin` (host wired); this layer
+// never joins itself. (rb-ios-event-message-design-align, rb-ios-loading-announce-restyle.)
 
 struct LBEventJoinLineRow: View {
     let theme: ReferenceUITheme
     let text: String
+    /// 主播名稱（`ChatFeedView.hostName` ← `FeedWinModel.hostName` ← `DefaultPlayerTemplate
+    /// .header.hostName`），純顯示 — 對齊 `LBChatLineRow.roleBubble` 的主播名 + 「主播」badge
+    /// 版型。空字串（未綁定 `FeedWinModel` 的呼叫端，如各 snapshot test 直接建構 `ChatFeedView`
+    /// 未帶 `hostName`）→ 不畫名字列，不影響其餘版型 / CTA gating。
+    let userName: String
     /// keyword 非空 → 畫「加入活動」CTA（後端「`ek` isset 才顯示 CTA」契約，問題 1）；空 → 純活動公告
     /// （活動已結束 / goods `event[]` 未含該 event → template 帶入 keyword ""），不畫 CTA / 已參加 chip。
     let hasCTA: Bool
@@ -618,70 +641,106 @@ struct LBEventJoinLineRow: View {
     let onJoin: () -> Void
 
     var body: some View {
-        // Shared message-row language (ACT_ROW gap 8): round sparkle slot OUTSIDE the bubble,
-        // then the accent-wash bubble wrapping copy + CTA only.
-        HStack(spacing: 8) {
+        // Shared message-row language (ACT_ROW gap 8): round crown-glyph slot OUTSIDE the
+        // bubble, `.top`-aligned like `LBChatLineRow`'s avatar + bubble pairing.
+        HStack(alignment: .top, spacing: 8) {
             eventSlot
-
-            HStack(spacing: 10) {
-                // 2-line keyword copy (full prebuilt text, NOT split).
-                Text(text.isEmpty ? Self.defaultEventCopy : text)
-                    .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: 132, alignment: .leading)
-
-                // Trailing CTA: 加入活動 (accent button) / 已參加 (translucent chip). 僅在 keyword 非空
-                // （hasCTA）時畫——活動公告無可參加 keyword 時為純公告（無 CTA / 無 joined chip）。
-                if hasCTA {
-                    if joined { joinedChip } else { joinButton }
-                }
-            }
-            .padding(EdgeInsets(top: 5, leading: 11, bottom: 5, trailing: 5))
-            .background(cardBubble)
+            bubble
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// 24×24 round accent sparkle slot (`ACT_SLOT`), drawn OUTSIDE the bubble on the shared
-    /// 24px icon rail (same shape/size as `LBActivityLineRow`'s icon slot).
+    /// 24×24 round accent slot (`ACT_SLOT`) with the SAME `crown.fill` glyph as
+    /// `LBChatLineRow.roleBubble`'s isHost avatar (design re-sync `c3c98733`: was `sparkles`;
+    /// the design's own slot path is the host crown shape, not a checkmark), drawn OUTSIDE the
+    /// bubble on the shared 24px icon rail (same shape/size as `LBActivityLineRow`'s icon slot).
     private var eventSlot: some View {
         Circle()
             .fill(theme.accent)
             .frame(width: 24, height: 24)
             .overlay(
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .bold))
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.white))
     }
 
-    /// Accent-wash bubble (`linear-gradient(accent3a,accent3a)` over `rgba(0,0,0,0.46)` = black
-    /// 0.46 + accent 0.23 wash) + 1px solid accent border, radius 12 — same wash formula as
-    /// `LBActivityLineRow` `.win` (here a solid accent border, no glow).
-    private var cardBubble: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .fill(Color.black.opacity(0.46))
-            .overlay(RoundedRectangle(cornerRadius: 12).fill(theme.accent.opacity(0.23)))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.accent, lineWidth: 1))
+    /// Host-bubble-styled card (design re-sync `c3c98733`): flat `theme.accent` fill (SAME
+    /// formula as `LBChatLineRow.roleBubble`'s `isHost` bubble — no gradient wash / border),
+    /// stacking an optional name+badge header, the keyword copy, and the CTA (moved below
+    /// the text, was inline beside it).
+    private var bubble: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if !userName.isEmpty {
+                hostNameHeader
+            }
+            // Full prebuilt text (NOT split). No fixed `maxWidth` anymore — the CTA no
+            // longer shares this row, so the text can use the bubble's natural width.
+            Text(text.isEmpty ? Self.defaultEventCopy : text)
+                .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            if hasCTA {
+                ctaRow
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 12).fill(theme.accent))
     }
 
-    /// 加入活動 accent CTA button (`padding 13/6`, capsule accent).
+    /// 主播名 + 「主播」badge header row, same formula as `LBChatLineRow.roleBubble`'s name +
+    /// `roleTag("主播", solid: true)`.
+    private var hostNameHeader: some View {
+        HStack(spacing: 5) {
+            Text(userName)
+                .font(.system(size: 11.5 * theme.fontScale, weight: .bold))
+                .foregroundColor(.white.opacity(0.95))
+                .lineLimit(1)
+            hostBadge
+        }
+    }
+
+    /// 「主播」badge — white 0.22 solid capsule, same formula as `LBChatLineRow.roleTag(_:
+    /// solid: true)`.
+    private var hostBadge: some View {
+        Text("主播")
+            .font(.system(size: 9 * theme.fontScale, weight: .heavy))
+            .foregroundColor(.white)
+            .padding(.horizontal, 5)
+            .frame(height: 14)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.22)))
+    }
+
+    /// Trailing CTA row — 加入活動 / 已參加, moved BELOW the text (design re-sync `c3c98733`:
+    /// was inline beside the text).
+    @ViewBuilder
+    private var ctaRow: some View {
+        if joined {
+            joinedChip.padding(.top, 4)
+        } else {
+            joinButton.padding(.top, 4)
+        }
+    }
+
+    /// 加入活動 CTA button — white capsule, accent text (design re-sync `c3c98733`: was accent
+    /// capsule + white text), weight `.heavy` (was `.bold`).
     private var joinButton: some View {
         Button(action: onJoin) {
             Text(Self.joinLabel)
-                .font(.system(size: 12 * theme.fontScale, weight: .bold))
-                .foregroundColor(.white)
+                .font(.system(size: 12 * theme.fontScale, weight: .heavy))
+                .foregroundColor(theme.accent)
                 .padding(.horizontal, 13)
                 .padding(.vertical, 6)
-                .background(Capsule().fill(theme.accent))
+                .background(Capsule().fill(Color.white))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(LBAccessibilityID.eventJoinCta)
     }
 
-    /// 已參加 chip (`padding 11/5`, white 0.16 capsule, white 0.72 text) + checkmark.
+    /// 已參加 chip (`padding 11/5`, white 0.2 capsule, white 0.82 text — design re-sync
+    /// `c3c98733`: was white 0.16 / white 0.72) + checkmark.
     private var joinedChip: some View {
         HStack(spacing: 4) {
             Image(systemName: "checkmark")
@@ -689,10 +748,10 @@ struct LBEventJoinLineRow: View {
             Text(Self.joinedLabel)
                 .font(.system(size: 11.5 * theme.fontScale, weight: .bold))
         }
-        .foregroundColor(Color.white.opacity(0.72))
+        .foregroundColor(Color.white.opacity(0.82))
         .padding(.horizontal, 11)
         .padding(.vertical, 5)
-        .background(Capsule().fill(Color.white.opacity(0.16)))
+        .background(Capsule().fill(Color.white.opacity(0.2)))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.eventJoinJoined)
     }
@@ -845,7 +904,7 @@ struct LBProductSaleCardRow: View {
         HStack(alignment: .top, spacing: 8) {
             // 24px accent 軌 — tag 圖示（共用聊天 / 活動軌 ACT_SLOT）。
             Circle().fill(theme.accent).frame(width: 24, height: 24)
-                .overlay(Image(systemName: "tag.fill")
+                .overlay(Image(systemName: "tag")
                     .font(.system(size: 11, weight: .bold)).foregroundColor(.white))
             card
         }

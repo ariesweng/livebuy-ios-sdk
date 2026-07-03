@@ -19,6 +19,7 @@ public enum LBAuthTriggerAction: Equatable {
     case cartAdd
     case commentSend
     case couponClaim
+    case subscribe
     case other
 }
 
@@ -57,6 +58,7 @@ public final class DefaultAuthGate {
         case "cart_add":     return .cartAdd
         case "comment_send": return .commentSend
         case "coupon_claim": return .couponClaim
+        case "subscribe":    return .subscribe
         default:             return .other
         }
     }

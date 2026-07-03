@@ -1,6 +1,7 @@
 import SwiftUI
+import LiveBuyUI
 
-// MARK: - LoginPromptController — on-demand「請先登入」(commentSend) modal presentation state
+// MARK: - LoginPromptController — on-demand「請先登入」modal presentation state (triggerAction-driven)
 //
 // The drop-in container's `PlayerOverlayRootView` does NOT compose the AUTH_REQUIRED-driven
 // `GapSurfacesOverlayView` (that surface is for hosts who assemble their own overlay), and the
@@ -23,10 +24,19 @@ public final class LoginPromptController: ObservableObject {
     /// Whether the「請先登入」modal is currently presented. Default `false` (snapshot-neutral).
     @Published public var isPresented = false
 
+    /// Which interaction raised the modal — drives `AuthGateModalView`'s body copy per kind. The
+    /// container sets it via `present(triggerAction:)`; the composed modal reads it dynamically so
+    /// ONE controller serves every gate (留言 → `.commentSend`, 訂閱 → `.subscribe`, …). Default
+    /// `.commentSend` (the original gate) keeps the existing 留言 gate behaviour unchanged.
+    @Published public var triggerAction: LBAuthTriggerAction = .commentSend
+
     public init() {}
 
-    /// Show the「請先登入」modal (the 留言 pill's guest + `guest_comment == 0` branch).
-    public func present() {
+    /// Show the「請先登入」modal for the given trigger. Default `.commentSend` (the 留言 pill's
+    /// guest + `guest_comment == 0` branch) so existing call sites need no change; 訂閱 gate passes
+    /// `.subscribe`.
+    public func present(triggerAction: LBAuthTriggerAction = .commentSend) {
+        self.triggerAction = triggerAction
         isPresented = true
     }
 

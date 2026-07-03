@@ -47,6 +47,21 @@ public final class PlayerShellModel: ObservableObject {
     @Published public private(set) var shopLogo: String
     /// Live viewer count (`DefaultPlayerHeaderState.viewerCount`).
     @Published public private(set) var viewerCount: Int
+    /// Backend-driven viewer-count visibility (rb-ios-viewer-count-show-pv-num). Mirrors the
+    /// view-model `DefaultPlayerHeaderState.viewerCountVisible` (= core
+    /// `LBPlayerMomentState.viewerCountVisible` = backend `channel.show_pv_num == 1`), so it
+    /// is a `@Published` template-derived value (same pipeline as `viewerCount`), updated by
+    /// `refresh(from:)`. `PlayerShellView` feeds it to `PlayerHeaderBarView`; the viewer count
+    /// draws ⟺ `isLive && viewerCountVisible && showViewerCount`. Distinct from `showViewerCount`
+    /// (host config) below — BOTH must be true. Default `true` keeps the demo / snapshot
+    /// memberwise construction byte-identical.
+    @Published public private(set) var viewerCountVisible: Bool
+    /// Host-config viewer-count visibility gate (rb-ios-hide-viewer-count-config). NOT a
+    /// template-derived value — a per-shell constant sourced from `LiveBuyPlayerConfig.show
+    /// ViewerCount` (default `true`), so it is a plain stored property (not `@Published`):
+    /// it is set once at build time and never mutates at runtime. `PlayerShellView` feeds it
+    /// to `PlayerHeaderBarView`; `false` hides the viewer count even while live / replay.
+    public var showViewerCount: Bool = true
     /// Subscribe badge state (`DefaultPlayerHeaderState.isSubscribed`).
     @Published public private(set) var isSubscribed: Bool
     /// Share action context URL (`DefaultPlayerHeaderState.shareUrl`).
@@ -71,6 +86,13 @@ public final class PlayerShellModel: ObservableObject {
     /// LIVE vs VOD flag (`DefaultPlayerHeaderState.isLive`, channel-derived). The
     /// header branches chrome on it (LIVE pill + viewer count only when live).
     @Published public private(set) var isLive: Bool
+
+    /// 回放旗標 — 一場**已結束的直播**（`DefaultPlayerHeaderState.isFinishedLiveReplay`，
+    /// channel-derived `type == 2 && liveStatus == 3`）。與 `isLive` 並列、語意分離、互斥。
+    /// `PlayerShellView` 以 `usesLiveChrome = isLive || isFinishedLiveReplay` 把回放歸入
+    /// live-chrome 家族（LIVE 疊層 + LIVE 底部 bar + 聊天 feed），純 VOD（兩旗標皆 false）維持
+    /// VOD 版型。只讀鏡像，不新增 view-model。預設 `false`（pre-channel / 直播 / 純 VOD）。
+    @Published public private(set) var isFinishedLiveReplay: Bool
 
     // -- VOD playback progress (DefaultPlaybackProgressState, VOD-2) ------------
 
@@ -104,6 +126,14 @@ public final class PlayerShellModel: ObservableObject {
     /// Video cover URL (`DefaultUpcomingState.cover` / backend `channel.cover`) — the
     /// upcoming surface's full-bleed background.
     @Published public private(set) var upcomingCover: String
+    /// General (NOT upcoming-scoped) loading-surface cover URL
+    /// (`DefaultPlayerTemplate.loadingCover` / backend `channel.cover`) — the loading
+    /// (`startPhase == .loading`) background source for a normal live / VOD too, not
+    /// just an `awaitingLive` upcoming. Zero-pixel bridge mirror (a follow-up reference-ui
+    /// change renders the cover + mask). DISTINCT from `upcomingCover` (upcoming-only) —
+    /// both coexist. Default `""` keeps the demo / snapshot memberwise construction
+    /// byte-identical.
+    @Published public private(set) var loadingCover: String
 
     // -- Start lifecycle (開場 loading / buffering / splash) state ----------------
 
@@ -240,6 +270,7 @@ public final class PlayerShellModel: ObservableObject {
             hostName: t.header.hostName,
             shopLogo: t.header.shopLogo,
             viewerCount: t.header.viewerCount,
+            viewerCountVisible: t.header.viewerCountVisible,
             isSubscribed: t.header.isSubscribed,
             shareUrl: t.header.shareUrl,
             railItems: t.operationRail.items,
@@ -247,6 +278,7 @@ public final class PlayerShellModel: ObservableObject {
             heartBurstTick: t.operationRail.heartBurstTick,
             muted: t.header.muted,
             isLive: t.header.isLive,
+            isFinishedLiveReplay: t.header.isFinishedLiveReplay,
             position: t.playbackProgress.position,
             duration: t.playbackProgress.duration,
             isPlaying: t.playbackProgress.isPlaying,
@@ -257,6 +289,7 @@ public final class PlayerShellModel: ObservableObject {
             startPhase: t.startScreen.phase,
             upcomingStartAt: t.upcoming.scheduledStartAt,
             upcomingCover: t.upcoming.cover,
+            loadingCover: t.loadingCover,
             prevVideoId: t.navigation.prevVideoId,
             nextVideoId: t.navigation.nextVideoId,
             infoTab: t.infoTab.current,
@@ -286,6 +319,8 @@ public final class PlayerShellModel: ObservableObject {
         hostName: String = "",
         shopLogo: String = "",
         viewerCount: Int = 0,
+        viewerCountVisible: Bool = true,
+        showViewerCount: Bool = true,
         isSubscribed: Bool = false,
         shareUrl: String = "",
         railItems: [LBSideRailItem] = PlayerShellModel.defaultRailItems,
@@ -293,6 +328,7 @@ public final class PlayerShellModel: ObservableObject {
         heartBurstTick: Int = 0,
         muted: Bool = true,
         isLive: Bool = false,
+        isFinishedLiveReplay: Bool = false,
         position: Double = 0,
         duration: Double = 0,
         isPlaying: Bool = false,
@@ -303,6 +339,7 @@ public final class PlayerShellModel: ObservableObject {
         startPhase: LBStartScreenPhase = .loading,
         upcomingStartAt: String = "",
         upcomingCover: String = "",
+        loadingCover: String = "",
         prevVideoId: String? = nil,
         nextVideoId: String? = nil,
         infoTab: LBInfoTabState = PlayerShellModel.emptyInfoTab,
@@ -324,6 +361,8 @@ public final class PlayerShellModel: ObservableObject {
         self.hostName = hostName
         self.shopLogo = shopLogo
         self.viewerCount = viewerCount
+        self.viewerCountVisible = viewerCountVisible
+        self.showViewerCount = showViewerCount
         self.isSubscribed = isSubscribed
         self.shareUrl = shareUrl
         self.railItems = railItems
@@ -331,6 +370,7 @@ public final class PlayerShellModel: ObservableObject {
         self.heartBurstTick = heartBurstTick
         self.muted = muted
         self.isLive = isLive
+        self.isFinishedLiveReplay = isFinishedLiveReplay
         self.position = position
         self.duration = duration
         self.isPlaying = isPlaying
@@ -341,6 +381,7 @@ public final class PlayerShellModel: ObservableObject {
         self.startPhase = startPhase
         self.upcomingStartAt = upcomingStartAt
         self.upcomingCover = upcomingCover
+        self.loadingCover = loadingCover
         self.prevVideoId = prevVideoId
         self.nextVideoId = nextVideoId
         self.infoTab = infoTab
@@ -379,6 +420,7 @@ public final class PlayerShellModel: ObservableObject {
         hostName = t.header.hostName
         shopLogo = t.header.shopLogo
         viewerCount = t.header.viewerCount
+        viewerCountVisible = t.header.viewerCountVisible
         isSubscribed = t.header.isSubscribed
         shareUrl = t.header.shareUrl
 
@@ -387,6 +429,7 @@ public final class PlayerShellModel: ObservableObject {
         heartBurstTick = t.operationRail.heartBurstTick
         muted = t.header.muted
         isLive = t.header.isLive
+        isFinishedLiveReplay = t.header.isFinishedLiveReplay
         position = t.playbackProgress.position
         duration = t.playbackProgress.duration
         isPlaying = t.playbackProgress.isPlaying
@@ -397,6 +440,7 @@ public final class PlayerShellModel: ObservableObject {
         startPhase = t.startScreen.phase
         upcomingStartAt = t.upcoming.scheduledStartAt
         upcomingCover = t.upcoming.cover
+        loadingCover = t.loadingCover
 
         prevVideoId = t.navigation.prevVideoId
         nextVideoId = t.navigation.nextVideoId

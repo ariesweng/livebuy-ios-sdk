@@ -176,6 +176,9 @@ public struct FeedWinOverlayView: View {
                 hostScrollable: chatScrollable,
                 // 置頂留言（chat-pinned-message-render ⑤c）；nil → 無橫幅（snapshot 中性）。
                 pinned: model.pinned,
+                // 主播名（純顯示，rb-ios-loading-announce-restyle）→ `.eventJoin` 列的主播名 +
+                // 「主播」badge header。
+                hostName: model.hostName,
                 onJoinEvent: { eid, keyword in
                     // The唯一 interactive row's「加入活動」intent → upstream exit
                     // (host wired) via the model's thin forwarder.

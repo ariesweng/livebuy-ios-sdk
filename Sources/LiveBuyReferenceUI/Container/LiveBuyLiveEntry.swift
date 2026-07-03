@@ -267,6 +267,16 @@ public struct LiveBuyLiveEntry: View {
         let item: LBVideoItem
     }
 
+    /// Public host-facing 「直播已結束」即時隱藏訊號入口。host 在自家 live-end 判斷成立時
+    /// （例如 event listener 收到 core `POLL_RECEIVED` + `live_end == 1`）呼叫此型別安全入口，
+    /// 讓正顯示中的容器立即隱藏，**取代硬寫 `Notification.Name("lb_live_ended")`**。內部 post
+    /// 既有 internal `.lbLiveEnded`（raw value 不變、容器 observer 不變），故對 drop-in player 的
+    /// 既有 ambient 路徑零影響。使用 turnkey 容器時此訊號為**選用**（immediacy-only）：即使 host
+    /// 從不呼叫，容器自身 30s 輪詢 + `liveStatus == 1` gate 仍會在一個 `pollInterval` 內隱藏。
+    public static func signalLiveEnded() {
+        NotificationCenter.default.post(name: .lbLiveEnded, object: nil)
+    }
+
     public init(shopId: String, config: LiveBuyLiveEntryConfig = LiveBuyLiveEntryConfig()) {
         _controller = StateObject(wrappedValue: LiveBuyLiveEntryController(
             shopId: shopId, pollInterval: config.pollInterval))

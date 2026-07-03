@@ -76,21 +76,42 @@ public struct LBWidgetContent: Equatable {
     }
 
     /// Per-video diff signature for the snapshot equality guard. Beyond the stable
-    /// `id` it includes the DISPLAY-AFFECTING fields that can change mid-session —
-    /// `liveStatus` (預告 0 / 直播 1 / 回放 3) plus `type` + `liveurl` (which together
-    /// drive `widget-hide-urlless-live` visibility). Comparing only `id` (the prior
-    /// behaviour) made a refresh that flips a card's `liveStatus` 0→1 look "unchanged",
-    /// so `onChange` never fired and the card stayed on 直播預告 until a reopen
-    /// (widget-content-diff-refresh / 問題3). Pure for unit testing.
+    /// `id` it includes every DISPLAY-AFFECTING field that can change mid-session so a
+    /// refresh that changes only what the card renders still counts as "changed":
+    ///   • `liveStatus` (預告 0 / 直播 1 / 回放 3) + `type` + `liveurl` — the latter two
+    ///     drive `widget-hide-urlless-live` visibility;
+    ///   • `cover` + `preview` + `title` — the card's thumbnail media + title text
+    ///     (all widget cells reuse `CarouselCardView`);
+    ///   • the product-overlay display fields (`goods.name` / `goods.pic` / `goods.price`)
+    ///     via `goodsDiffSignature` (nil-safe — `goods` is `Optional`).
+    /// Comparing only `id` + status fields (the prior behaviour) made a refresh that
+    /// keeps the same `id` but swaps `cover` (backend renames the cover URL), `title`,
+    /// or the featured product look "unchanged", so `onChange` never fired and the card
+    /// stayed on the stale image until a reopen (widget-content-diff-refresh /
+    /// widget-content-diff-include-cover). Pure for unit testing.
     static func videoDiffSignature(_ v: LBVideoItem) -> String {
-        "\(v.id)|\(v.liveStatus)|\(v.type)|\(v.liveurl)"
+        "\(v.id)|\(v.liveStatus)|\(v.type)|\(v.liveurl)|\(v.cover)|\(v.preview)|\(v.title)|\(goodsDiffSignature(v.goods))"
+    }
+
+    /// Diff signature for the card's featured-product overlay (`LBVideoItem.goods` —
+    /// `LBFeaturedGood?`). `nil` (no overlay rendered) → the sentinel `"-"`, so a
+    /// product appearing / disappearing (nil ↔ non-nil) always differs; otherwise the
+    /// DISPLAYED fields the overlay draws (`name` / `pic` / `price`). Pure for unit
+    /// testing. `originalPrice` / `soldOut` / `stock` / `status` are intentionally
+    /// excluded — the widget card does not render them.
+    static func goodsDiffSignature(_ g: LBFeaturedGood?) -> String {
+        guard let g = g else { return "-" }
+        return "\(g.name)|\(g.pic)|\(g.price)"
     }
 
     /// `Equatable` is hand-rolled because core `LBVideoItem` is NOT `Equatable`
     /// (it is a Mapper-produced model). Two snapshots are equal when the scalar
     /// fields match AND the video / live-card DIFF SIGNATURE (id + liveStatus + type +
-    /// liveurl) is the same — so a content change (incl. a card's live status flipping)
-    /// always makes the snapshot unequal and fires `onChange` (diff-then-notify).
+    /// liveurl + cover + preview + title + 商品名稱/圖片/價格) is the same — so ANY change
+    /// the card renders (live status flipping, a swapped cover / preview / title, or an
+    /// updated featured product) always makes the snapshot unequal and fires `onChange`
+    /// (diff-then-notify). Covering the DISPLAY fields is what keeps a pure cover /
+    /// title / price update from being swallowed by the diff.
     public static func == (lhs: LBWidgetContent, rhs: LBWidgetContent) -> Bool {
         lhs.mode == rhs.mode
             && lhs.currentPage == rhs.currentPage

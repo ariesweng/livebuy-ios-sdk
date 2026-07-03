@@ -39,8 +39,11 @@ import LiveBuyUI
 //
 // Phase dispatch (design §1, mirrors the moments.jsx start components
 // `LBPLoadingOverlay` / `LBPBufferingSpinner` / `LBPSkipIntroButton`):
-//   • `.loading`   → full-bleed brand background + centered spinner + wordmark +
-//                    「載入中…」 caption.
+//   • `.loading`   → full-bleed brand background + centered brand PNG-sequence
+//                    animation ONLY. Design re-sync `c3c98733` REMOVED the wordmark
+//                    (accent dot + "LiveBuy") and the「載入中…」caption that used to
+//                    sit below the spinner — `LBPLoadingOverlay` now renders just the
+//                    mark (`rb-ios-loading-announce-restyle`).
 //   • `.buffering` → renders NOTHING (`EmptyView`). The former central over-content
 //                    spinner was removed (rb-ios-hide-start-buffering-spinner): a stalled
 //                    engine keeps the phase at `.buffering`, which left the spinner stuck
@@ -77,22 +80,35 @@ public struct StartScreenView: View {
     /// from `PlayerShellModel.startPhase`. Drives which branch renders. Read-only.
     public let phase: LBStartScreenPhase
 
+    /// The video cover URL (`PlayerShellModel.loadingCover` ← `channel.cover`) drawn as
+    /// the `.loading` full-bleed background (behind the loader) on the `live == true`
+    /// runtime path; empty → the solid `#0C0C10` brand backdrop. Distinct from the
+    /// upcoming-scoped cover. Default `""` keeps demo / snapshot on the solid path
+    /// (design provenance: `UpcomingCountdownView` cover+mask pattern).
+    public let coverUrl: String
+
+    /// Runtime opt-in for the `.loading` cover load. `false` (default — demo / snapshot)
+    /// → solid `#0C0C10` backdrop, NO remote cover load (deterministic baselines).
+    /// `true` (host runtime, `!paintsBackgroundPlaceholder`) → loads the cover background.
+    /// Same mechanism as `UpcomingCountdownView.live`.
+    public let live: Bool
+
     /// Splash「略過介紹」open intent. This surface does NOT own the skip — the
     /// container / host funnels it to core `skipStart()` (design §1). Default `nil`
     /// so demo / snapshot instances construct action-free.
     public let onSkip: (() -> Void)?
 
-    /// Local spinner rotation state. Driven purely by the on-appear forever-repeat
-    /// toggle below (never by a core call). Mirrors the design's `lbp-spin` ring.
-    @State private var spinning = false
-
     public init(
         theme: ReferenceUITheme,
         phase: LBStartScreenPhase,
+        coverUrl: String = "",
+        live: Bool = false,
         onSkip: (() -> Void)? = nil
     ) {
         self.theme = theme
         self.phase = phase
+        self.coverUrl = coverUrl
+        self.live = live
         self.onSkip = onSkip
     }
 
@@ -120,45 +136,51 @@ public struct StartScreenView: View {
 
     // MARK: - .loading — full-bleed brand loader (design §1, `phase === 'loading'`)
 
-    /// First load: a full-bleed dark brand background with a centered spinner, the
-    /// brand wordmark, and a「載入中…」caption. `background: '#0C0C10'`.
+    /// First load: a full-bleed background with the centered brand PNG-sequence
+    /// animation. The BACKDROP is the video cover (`scaleAspectFill`) + a
+    /// `rgba(0,0,0,0.35)` dark mask on the `live == true` runtime path (so first-open
+    /// shows the cover instead of black — design provenance: `UpcomingCountdownView`
+    /// cover+mask); the demo / snapshot path (`live == false`) and an empty cover fall
+    /// back to the solid `#0C0C10` brand backdrop. Design re-sync `c3c98733` REMOVED
+    /// the brand wordmark and「載入中…」caption that used to sit below the mark —
+    /// `.loading` now renders ONLY `LoadingMarkAnimationView()` over the backdrop
+    /// (`rb-ios-loading-announce-restyle`).
     private var loadingScreen: some View {
         ZStack {
-            // Full-bleed brand backdrop (`#0C0C10`).
-            Self.loadingBackground
-                .ignoresSafeArea()
-
-            VStack(spacing: Self.loadingStackSpacing) {
-                spinnerRing(size: Self.loadingSpinnerSize, lineWidth: Self.loadingSpinnerWidth)
-
-                // Brand wordmark (`LBLogo variant="wordmark"`). The design renders a
-                // dark wordmark; we mirror its read as a white brand name with the
-                // accent applied to the leading mark dot.
-                wordmark
-
-                // Letter-spacing in the design (`letterSpacing: 1`) is omitted —
-                // `Text.tracking(_:)` is iOS-16+, and this layer's floor is iOS-14
-                // (design §"守住的不變式": iOS-14 樓地板). The caption reads the same.
-                Text(Self.loadingCaption)
-                    .font(.system(size: Self.loadingCaptionFontSize))
-                    .foregroundColor(.white.opacity(Self.loadingCaptionOpacity))
+            // Backdrop: cover (runtime, fill) + dark mask when a cover URL resolves;
+            // else the solid `#0C0C10` brand backdrop (snapshot / demo / empty cover).
+            // `live:` gates the remote load so snapshot baselines stay deterministic —
+            // the SAME mechanism as `UpcomingCountdownView` (design provenance).
+            if let url = Self.loadingCoverURL(live: live, coverUrl: coverUrl) {
+                RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
+                    .ignoresSafeArea()
+                Color.black.opacity(Self.loadingCoverMaskOpacity)
+                    .ignoresSafeArea()
+            } else {
+                Self.loadingBackground
+                    .ignoresSafeArea()
             }
+
+            // The brand PNG-sequence mark ONLY (design re-sync `c3c98733`): the
+            // wordmark + 「載入中…」caption that used to sit below it are REMOVED.
+            // A single `ZStack` child centers itself — no wrapping `VStack` / spacing
+            // needed anymore.
+            LoadingMarkAnimationView()
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.momentLoading)
     }
 
-    /// The brand wordmark used by `.loading` (`LBLogo variant="wordmark"`): an
-    /// accent mark dot + the brand name. Plain `HStack` (no lazy/scroll).
-    private var wordmark: some View {
-        HStack(spacing: Self.wordmarkSpacing) {
-            Circle()
-                .fill(theme.accent)
-                .frame(width: Self.wordmarkDotSize, height: Self.wordmarkDotSize)
-            Text(Self.brandName)
-                .font(.system(size: Self.wordmarkFontSize, weight: .heavy))
-                .foregroundColor(.white)
-        }
+    /// Pure gate deciding the `.loading` backdrop: a resolved cover `URL` → draw
+    /// cover + mask; `nil` → the solid `#0C0C10` brand backdrop. Returns `nil` when
+    /// NOT on the runtime path (`live == false` — demo / snapshot, so no remote load →
+    /// deterministic baselines) OR the cover is empty / whitespace (graceful fallback).
+    /// Mirrors `UpcomingCountdownView.coverURL` with the `live` gate folded in
+    /// (single testable function; unit-test-discipline).
+    static func loadingCoverURL(live: Bool, coverUrl: String) -> URL? {
+        guard live else { return nil }
+        let s = coverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : URL(string: s)
     }
 
     // MARK: - .buffering — intentionally not rendered (rb-ios-hide-start-buffering-spinner)
@@ -203,9 +225,9 @@ public struct StartScreenView: View {
                     .font(.system(size: Self.skipFontSize, weight: .semibold))
                     .foregroundColor(.white)
                 // Fast-forward chevrons (the design's `M5 4l8 8…M14 4l6 8…` SVG).
-                Image(systemName: "forward.fill")
-                    .font(.system(size: Self.skipGlyphSize, weight: .bold))
-                    .foregroundColor(.white)
+                // Hand-drawn open double-chevron (design `fill="none" stroke 2.2`); SF
+                // `forward.fill` (solid triangles) contradicted the stroke-based icon set.
+                ChevronForwardGlyph(size: Self.skipGlyphSize, color: .white)
             }
             .padding(.horizontal, Self.skipHPadding)
             .padding(.vertical, Self.skipVPadding)
@@ -219,33 +241,6 @@ public struct StartScreenView: View {
         .accessibilityIdentifier(LBAccessibilityID.momentStartSkip)
     }
 
-    // MARK: - Spinner ring (iOS-14-safe, mirrors design `lbp-spin`)
-
-    /// A rotating accent/white ring drawn with `Circle().trim` and a forever-repeat
-    /// rotation — the iOS-14-safe stand-in for the design's `lbp-spin` border
-    /// spinner (and avoids relying on `ProgressView(.circular)` styling, which is
-    /// inconsistent across OS versions). A faint full ring + a bright trimmed arc.
-    private func spinnerRing(size: CGFloat, lineWidth: CGFloat) -> some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(Self.spinnerTrackOpacity), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: Self.spinnerArcFraction)
-                .stroke(
-                    Color.white,
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-                )
-                .rotationEffect(.degrees(spinning ? 360 : 0))
-        }
-        .frame(width: size, height: size)
-        // Forever-repeat rotation (iOS-14-safe). Under `ImageRenderer` the frame is
-        // captured at the seed (deterministic baseline); on a live player it spins.
-        .onAppear {
-            withAnimation(.linear(duration: Self.spinnerDuration).repeatForever(autoreverses: false)) {
-                spinning = true
-            }
-        }
-    }
 }
 
 // MARK: - Design tokens (lifted from moments.jsx start components — LBPLoadingOverlay /
@@ -262,18 +257,12 @@ private extension StartScreenView {
     static let chromeFill = Color(hex: chromeFillHex) ?? .black
 
     // --- .loading ---
-    static let loadingStackSpacing: CGFloat = 18  // gap 18
-    static let loadingSpinnerSize: CGFloat = 76   // LBLoading size 76
-    static let loadingSpinnerWidth: CGFloat = 4
-    static let loadingCaption = "載入中…"
-    static let loadingCaptionFontSize: CGFloat = 12
-    static let loadingCaptionOpacity: Double = 0.5  // rgba(255,255,255,0.5)
-
-    // Wordmark (`LBLogo variant="wordmark" size=26`)
-    static let brandName = "LiveBuy"
-    static let wordmarkSpacing: CGFloat = 7
-    static let wordmarkDotSize: CGFloat = 9
-    static let wordmarkFontSize: CGFloat = 22
+    // `.loading` cover backdrop dark mask (rgba(0,0,0,0.35)) — design provenance
+    // `UpcomingCountdownView` cover+mask. Only drawn on the `live == true` cover path.
+    static let loadingCoverMaskOpacity: Double = 0.35
+    // The wordmark (accent dot + "LiveBuy") + 「載入中…」caption tokens that used to
+    // live here were REMOVED (design re-sync `c3c98733`, `rb-ios-loading-announce-
+    // restyle`) — `.loading` now renders only `LoadingMarkAnimationView()`.
 
     // --- .buffering: intentionally not rendered (rb-ios-hide-start-buffering-spinner) ---
     // (the former central buffering pill / spinner tokens were removed — `.buffering`
@@ -295,11 +284,6 @@ private extension StartScreenView {
     static let skipShadowOpacity: Double = 0.3        // boxShadow rgba(0,0,0,0.3)
     static let skipShadowRadius: CGFloat = 14         // blur 14
     static let skipShadowY: CGFloat = 4               // y-offset 4
-
-    // Spinner ring
-    static let spinnerTrackOpacity: Double = 0.22     // rgba(255,255,255,0.22)
-    static let spinnerArcFraction: CGFloat = 0.25     // bright top arc
-    static let spinnerDuration: Double = 0.8          // lbp-spin 0.8s
 }
 
 // MARK: - Deterministic demo data (previews + snapshot test)

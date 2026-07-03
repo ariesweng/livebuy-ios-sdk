@@ -73,6 +73,10 @@ public struct PlayerOverlayContext {
     public let onOpenProductList: () -> Void
     public let onShowChatFeed: () -> Void
     public let onComment: () -> Void
+    /// 訂閱按鈕（PlayerHeader 頭像徽章 + VideoInfoPanel 訂閱 pill 共用同一入口）→ 未登入訪客先本地
+    /// 呈現「請先登入」modal（`AuthGateModalView(.subscribe)`），已登入 → `toggleSubscribe()`
+    /// （rb-ios-subscribe-login-gate）。header 徽章與 info pill 兩處都走這一個注入 closure。
+    public let onSubscribe: () -> Void
     /// LIVE 底部 bar 暱稱（person-edit）按鈕 → 本地呈現 設定暱稱 modal（不走被 gating 的 core 路徑）。
     public let onNickname: () -> Void
     /// 設定暱稱 modal 送出 → 設定顯示名（容器預設 `LiveBuy.setUser`）。傳 trimmed 暱稱。
@@ -113,6 +117,7 @@ public struct PlayerOverlayContext {
         onOpenProductList: @escaping () -> Void,
         onShowChatFeed: @escaping () -> Void,
         onComment: @escaping () -> Void,
+        onSubscribe: @escaping () -> Void = {},
         onNickname: @escaping () -> Void = {},
         onNicknameSubmit: @escaping (String) -> Void = { _ in },
         onProductTap: @escaping (LBProduct) -> Void,
@@ -148,6 +153,7 @@ public struct PlayerOverlayContext {
         self.onOpenProductList = onOpenProductList
         self.onShowChatFeed = onShowChatFeed
         self.onComment = onComment
+        self.onSubscribe = onSubscribe
         self.onNickname = onNickname
         self.onNicknameSubmit = onNicknameSubmit
         self.onProductTap = onProductTap

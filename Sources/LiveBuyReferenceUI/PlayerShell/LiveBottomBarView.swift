@@ -89,6 +89,13 @@ public struct LiveBottomBarView: View {
     /// / `isReplay` (when `bagOnly` is true, the other variant flags are ignored).
     public let bagOnly: Bool
 
+    /// 回放（已結束直播）聊天室已關閉旗標。`true`（來源 `PlayerShellModel.isFinishedLiveReplay`，
+    /// `type==3 || (type==2 && liveStatus==3)`）→ 留言區改 disabled「聊天室已關閉」（非互動）、暱稱隱藏：
+    /// 因後端 `POST /sdk/video/commentsub` 對已結束直播回 404（`notLive`）。**與 behind-edge `isReplay`
+    /// 不同**——`isReplay`（仍 `liveStatus==1` 的預錄直播）留言恆開（prerecorded-live-bottom-bar-comment）；
+    /// `chatClosed` 才是真正已結束的回放。優先序低於 `bagOnly` / `isUpcoming`（rb-ios-replay-chat-closed-bottom-bar）。
+    public let chatClosed: Bool
+
     /// Bag tap → host opens the product list. nil → inert.
     public let onBag: (() -> Void)?
     /// "留言..." tap → host opens its comment composer / nickname flow. nil → inert.
@@ -110,6 +117,7 @@ public struct LiveBottomBarView: View {
         isReplay: Bool,
         isUpcoming: Bool = false,
         bagOnly: Bool = false,
+        chatClosed: Bool = false,
         onBag: (() -> Void)? = nil,
         onComment: (() -> Void)? = nil,
         onNickname: (() -> Void)? = nil,
@@ -122,6 +130,7 @@ public struct LiveBottomBarView: View {
         self.isReplay = isReplay
         self.isUpcoming = isUpcoming
         self.bagOnly = bagOnly
+        self.chatClosed = chatClosed
         self.onBag = onBag
         self.onComment = onComment
         self.onNickname = onNickname
@@ -144,28 +153,36 @@ public struct LiveBottomBarView: View {
             if bagOnly {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
             } else {
-                // Flex comment area. Upcoming (slim) → an ACTIVE flex (no chat before the
-                // stream starts); otherwise (LIVE — INCLUDING 預錄直播 where isReplay is
-                // mis-flagged true) → the tap-target "留言...". The LIVE bottom bar only renders
-                // for a live broadcast (liveStatus == 1), whose chat room is open REGARDLESS of
-                // the viewer's playback position — so the comment entry is ALWAYS available and
-                // MUST NOT collapse to a disabled "聊天室已關閉" on `isReplay`
-                // (prerecorded-live-bottom-bar-comment, 問題 1). True 回放/VOD uses the side rail,
-                // not this bar. The upcoming flex uses `Color.clear` + `maxWidth: .infinity`
-                // (mirrors the design `<div flex:1/>` and the LIVE commentPill), NOT a bare
-                // `Spacer` — a bare Spacer collapses to ideal-width when the bar is hosted without
-                // an explicit width proposal, pushing the end buttons (bag / like) off-screen.
-                if isUpcoming {
+                // Flex comment area — variant resolved by the pure `commentAreaKind`:
+                //   • upcoming(slim) → an ACTIVE flex spacer (no chat before the stream starts).
+                //   • chatClosed(回放) → disabled「聊天室已關閉」(non-interactive): the FINISHED live's
+                //     chat room is closed (backend commentsub → 404 notLive). Distinct from a
+                //     behind-edge `isReplay` (a live broadcast where the viewer scrubbed back —
+                //     still liveStatus==1, chat OPEN → keep the tap-target "留言...").
+                //   • comment → the tap-target "留言..." (LIVE, incl. 預錄直播 mis-flagged isReplay).
+                // The flex spacer uses `Color.clear` + `maxWidth: .infinity` (mirrors design
+                // `<div flex:1/>` and the LIVE commentPill), NOT a bare `Spacer` — a bare Spacer
+                // collapses to ideal-width without an explicit width proposal, pushing the end
+                // buttons (bag / like) off-screen.
+                switch Self.commentAreaKind(bagOnly: bagOnly, isUpcoming: isUpcoming, chatClosed: chatClosed) {
+                case .upcomingSpacer:
                     Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                } else {
+                case .chatClosed:
+                    chatClosedPill
+                case .comment:
                     commentPill
+                case .bagOnlySpacer:
+                    // Unreachable here (bagOnly handled above), but keeps the switch total.
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                 }
 
-                // Nickname (person-edit) button is dropped entirely in the upcoming variant
-                // (design gates it on `!upcoming`). Otherwise it ALWAYS shows — the LIVE bottom
-                // bar no longer swaps it for a CC toggle on `isReplay` (a live broadcast's chat is
-                // open, so the nickname/comment affordance stays — prerecorded-live-bottom-bar-comment).
-                if !isUpcoming {
+                // Nickname (person-edit) button shows ONLY in the normal LIVE variant
+                // (`!isUpcoming && !chatClosed`): dropped in the upcoming slim variant (design
+                // gates it on `!upcoming`) AND in the 回放 chat-closed variant (改名 only serves
+                // commenting; with the chat room closed it is useless). The LIVE bottom bar no
+                // longer swaps it for a CC toggle on the behind-edge `isReplay`
+                // (prerecorded-live-bottom-bar-comment).
+                if !isUpcoming && !chatClosed {
                     // 設定暱稱 draws the hand-drawn person-EDIT composite (head + pencil
                     // badge, design `live-chrome.jsx` ≈224), not SF `person.fill`
                     // (rb-align-nickname-icon-person-edit).
@@ -249,6 +266,46 @@ public struct LiveBottomBarView: View {
         .accessibilityIdentifier(LBAccessibilityID.liveCommentPill)
     }
 
+    /// Disabled「聊天室已關閉」flex pill for the 回放 (finished-live) variant — a NON-interactive
+    /// `HStack` (NOT a `Button`), so a tap does nothing (no `onComment` → no composer, no
+    /// 「請先登入」mis-fire, no commentsub 404). Dimmer than the active pill (text 0.5 vs 0.78,
+    /// fainter capsule) to read as disabled. String is design-literal (mirrors `commentPlaceholder`).
+    private var chatClosedPill: some View {
+        HStack(spacing: 0) {
+            Text(Self.chatClosedPlaceholder)
+                .font(.system(size: Self.commentFontSize))
+                .foregroundColor(Color.white.opacity(0.5))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Self.commentHPadding)
+        .frame(height: Self.iconSize)
+        .frame(maxWidth: .infinity)
+        .background(Capsule().fill(Self.commentBackground.opacity(0.6)))
+        .accessibilityIdentifier(LBAccessibilityID.liveCommentPill)
+    }
+
+    // MARK: - Comment-area variant (pure, unit-testable — no rendering)
+
+    /// Which thing the flex comment area draws. Pure decision of the three variant flags
+    /// (`commentAreaKind`), extracted so the precedence is unit-testable without rendering
+    /// (mirrors `PlayerShellView.resolveGestureEnd` discipline).
+    enum CommentAreaKind: Equatable { case bagOnlySpacer, upcomingSpacer, chatClosed, comment }
+
+    /// Resolve the comment-area variant. Precedence: `bagOnly` > `isUpcoming` > `chatClosed`
+    /// > 正常留言. Pure (no I/O, no UIKit).
+    static func commentAreaKind(bagOnly: Bool, isUpcoming: Bool, chatClosed: Bool) -> CommentAreaKind {
+        if bagOnly { return .bagOnlySpacer }
+        if isUpcoming { return .upcomingSpacer }
+        if chatClosed { return .chatClosed }
+        return .comment
+    }
+
+    /// Whether the nickname (person-edit) button shows — only in the normal LIVE variant.
+    /// Pure (unit-testable). Dropped in upcoming slim / bag-only / 回放 chat-closed.
+    static func showsNickname(bagOnly: Bool, isUpcoming: Bool, chatClosed: Bool) -> Bool {
+        !bagOnly && !isUpcoming && !chatClosed
+    }
+
     // MARK: - Icon button (`LBLiveBottomBar` iconBtn)
 
     /// A round translucent-dark icon button (36×36). `tint` colors the glyph
@@ -311,6 +368,8 @@ private extension LiveBottomBarView {
     static let commentFontSize: CGFloat = 13
     static let commentBackground = Color(.sRGB, red: 20 / 255, green: 20 / 255, blue: 24 / 255, opacity: 0.55)
     static let commentPlaceholder = "留言..."
+    /// 回放 chat-closed 變體文字（design-literal，同 `commentPlaceholder` 模式）。
+    static let chatClosedPlaceholder = "聊天室已關閉"
 
     // glyphs (match OperationRailView.symbolName mapping)
     static let bagSymbol = "bag"                    // Icons.bag

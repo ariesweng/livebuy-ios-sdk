@@ -224,15 +224,19 @@ public struct ProductSheetsOverlayView: View {
     /// then re-sets the flag) and re-presents (cart-needs-login-gate).
     @State private var cartLoginGatePresented = false
 
-    /// Whether the「請選規格」prompt is currently presented (ios-variant-prompt-overlay-fix). A
-    /// LOCAL presentation flag (NOT a model snapshot), mirroring `cartLoginGatePresented`: set true
-    /// on the template's `needsVariantSelection` false→true transition; cleared on「我知道了」/ scrim.
-    /// Default false → snapshot-neutral. The prompt is mounted at the player overlay root (above the
-    /// sheet stack, full-frame centered modal + own scrim) — NOT inside the bottom-sheet card, whose
-    /// `GeometryReader` height measurement a full-bleed scrim would distort (the layout bug this
-    /// fixes). Using a local flag (not gating directly on `model.needsVariantSelection`) lets the
-    /// acknowledge button dismiss the prompt even though reference-ui cannot reset the template flag;
-    /// the user then reaches the variant chips and `selectVariant` clears `needsVariantSelection`.
+    /// Whether the「請選規格」prompt is currently presented (ios-variant-prompt-overlay-fix +
+    /// ios-variant-prompt-reprompt-rearm). A LOCAL presentation flag (NOT a model snapshot): set
+    /// true PER add-to-cart TAP in `addToCartReprompting()` when the add left
+    /// `model.needsVariantSelection` true; cleared on「我知道了」/ scrim. Default false →
+    /// snapshot-neutral. The prompt is mounted at the player overlay root (above the sheet stack,
+    /// full-frame centered modal + own scrim) — NOT inside the bottom-sheet card, whose
+    /// `GeometryReader` height measurement a full-bleed scrim would distort (the layout bug the
+    /// overlay-hoist fix addressed). Driving it per-tap (NOT on a `needsVariantSelection` false→true
+    /// rising edge) re-arms it on every attempt: the template guard leaves the flag true across a
+    /// dismiss, so a rising-edge present would miss the 2nd, 3rd, … unselected re-add (the bug
+    /// ios-variant-prompt-reprompt-rearm fixes). The acknowledge button dismisses the prompt even
+    /// though reference-ui cannot reset the template flag; the user then reaches the variant chips
+    /// and `selectVariant` clears `needsVariantSelection` (so the next add proceeds normally).
     @State private var variantPromptPresented = false
 
     /// Add-to-cart success toast presentation (rb-ios-cart-add-success-toast). A LOCAL
@@ -310,15 +314,18 @@ public struct ProductSheetsOverlayView: View {
                     onLogin: lbForwardLogin(onRequestLogin) { cartLoginGatePresented = false },
                     onDismiss: { cartLoginGatePresented = false })
             }
-            // 「請選規格」prompt (ios-variant-prompt-overlay-fix) — presented at the overlay root
-            // (above the sheet stack, with its OWN full-frame scrim — same idiom as the
-            // cart-needs-login gate above) when a spec product is added without a complete variant
-            // selection (`model.needsVariantSelection` false→true). Mounting it HERE (not inside the
-            // sheet card) is the fix: a full-bleed scrim inside the card distorted the card's
-            // GeometryReader height and broke the sheet layout. 「我知道了」/ scrim → dismiss the
-            // local flag so the user can reach the variant chips; `selectVariant` then clears the
-            // template flag. Mutually exclusive with the needs-login gate in practice (the variant
-            // guard early-returns from `addToCart()` before any request, so no 401 needs-login).
+            // 「請選規格」prompt (ios-variant-prompt-overlay-fix + ios-variant-prompt-reprompt-rearm)
+            // — presented at the overlay root (above the sheet stack, with its OWN full-frame scrim —
+            // same idiom as the cart-needs-login gate above) when a spec product is added without a
+            // complete variant selection. The local flag is set PER add-to-cart tap in
+            // `addToCartReprompting()` (re-armed every attempt — NOT a `needsVariantSelection`
+            // false→true rising edge, which would miss repeat unselected re-adds after a dismiss).
+            // Mounting it HERE (not inside the sheet card) is the layout fix: a full-bleed scrim
+            // inside the card distorted the card's GeometryReader height and broke the sheet layout.
+            // 「我知道了」/ scrim → dismiss the local flag so the user can reach the variant chips;
+            // `selectVariant` then clears the template flag. Mutually exclusive with the needs-login
+            // gate in practice (the variant guard early-returns from `addToCart()` before any
+            // request, so no 401 needs-login).
             if variantPromptPresented {
                 SelectVariantPromptModalView(
                     theme: theme,
@@ -341,11 +348,15 @@ public struct ProductSheetsOverlayView: View {
         // `onChange`; mirrors `syncPresentation`). A local flag — not direct gating —
         // so 稍後再說 can dismiss without reference-ui resetting the template flag.
         .presentCartLoginGate(on: model.addToCartNeedsLogin, into: $cartLoginGatePresented)
-        // Present the「請選規格」prompt on the template flag's false→true transition
-        // (ios-variant-prompt-overlay-fix; mirrors `presentCartLoginGate`). A local flag — not
-        // direct gating — so the acknowledge button can dismiss without reference-ui resetting the
-        // template flag; selecting a spec then clears `needsVariantSelection` in the template.
-        .presentVariantPrompt(on: model.needsVariantSelection, into: $variantPromptPresented)
+        // NOTE: the「請選規格」prompt is NOT presented on a `needsVariantSelection` false→true
+        // rising edge (ios-variant-prompt-reprompt-rearm). The template's `addToCart()` variant
+        // guard only flips the flag false→true on the FIRST add and leaves it true thereafter
+        // (it is only cleared by `selectVariant`), so a rising-edge present misses every repeat
+        // attempt after the user dismisses the prompt without selecting a spec ("dismiss → re-add
+        // shows nothing"). Instead the prompt is (re)presented per add-to-cart TAP in
+        // `addToCartReprompting()` — the guard path is synchronous on the main thread, so
+        // `model.needsVariantSelection` reflects the result immediately after `model.addToCart()`
+        // returns, re-arming on every attempt. See `addToCartReprompting()` / `VariantPromptTrigger`.
         // Seed the cartCount watermark once on appear so the first genuine rise (not the
         // bind-time value) flashes the toast (D-1).
         .onAppear { if lastCartCount < 0 { lastCartCount = model.cartCount } }
@@ -447,6 +458,23 @@ public struct ProductSheetsOverlayView: View {
         model.closeDetail()
     }
 
+    /// Add to cart, then (re)present the「請選規格」prompt if the add hit the incomplete-variant
+    /// guard (ios-variant-prompt-reprompt-rearm). The template's `addToCart()` variant guard is
+    /// SYNCHRONOUS on the main thread and early-returns (no `Task`), and `notifyChange()` runs the
+    /// model's `onChange` synchronously when already on main — so by the time `model.addToCart()`
+    /// returns, `model.needsVariantSelection` reflects the guard result. Presenting HERE (per TAP)
+    /// — instead of on a `needsVariantSelection` false→true rising edge — re-arms the prompt on
+    /// EVERY attempt: the guard leaves the flag true across a dismiss (it is only cleared by
+    /// `selectVariant`), so a rising-edge present would miss the 2nd, 3rd, … unselected re-add
+    /// (the "dismiss then re-add shows nothing" bug this fixes). Once the user selects a spec, the
+    /// template clears the flag, so the next add proceeds normally (no prompt).
+    private func addToCartReprompting() {
+        model.addToCart()
+        if VariantPromptTrigger.shouldPresent(needsVariantSelection: model.needsVariantSelection) {
+            variantPromptPresented = true
+        }
+    }
+
     /// Pure mapping of `actionMode` → which sheet to present (rb-ios-soldout-row-detail-vs-restock).
     /// No `soldOut` override: 售完商品經名稱 / 明細 (`.detail`) 仍開 ProductDetailSheetView，補貨
     /// 通知只由 `.restock`（售完補貨鈴鐺）開啟。Unit-tested.
@@ -493,7 +521,7 @@ public struct ProductSheetsOverlayView: View {
                 onSetQty: { model.setQty($0) },
                 onInc: { model.incQty() },
                 onDec: { model.decQty() },
-                onAddToCart: { model.addToCart() },
+                onAddToCart: { addToCartReprompting() },
                 onOpenCart: { model.openCart() },
                 onDismiss: { dismissDetail() },
                 onZoomImage: { zoomedDetail = detail })
@@ -520,7 +548,7 @@ public struct ProductSheetsOverlayView: View {
                 onSetQty: { model.setQty($0) },
                 onInc: { model.incQty() },
                 onDec: { model.decQty() },
-                onAddToCart: { model.addToCart() },
+                onAddToCart: { addToCartReprompting() },
                 onOpenCart: { model.openCart() },
                 onToggleFavorite: { model.toggleFavorite(forProductId: detail.productId) },
                 // 分享 is a host concern — forward the container's host passthrough.
@@ -594,6 +622,25 @@ enum CartToastTrigger {
     }
 }
 
+// MARK: - VariantPromptTrigger — pure decision for the「請選規格」per-tap re-arm
+//
+// The「請選規格」prompt (ios-variant-prompt-reprompt-rearm) is (re)presented PER add-to-cart tap
+// (`addToCartReprompting()`), NOT on a `needsVariantSelection` false→true rising edge — the
+// template's variant guard leaves the flag true across a dismiss (only `selectVariant` clears it),
+// so a rising-edge present would miss every repeat unselected re-add ("dismiss then re-add shows
+// nothing"). The decision is simply: after the (synchronous) add, present iff the variant
+// selection is still incomplete. Extracted as a pure function so the per-tap re-arm rule is
+// unit-testable without a SwiftUI host (unit-test-discipline), mirroring `CartToastTrigger`.
+enum VariantPromptTrigger {
+    /// After an add-to-cart attempt, (re)present the prompt iff the variant selection is still
+    /// incomplete (`needsVariantSelection == true`). True on EVERY such attempt (re-arm), incl.
+    /// after the user dismissed a prior prompt without selecting a spec; false once a spec is
+    /// chosen (`selectVariant` cleared the flag) so the add proceeds with no prompt.
+    static func shouldPresent(needsVariantSelection: Bool) -> Bool {
+        needsVariantSelection
+    }
+}
+
 // MARK: - CartLoadingFloor — pure anti-flicker min-display for the CTA loading (D-2)
 //
 // The add-to-cart CTA loading mirrors the template's `addToCartInFlight`, but a fast resolve
@@ -640,22 +687,6 @@ private extension View {
     func presentCartLoginGate(on needsLogin: Bool, into binding: Binding<Bool>) -> some View {
         if #available(iOS 14.0, *) {
             self.onChange(of: needsLogin) { newValue in
-                if newValue { binding.wrappedValue = true }
-            }
-        } else {
-            self
-        }
-    }
-
-    /// Present the「請選規格」prompt on the template flag's false→true transition
-    /// (ios-variant-prompt-overlay-fix). Identical shape to `presentCartLoginGate`: iOS-14-safe
-    /// `onChange`; only a rising edge sets the local presentation flag (so an acknowledge dismiss,
-    /// which leaves the template flag true until a `selectVariant`, does not re-present until the
-    /// next add attempt re-fires false→true).
-    @ViewBuilder
-    func presentVariantPrompt(on needsVariant: Bool, into binding: Binding<Bool>) -> some View {
-        if #available(iOS 14.0, *) {
-            self.onChange(of: needsVariant) { newValue in
                 if newValue { binding.wrappedValue = true }
             }
         } else {

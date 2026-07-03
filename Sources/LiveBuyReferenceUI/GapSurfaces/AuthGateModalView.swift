@@ -101,6 +101,7 @@ public struct AuthGateModalView: View {
         case .cartAdd:     return Self.bodyCartAdd
         case .commentSend: return Self.bodyCommentSend
         case .couponClaim: return Self.bodyCouponClaim
+        case .subscribe:   return Self.bodySubscribe
         case .other:       return Self.bodyOther
         }
     }
@@ -241,6 +242,7 @@ public struct AuthGateModalView: View {
     static let bodyCartAdd = "登入後即可將商品加入購物車"
     static let bodyCommentSend = "登入後即可參與留言互動"
     static let bodyCouponClaim = "登入後即可領取優惠與獎品"
+    static let bodySubscribe = "登入後即可訂閱直播主，第一時間掌握開播與專屬優惠"
     static let bodyOther = "登入後即可使用完整功能"
 }
 

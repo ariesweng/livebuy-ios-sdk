@@ -165,12 +165,27 @@ public struct PlayerShellView: View {
     /// route through `PlayerShellModel`'s existing turnkey forwarders.
     private let onComment: (() -> Void)?
 
+    /// 訂閱 tap (PlayerHeader 頭像徽章 + VideoInfoPanel 訂閱 pill 共用同一入口) → host-wired subscribe
+    /// gate. The drop-in container wires this so an UNLOGGED-IN guest first sees the「請先登入」modal
+    /// (`AuthGateModalView(.subscribe)`) instead of a silent `AUTH_REQUIRED`; a logged-in user
+    /// toggles subscribe (rb-ios-subscribe-login-gate). nil (demo / snapshot / non-container) →
+    /// falls back to `model.toggleSubscribe()` so those paths (and snapshot baselines) are unchanged.
+    private let onSubscribe: (() -> Void)?
+
     /// LIVE bottom-bar 暱稱（person-edit）tap → host presents the 設定暱稱 modal. The drop-in
     /// container wires this to its local `GuestNameEditModalView` presentation (NOT the
     /// `requestGuestNameEdit()` core path, which is gated on `guestEditAvailable` and silently
     /// no-ops). nil → falls back to the existing `model.requestGuestNameEdit()` forwarder (so
     /// non-container call sites / snapshots are unchanged).
     private let onNickname: (() -> Void)?
+
+    /// LIVE bottom-bar 分享鈕 tap. The drop-in container wires this to `context.onShare`
+    /// (= `config.onShare ?? (performShare() 未被 host 攔截時 presentChannelShare)`,
+    /// dropin-player-default-share-sheet / rb-ios-live-share-default-sheet), so an unwired
+    /// host still gets the default system share sheet. nil → falls back to the existing
+    /// headless `model.performShare()` forwarder (只派 `VIDEO_SHARE_REQUEST` 事件；非容器 /
+    /// snapshot 路徑不變).
+    private let onShare: (() -> Void)?
 
     /// Host-supplied VOD caption text (core exposes no active-caption text). Shown in
     /// the VOD branch only while `model.subtitleEnabled` and non-empty. Default "".
@@ -270,7 +285,9 @@ public struct PlayerShellView: View {
                 onOpenProductList: (() -> Void)? = nil,
                 onShowChatFeed: (() -> Void)? = nil,
                 onComment: (() -> Void)? = nil,
+                onSubscribe: (() -> Void)? = nil,
                 onNickname: (() -> Void)? = nil,
+                onShare: (() -> Void)? = nil,
                 captionText: String = "",
                 onSwipeUp: (() -> Void)? = nil,
                 onSwipeDown: (() -> Void)? = nil,
@@ -290,7 +307,9 @@ public struct PlayerShellView: View {
         self.onOpenProductList = onOpenProductList
         self.onShowChatFeed = onShowChatFeed
         self.onComment = onComment
+        self.onSubscribe = onSubscribe
         self.onNickname = onNickname
+        self.onShare = onShare
         self.captionText = captionText
         self.onSwipeUp = onSwipeUp
         self.onSwipeDown = onSwipeDown
@@ -415,10 +434,18 @@ public struct PlayerShellView: View {
 
     // MARK: - Chrome gating (rb-ios-intro-chrome-minimal)
 
-    /// The VOD main-chrome family — NOT LIVE / upcoming(awaitingLive) / upcoming-intro.
-    /// VOD side rail + floating bag + (in the main state) header live here.
+    /// live-chrome 家族 — 真直播（`isLive`，`liveStatus == 1`）或回放（`isFinishedLiveReplay`，
+    /// 已結束的直播 `type == 2 && liveStatus == 3`）。兩者套用相同的 LIVE 版型（LIVE 疊層 chrome +
+    /// LIVE 底部 bar + 聊天 feed）；純 VOD 點播（兩旗標皆 false）走 VOD 版型（side rail + 浮動袋 +
+    /// now-introducing 輪播）。回放版型對齊直播當下（rb-ios-replay-live-chrome）。
+    private var usesLiveChrome: Bool {
+        model.isLive || model.isFinishedLiveReplay
+    }
+
+    /// The VOD main-chrome family — NOT live-chrome 家族（LIVE / 回放）/ upcoming(awaitingLive) /
+    /// upcoming-intro. 純 VOD side rail + floating bag + (in the main state) header live here.
     private var isVodMainChrome: Bool {
-        !model.isLive && !model.isUpcoming && !model.introPlaying
+        !usesLiveChrome && !model.isUpcoming && !model.introPlaying
     }
 
     /// Whether the VOD MAIN chrome (side rail + floating bag) should show. Only the
@@ -519,13 +546,16 @@ public struct PlayerShellView: View {
                 // upcoming awaitingLive OR the upcoming intro is playing → no live-overlay
                 // chrome (announce / pinned / chat / host-caption don't exist pre-live).
                 EmptyView()
-            } else if model.isLive {
+            } else if usesLiveChrome {
                 LiveOverlayChromeView(
                     theme: theme,
                     announceText: model.announceText,
-                    // LIVE 全部介紹中商品（多件 narrate_status==2）→ pinnedCard 多商品輪播 + 分頁點；
-                    // 空時 fallback 單一 pinnedProduct（activeProduct ?? first isHot）（問題 7）。
-                    pinnedProducts: model.livePinnedProducts,
+                    // 釘選卡來源依真直播 vs 回放分流（rb-ios-replay-live-chrome）：
+                    //   真直播 → livePinnedProducts（多件 narrate_status==2 輪播 + 分頁點；空時
+                    //            fallback 單一 activeProduct ?? first isHot，問題 7）。
+                    //   回放   → vodActiveProducts（時間軸窗格 [beginTime,endTime) 含 playhead，隨
+                    //            播放進度更新；回放無即時 narrate_status==2，改用後端介紹時間窗）。
+                    pinnedProducts: model.isLive ? model.livePinnedProducts : model.vodActiveProducts,
                     // Real product image on the pinned card only over a live video surface
                     // (placeholder suppressed) — same gate as the shop logo / VOD card
                     // (live-pinned-card-image-radius). Snapshot/demo keeps the placeholder.
@@ -602,17 +632,30 @@ public struct PlayerShellView: View {
                     shopLogo: model.shopLogo,
                     viewerCount: model.viewerCount,
                     isSubscribed: model.isSubscribed,
-                    isLive: model.isLive,
-                    // Replay (scrubbed behind live edge) hides the LIVE pill but keeps the
-                    // viewer count (design `hideLivePill = isReplay`). `model.isReplay`
-                    // already mirrors `playbackProgress.isReplay` (the LIVE bottom bar uses it).
-                    isReplay: model.isReplay,
+                    // live-chrome 家族（真直播 + 回放）皆餵 isLive: true → header 畫 viewer-count
+                    // （回放套 LIVE 版型，rb-ios-replay-live-chrome）。
+                    isLive: usesLiveChrome,
+                    // Replay hides the LIVE pill but keeps the viewer count (design
+                    // `hideLivePill = isReplay`). 兩種回放皆隱 LIVE 膠囊：behind-edge replay
+                    // （`model.isReplay`，鏡像 playbackProgress.isReplay）與 finished-live replay
+                    // （`model.isFinishedLiveReplay`，已結束直播）——後者非正在直播，顯紅 LIVE 會誤導。
+                    isReplay: model.isReplay || model.isFinishedLiveReplay,
                     // Real shop logo only over a live video surface (placeholder suppressed) —
                     // reuse the same runtime image gate the cover/upcoming surfaces use; the
                     // snapshot/demo path (`paintsBackgroundPlaceholder == true`) stays monogram.
                     live: !paintsBackgroundPlaceholder,
+                    // Host-config viewer-count gate (rb-ios-hide-viewer-count-config): default
+                    // true; `false` (host) hides the viewer count even while live / replay.
+                    showViewerCount: model.showViewerCount,
+                    // Backend viewer-count gate (rb-ios-viewer-count-show-pv-num): mirrors
+                    // `channel.show_pv_num == 1` via the view-model (same source as `viewerCount`).
+                    // The badge shows ⟺ isLive && viewerCountVisible && showViewerCount — so replay
+                    // (LIVE chrome) honours the original live-time show_pv_num setting.
+                    viewerCountVisible: model.viewerCountVisible,
                     onMinimize: { onMinimize?() },
-                    onSubscribe: { model.toggleSubscribe() },
+                    // 訂閱徽章 → 容器注入的 gate（未登入 → AuthGate(.subscribe)）；未注入 fallback
+                    // `model.toggleSubscribe()`（rb-ios-subscribe-login-gate）。與 info pill 共用。
+                    onSubscribe: { performSubscribe() },
                     // Host badge tap → open the VideoInfoPanel (design LBPHostBadge →
                     // video_info; presentation-only, replaces the removed VOD rail
                     // `more` pill). Same presentation toggle the `more` pill used.
@@ -689,7 +732,7 @@ public struct PlayerShellView: View {
             // the composer replaces the 留言 entry and sits in the same bottom region, so the
             // bottom bar (+ its heart-burst sibling) is suppressed to avoid overlap
             // (rb-ios-chat-composer-opaque-hide-bottom-bar).
-            if (model.isLive || model.isUpcoming || model.introPlaying) && !composerPresented {
+            if (usesLiveChrome || model.isUpcoming || model.introPlaying) && !composerPresented {
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
                     LiveBottomBarView(
@@ -700,6 +743,10 @@ public struct PlayerShellView: View {
                         // 直播預告的開場影片 (introPlaying) → bag-only minimal bar (just the bag).
                         // awaitingLive keeps the slim three-button bar. bagOnly takes precedence.
                         bagOnly: model.introPlaying,
+                        // 回放（已結束直播）→ 留言改 disabled「聊天室已關閉」、暱稱隱藏（後端 commentsub
+                        // 對 liveStatus==3 回 404；rb-ios-replay-chat-closed-bottom-bar）。behind-edge
+                        // isReplay（仍直播）不受影響——chatClosed 只由 isFinishedLiveReplay 驅動。
+                        chatClosed: model.isFinishedLiveReplay,
                         onBag: {
                             model.performGoodsTap()   // telemetry-only panel-toggle event
                             onOpenProductList?()       // host opens the product-list overlay
@@ -709,7 +756,10 @@ public struct PlayerShellView: View {
                         // presentation; absent (non-container / snapshot) → fall back to the
                         // existing `model.requestGuestNameEdit()` forwarder (gated core path).
                         onNickname: { if let onNickname = onNickname { onNickname() } else { model.requestGuestNameEdit() } },
-                        onShare: { model.performShare() },
+                        // dropin-player-default-share-sheet 的 fallback（presentChannelShare）
+                        // 由容器經 `onShare` 注入（rb-ios-live-share-default-sheet）；非容器 /
+                        // snapshot（onShare == nil）維持既有 headless `model.performShare()`。
+                        onShare: { if let onShare = onShare { onShare() } else { model.performShare() } },
                         // Real like via the existing turnkey forwarder + an immediate local heart
                         // burst (rb-ios-live-bottom-heart-burst — design `onLike → spawnHeart`).
                         onLike: { model.performLike(); liveHeartTick &+= 1 })
@@ -722,7 +772,7 @@ public struct PlayerShellView: View {
                 // like button (bottom-trailing), driven by the local `liveHeartTick`. Bag-only
                 // (introPlaying) draws no like → no burst. Transient + non-interactive →
                 // snapshot-neutral at rest. (rb-ios-live-bottom-heart-burst)
-                if (model.isLive || model.isUpcoming) && !model.introPlaying {
+                if (usesLiveChrome || model.isUpcoming) && !model.introPlaying {
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
                         HStack(spacing: 0) {
@@ -778,7 +828,11 @@ public struct PlayerShellView: View {
                 // has no core exit yet; it renders for design fidelity and stays inert.)
                 onContactMerchant: { withAnimation { contactMerchantPresented = true } },
                 // header 右上角關閉 icon → 關面板（第四個合法關閉入口，rb-ios-sheet-header-close-unify）。
-                onClose: { withAnimation { infoPanelPresented = false } })
+                onClose: { withAnimation { infoPanelPresented = false } },
+                // 訂閱 pill → 與 header 頭像徽章共用同一注入 gate（未登入 → 本地 AuthGate(.subscribe)、
+                // 已登入 → toggleSubscribe）；未注入 fallback `model.toggleSubscribe()`
+                // （rb-ios-subscribe-login-gate，取代原本一律直接 toggleSubscribe 的寫法）。
+                onSubscribe: { performSubscribe() })
         }
         // 「聯絡商家」confirm modal — composed ABOVE the info-panel sheet so it overlays it.
         .overlay(contactMerchantOverlay)
@@ -792,12 +846,18 @@ public struct PlayerShellView: View {
         // chat feed in VOD (rb-ios-hide-chat-feed-in-vod). `.onAppear` supplies the initial value
         // (`.onChange` does not fire for it); `.onChange` tracks switches between videos.
         .onAppear {
-            onIsLiveChange?(model.isLive)
+            // 回報 live-chrome 家族（真直播 + 回放）而非僅 isLive，使回放也顯示聊天 feed
+            // （rb-ios-replay-live-chrome）。
+            onIsLiveChange?(usesLiveChrome)
             // 初值報告 announce 顯示與否（`.onChange` 不會為初值觸發），讓容器一進場就給對的避讓。
             onHasAnnounceChange?(!model.announceText.isEmpty)
         }
-        .onChange(of: model.isLive) { isLive in
-            onIsLiveChange?(isLive)
+        .onChange(of: model.isLive) { _ in
+            onIsLiveChange?(usesLiveChrome)
+        }
+        // 回放旗標切換亦回報 live-chrome 家族（換片 live→回放 / 回放→VOD 時聊天 feed 跟著開關）。
+        .onChange(of: model.isFinishedLiveReplay) { _ in
+            onIsLiveChange?(usesLiveChrome)
         }
         // Report whether the LBLiveAnnounce banner is showing (announceText 非空) so the container
         // gives the chat feed extra bottom clearance only when a 公告 is present
@@ -807,6 +867,14 @@ public struct PlayerShellView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.playerShell)
+    }
+
+    /// 訂閱 tap 的統一分派（header 頭像徽章 + VideoInfoPanel 訂閱 pill 共用一份 → 決策一致）：容器
+    /// 注入的 `onSubscribe` gate（未登入 → 本地 `AuthGateModalView(.subscribe)`、已登入 →
+    /// toggleSubscribe）優先；未注入（demo / snapshot / 非容器）→ fallback `model.toggleSubscribe()`
+    /// 以保既有路徑與 snapshot baseline 不變（rb-ios-subscribe-login-gate）。
+    private func performSubscribe() {
+        if let onSubscribe = onSubscribe { onSubscribe() } else { model.toggleSubscribe() }
     }
 
     /// Forward a side-rail tap to its turnkey destination (TK-3). Every kind is now
@@ -825,7 +893,10 @@ public struct PlayerShellView: View {
         case .subtitle:
             model.toggleSubtitle()
         case .share:
-            model.performShare()
+            // 與 LIVE 底部 bar 分享同一走線：容器注入的 `onShare`（含 presentChannelShare
+            // fallback）→ unwired host 也能分享；非容器 / snapshot（onShare == nil）維持既有
+            // headless `model.performShare()`（rb-ios-vod-rail-share-default-sheet）。
+            if let onShare = onShare { onShare() } else { model.performShare() }
         case .serviceLink:
             // Design `contact_merchant`: confirm BEFORE opening the service link. Present
             // the confirm modal; only its「確定」proceeds to `model.openServiceLink()`.

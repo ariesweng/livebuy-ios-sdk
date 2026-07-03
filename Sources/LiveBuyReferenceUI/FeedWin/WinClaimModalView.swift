@@ -317,7 +317,7 @@ public struct WinClaimModalView: View {
         } else {
             // Failure (retryable).
             HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(theme.accent)
                 Text(Self.failureTitle)

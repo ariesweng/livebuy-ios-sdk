@@ -122,6 +122,13 @@ public struct LiveBuyPlayerConfig {
     /// nothing; a host that wants once-per-install behavior computes this in its config.
     public var showGestureHints: Bool = false
 
+    /// Whether the PlayerHeader top bar shows the live viewer count. Default `true`
+    /// (existing behavior). Set `false` to hide the viewer count even while live / replay
+    /// (rb-ios-hide-viewer-count-config). This is a pure render-side gate — the core /
+    /// view-model `viewerCount` data pipeline (`channel.watchNum` → `MomentState.viewerCount`)
+    /// is unaffected; the LIVE pill is unaffected.
+    public var showViewerCount: Bool = true
+
     /// Fired when an IN-PLACE switch (hot-pick / watch-next) changes the shown
     /// video, with the NEW video id (R3), so a host can keep its own "current video" state
     /// in sync (e.g. a minimized preview shows the right video). Default `nil`.
@@ -164,6 +171,14 @@ func liveCommentRequiresNickname(isLoggedIn: Bool, displayName: String) -> Bool 
 /// 用不到的暱稱。host 自訂 `config.onComment` 時 MUST NOT 經此函式（完全接管、不套 gating）。
 func liveCommentRequiresLogin(isLoggedIn: Bool, chatEnabled: Bool) -> Bool {
     !isLoggedIn && !chatEnabled
+}
+
+/// 訂閱鈕預設**登入**閘（純函式，rb-ios-subscribe-login-gate）：使用者**未登入** → 回 `true`，容器先本地
+/// 呈現「請先登入」modal（`AuthGateModalView(.subscribe)`），MUST NOT `toggleSubscribe()`；已登入 → 回
+/// `false`，直接 `toggleSubscribe()`（→ core 訂閱 + `SUBSCRIBE_CHANGED`）。訂閱要登入，故**只看登入狀態、
+/// 不看 chatEnabled**（與留言閘不同——留言可開放訪客，訂閱不行）。host 自訂訂閱流程時 MUST NOT 經此函式。
+func subscribeRequiresLogin(isLoggedIn: Bool) -> Bool {
+    !isLoggedIn
 }
 
 /// 組商品分享連結（issue 6）：在 `base`（= `channel.share_url`）後加上商品介紹時間 `t=<beginTime>`（秒）。
@@ -272,6 +287,9 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// flow publishes back into these snapshots. Plus the on-demand chat composer controller.
     private func buildModels(template: DefaultPlayerTemplate, coordinator: Coordinator) {
         coordinator.model = PlayerShellModel(template: template)
+        // Host-config viewer-count visibility gate (rb-ios-hide-viewer-count-config): a per-shell
+        // constant, set once here from `config.showViewerCount` (not template-derived).
+        coordinator.model?.showViewerCount = config.showViewerCount
         // Swipe-navigation in-place switch → report `onVideoSwitched` (swipe-video-switched-notify),
         // parity with the onWatchNext / onPickHot paths so a host-bound video mirror (the minimized
         // floating preview card's `video`) tracks the shown video after a swipe. Update cover AND
@@ -474,6 +492,18 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
                     nicknameController.present(composeAfter: true)
                 } else {
                     composerController.open()
+                }
+            },
+            // 訂閱鈕（header 頭像徽章 + info-panel 訂閱 pill 共用同一入口）→ **登入閘**
+            // （rb-ios-subscribe-login-gate）：訪客（`subscribeRequiresLogin`）→ 先本地呈現
+            // `AuthGateModalView(.subscribe)`（`present(triggerAction: .subscribe)`），MUST NOT
+            // toggleSubscribe；已登入 → `shellModel.toggleSubscribe()`（→ core 訂閱 + `SUBSCRIBE_CHANGED`，
+            // 行為零改）。訂閱只看登入狀態、不看 chatEnabled。`[weak shellModel]` 破 retain cycle。
+            onSubscribe: { [weak shellModel] in
+                if subscribeRequiresLogin(isLoggedIn: shellModel?.isLoggedIn ?? false) {
+                    loginController.present(triggerAction: .subscribe)
+                } else {
+                    shellModel?.toggleSubscribe()
                 }
             },
             // LIVE 底部 bar 暱稱按鈕 → 本地呈現 設定暱稱 modal（不走被 gating 的 core

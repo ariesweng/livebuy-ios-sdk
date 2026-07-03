@@ -46,6 +46,7 @@ public struct MinimalDesign: ReferenceUIDesign {
                 onOpenProductList: context.onOpenProductList,
                 onShowChatFeed: context.onShowChatFeed,
                 onComment: context.onComment,
+                onSubscribe: context.onSubscribe,
                 onNickname: context.onNickname,
                 onNicknameSubmit: context.onNicknameSubmit,
                 onProductTap: context.onProductTap,
@@ -174,6 +175,9 @@ struct PlayerOverlayRootView: View {
     let onOpenProductList: () -> Void
     let onShowChatFeed: () -> Void
     let onComment: () -> Void
+    /// 訂閱按鈕（header 頭像徽章 + info-panel 訂閱 pill 共用）→ 未登入先跳「請先登入」modal
+    /// （`.subscribe`），已登入 → `toggleSubscribe()`（rb-ios-subscribe-login-gate）。
+    let onSubscribe: () -> Void
     /// LIVE 底部 bar 暱稱按鈕 → 本地呈現 設定暱稱 modal（不走被 gating 的 core 路徑）。
     let onNickname: () -> Void
     /// 設定暱稱 modal 送出 → 設定顯示名（容器預設 `LiveBuy.setUser`）。
@@ -223,7 +227,12 @@ struct PlayerOverlayRootView: View {
                 onOpenProductList: onOpenProductList,
                 onShowChatFeed: onShowChatFeed,
                 onComment: onComment,
+                // 訂閱鈕（header 徽章 + info pill）走容器注入的 gate（未登入 → AuthGate(.subscribe)）。
+                onSubscribe: onSubscribe,
                 onNickname: onNickname,
+                // LIVE 底部 bar 分享鈕走與商品詳情分享同一條 `context.onShare` fallback
+                // （host 未攔截 → presentChannelShare 系統 sheet；rb-ios-live-share-default-sheet）。
+                onShare: onShare,
                 onSwipeUp: onSwipeUp,
                 onSwipeDown: onSwipeDown,
                 onCloseRequest: onCloseRequest,
@@ -298,16 +307,19 @@ struct PlayerOverlayRootView: View {
                     onDismiss: { nicknameController.dismiss() })
             }
 
-            // On-demand「請先登入」modal — the reference-ui `AuthGateModalView(.commentSend)` composed
-            // into the drop-in overlay (rb-ios-live-comment-login-gate, 方案 A). Gated on
-            // `loginController.isPresented` (default false → snapshot-neutral): a guest tapping the
-            // LIVE 留言 pill on a `guest_comment == 0` live (`chatEnabled == false`) presents it; 前往
-            // 登入 → host login flow (`onRequestLogin`, reference-ui NEVER logs in itself) then
-            // dismiss; 稍後再說 / scrim → dismiss. The modal owns its own scrim.
+            // On-demand「請先登入」modal — the reference-ui `AuthGateModalView` composed into the
+            // drop-in overlay. Gated on `loginController.isPresented` (default false → snapshot-
+            // neutral). Raised by MULTIPLE gates: a guest tapping the LIVE 留言 pill on a
+            // `guest_comment == 0` live presents `.commentSend` (rb-ios-live-comment-login-gate,
+            // 方案 A); a guest tapping 訂閱 presents `.subscribe` (rb-ios-subscribe-login-gate). The
+            // body copy follows `loginController.triggerAction` (set by `present(triggerAction:)`),
+            // so ONE controller serves every gate. 前往登入 → host login flow (`onRequestLogin`,
+            // reference-ui NEVER logs in itself) then dismiss; 稍後再說 / scrim → dismiss. The modal
+            // owns its own scrim.
             if loginController.isPresented {
                 AuthGateModalView(
                     theme: theme,
-                    triggerAction: .commentSend,
+                    triggerAction: loginController.triggerAction,
                     // Forward optional-ness (design D2.5): unwired `config.onLogin` → nil →
                     // the「前往登入」CTA is hidden, not dead. When wired, dismiss the login
                     // prompt first, then run the host login. (Dismiss is not lost when the
@@ -329,7 +341,11 @@ struct PlayerOverlayRootView: View {
             // NOT a moment (rb-ios-start-screen-out-of-moments). Composed topmost so the
             // full-bleed `.loading` covers everything; `.splash` is a transparent skip
             // overlay over the subject chrome. Observes `PlayerShellModel.startPhase`.
-            StartScreenHostView(model: shellModel, theme: theme, onSkip: onSkip)
+            // `live:` (= runtime, not placeholder) loads the `.loading` cover background
+            // (`model.loadingCover`); the snapshot / demo path keeps the solid `#0C0C10`
+            // backdrop — the SAME flag `UpcomingCountdownView` uses (design provenance).
+            StartScreenHostView(model: shellModel, theme: theme,
+                                live: !paintsBackgroundPlaceholder, onSkip: onSkip)
         }
     }
 }
@@ -342,11 +358,16 @@ struct PlayerOverlayRootView: View {
 struct StartScreenHostView: View {
     @ObservedObject var model: PlayerShellModel
     let theme: ReferenceUITheme
+    /// Runtime opt-in for the `.loading` cover background: `true` on a real video surface
+    /// (`!paintsBackgroundPlaceholder`) → loads `model.loadingCover`; `false` (snapshot /
+    /// demo) → solid `#0C0C10` backdrop. Same mechanism as `UpcomingCountdownView.live`.
+    let live: Bool
     let onSkip: () -> Void
 
     var body: some View {
         if model.startPhase != .done {
-            StartScreenView(theme: theme, phase: model.startPhase, onSkip: onSkip)
+            StartScreenView(theme: theme, phase: model.startPhase,
+                            coverUrl: model.loadingCover, live: live, onSkip: onSkip)
         }
     }
 }

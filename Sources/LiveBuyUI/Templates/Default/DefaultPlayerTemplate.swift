@@ -220,6 +220,17 @@ public final class DefaultPlayerTemplate {
     /// carries the correct `video_id`. nil until a channel is ingested.
     private(set) public var currentVideoId: String?
 
+    /// General (NOT upcoming-scoped) 封面圖 URL for the player **loading** surface
+    /// (`player-loading-cover-background-template`). Channel-derived (`channel.cover`),
+    /// fed by `ingestChannel` via `applyLoadingCover(_:)` — so a normal live / VOD
+    /// video (not just an `awaitingLive` upcoming) can supply a cover to the loading
+    /// screen. Zero-pixel passthrough: the template MUST NOT load the image; a
+    /// follow-up reference-ui change renders the cover + mask background. Empty (`""`)
+    /// until a channel with a non-empty `cover` is ingested. DISTINCT from the
+    /// upcoming-scoped `upcoming.cover` (`DefaultUpcomingState.cover`, direct-only) —
+    /// both coexist and neither alters the other. Default `""` (pre-channel / no cover).
+    private(set) public var loadingCover: String = ""
+
     /// Injected route-B add-to-cart requester (default throwing stub for headless
     /// unit tests, mirroring `DefaultGoodsTracking`'s `setAwait`/`setNotice`
     /// closures). The wiring fills it with `LiveBuy.addToCart(...)`. The template
@@ -449,6 +460,20 @@ public final class DefaultPlayerTemplate {
         liveStatus == 0 && type == 2
     }
 
+    /// Whether the loaded channel is a 回放 (一場**已結束的直播**). Pure + time-independent
+    /// (no `Date()`). 型別語意（實測校正，影片 `W4pqqM` 為 `type == 3` / `liveStatus == 3`）：
+    /// **`type == 3` = 回放（已結束直播）**、`type == 2` = 直播（預告 + 進行中）、`type == 1` = 點播 VOD。
+    /// `liveStatus` 權威定義：`openspec/specs/backend/videos.md`（0=未直播 / 1=直播中 / 3=已結束/回放）。
+    ///
+    /// 回放為 **`type == 3`**（回放型別，與 `liveStatus` 無關）**或** `type == 2 && liveStatus == 3`
+    /// （剛結束、仍標記為直播型別的邊界）。`false` for: 直播中 (`liveStatus == 1`), 直播預告
+    /// (`type == 2 && liveStatus == 0`), 純 VOD 點播 (`type == 1`, any `liveStatus`). 與 `isLive`
+    /// (`liveStatus == 1`) 互斥。下游 reference-ui 讀此把 回放 渲染成與直播相同的 LIVE chrome
+    /// (replay-live-chrome-flag)。先前僅認 `type == 2 && liveStatus == 3` 會漏掉 `type == 3` 的真實回放。
+    static func isFinishedLiveReplay(type: Int, liveStatus: Int) -> Bool {
+        type == 3 || (type == 2 && liveStatus == 3)
+    }
+
     /// Feed the public `channel` into the top-bar chrome (D3), info-tab fields
     /// (D4) and side-rail conditional enablement (D2). Internal so unit tests can
     /// drive it with a fabricated `LBChannel` without a live load. Coalesced so a
@@ -478,8 +503,17 @@ public final class DefaultPlayerTemplate {
                 guestEditAvailable: ch.guestComment == 1)
             // LIVE/VOD flag for the top-bar chrome branch (host reads header.isLive).
             handleLive(ch.liveStatus == 1)
+            // 回放旗標（replay-live-chrome-flag）：一場已結束的直播（type==2 && liveStatus==3）。
+            // 與 isLive 並列、語意分離、互斥。下游 reference-ui 讀此把回放渲染成 LIVE 版型。
+            // 純 VOD 點播（type==1）兩旗標皆 false → 維持 VOD 版型。
+            header.handleFinishedLiveReplay(
+                Self.isFinishedLiveReplay(type: ch.type, liveStatus: ch.liveStatus))
             // 會員等級限定軟閘門（restriction-gate ②）：衍生 isRestricted 供 reference-ui 疊遮罩。
             applyRestriction(ch.isRestriction == 1)
+            // 通用 loading 封面（player-loading-cover-background-template）：衍生 loadingCover =
+            // channel.cover 供 loading 畫面（不限 upcoming）繪封面圖背景。zero-pixel passthrough，
+            // diff-then-notify 折進本批次（單次 ingest 至多一次 onChange）。不動 upcoming.cover。
+            applyLoadingCover(ch.cover)
             // Prev/next adjacent video targets (swipe-navigate-template) — read the
             // first item id of each nav array (LBNavItem.id). Diff-then-notify inside
             // this same coalescing batch, so a channel ingest still fires at most one
@@ -500,6 +534,16 @@ public final class DefaultPlayerTemplate {
     private func applyRestriction(_ restricted: Bool) {
         guard isRestricted != restricted else { return }
         isRestricted = restricted
+        notifyChange()
+    }
+
+    /// Diff-then-notify the general (not upcoming-scoped) loading cover
+    /// (`player-loading-cover-background-template`). Called inside `ingestChannel`'s
+    /// coalescing batch, so a cover change folds into the single channel-ingest
+    /// onChange. Exact shape of `applyRestriction` (channel-derived, guard-then-set).
+    private func applyLoadingCover(_ cover: String) {
+        guard loadingCover != cover else { return }
+        loadingCover = cover
         notifyChange()
     }
 
@@ -542,7 +586,8 @@ public final class DefaultPlayerTemplate {
                                    remain: s.autoNextRemainingSeconds,
                                    endScreenShown: s.endScreenShown)
             productOverlay.handleProducts(s.products, active: s.narratingProduct)
-            header.handleHeader(isSubscribed: s.isSubscribed, viewerCount: s.viewerCount)
+            header.handleHeader(isSubscribed: s.isSubscribed, viewerCount: s.viewerCount,
+                                viewerCountVisible: s.viewerCountVisible)
             subtitle.handle(available: s.subtitleAvailable, enabled: s.subtitleEnabled)
             // Side-rail bag-count = products.count (derived — NO second copy, D2)
             // and the subtitle-enabled item flag reuse `subtitleAvailable`.
@@ -602,9 +647,13 @@ public final class DefaultPlayerTemplate {
     // design default flow runs when the host does NOT intercept. NO gating/throttle
     // here (lives in core); a host sync-interceptor still wins. Heart-burst stays
     // driven by the reactive `handleLikePerformed` (VIDEO_LIKE) — `performLike` only
-    // triggers, it does NOT bump the tick (no double animation). System-UI for
-    // share / serviceLink (share sheet / in-app browser) is presented by the host on
-    // the not-intercepted `videoShareRequest` / `serviceLinkRequest` event (TK-4).
+    // triggers, it does NOT bump the tick (no double animation). System-UI for share
+    // (share sheet) is presented by the host on the not-intercepted `videoShareRequest`
+    // event (TK-4). serviceLink is the ONE exception: when neither `INFO_CUSTOMER_SERVICE`
+    // nor `SERVICE_LINK_REQUEST` is intercepted, the template itself opens a default
+    // in-app browser via the existing `openInAppBrowser` seam (dropin-service-link-
+    // default-browser) — there is no reference-ui container config seam for it (unlike
+    // `onShare`), so the default lives here instead.
 
     /// Like (❤️) — forwards to the throttled core exit.
     public func performLike() { player?.performLike() }
@@ -612,8 +661,19 @@ public final class DefaultPlayerTemplate {
     public func performShare() { player?.performShare() }
     /// Toggle subtitles (CC) — forwards to the gated core exit.
     public func toggleSubtitle() { player?.performSubtitleToggle() }
-    /// Open the shop service link — forwards to core (emits interceptable `serviceLinkRequest`).
-    public func openServiceLink() { player?.performServiceLink() }
+    /// Open the shop service link — forwards to core (emits interceptable `INFO_CUSTOMER_SERVICE` /
+    /// `SERVICE_LINK_REQUEST`). If NEITHER event was intercepted by the host AND
+    /// `channel.shop.serviceLink` is a non-empty, parseable URL, opens it via the existing
+    /// `openInAppBrowser` seam (dropin-service-link-default-browser) — mirrors the `diversionUrl`
+    /// precedent. Empty / unparseable url → safe no-op (does NOT present an empty browser).
+    public func openServiceLink() {
+        let intercepted = player?.performServiceLink() ?? false
+        guard !intercepted,
+              let urlString = player?.channel?.shop.serviceLink, !urlString.isEmpty,
+              let url = URL(string: urlString)
+        else { return }
+        openInAppBrowser(url)
+    }
     /// Subscribe / unsubscribe — forwards to core.
     public func toggleSubscribe() { player?.performSubscribe() }
     /// Tap a product → core default flow (not-intercepted → reactive `handleProductTap`
@@ -1015,6 +1075,77 @@ public final class DefaultPlayerTemplate {
         activityFeed.appendChat(text: text, name: name)
     }
 
+    // MARK: - 回放聊天 bridge（replay-chat-feed-bridge-template，Depends On -core）
+
+    /// 已 append 進 `activityFeed` 的回放已揭露前綴長度（單調游標）。core 的通知型 seam
+    /// `onReplayChatRevealed` 一律送「同一條依 `time` 升序串的前綴」，故此值即上次 reveal 已
+    /// reconcile 的長度，用來判定「前進只 append 新尾段」或「倒退 / 清空 / 換片重建」。換片
+    /// （core 送 `[]` 或 `handleVideoSwitch`）時歸 0。
+    private var replayChatAppendedCount: Int = 0
+
+    /// 回放已揭露前綴 reconcile 進 `activityFeed` 的**純決策**（遵 docs/unit-test-discipline.md）。
+    /// 前綴單調（core 一律送同一升序串的前綴）：
+    /// - `incomingCount >= appendedCount`（播放前進 / 不變）→ `.appendDelta`：只 append 尾段索引
+    ///   區間 `[appendedCount, incomingCount)`（`incomingCount == appendedCount` 為空區間 = no-op，
+    ///   前進時**不重建、不閃爍**）。
+    /// - `incomingCount < appendedCount`（seek 倒退 / 收到 `[]` 清空 / 換片）→ `.rebuild`：先 clear
+    ///   再重建全部 `[0, incomingCount)`（可能為空）。
+    enum ReplayChatReconcile: Equatable {
+        /// 只 append 索引區間 `[from, to)` 的新尾段（`to == from` 時為 no-op）。
+        case appendDelta(from: Int, to: Int)
+        /// 先 `clear` 再重建索引區間 `[0, to)` 全部（倒退 / 清空 / 換片）。
+        case rebuild(to: Int)
+    }
+
+    /// Pure → 可單測（回傳 Equatable enum、complexity 低、無副作用）。唯一決策點。
+    static func replayChatReconcile(incomingCount: Int, appendedCount: Int) -> ReplayChatReconcile {
+        incomingCount >= appendedCount
+            ? .appendDelta(from: appendedCount, to: incomingCount)
+            : .rebuild(to: incomingCount)
+    }
+
+    /// 把回放歷史 `LBComment` 映射成 chat feed row 的角色 metadata。歷史端（`/sdk/video/comments`）
+    /// 僅三型：`.comment`（觀眾留言）/ `.host`（主播留言）/ `.hostReply`（主播回覆，帶引用 `reply`）。
+    /// AI 回覆（`.aiReply`）為直播 push 限定、回放歷史不會出現 → `isAI` 一律 false。`color` /
+    /// `replyColor` 不入 feed 模型（reference-ui 以**版型**而非顏色區分主播 / 回覆），故只搬
+    /// `text` / `name` / `reply`（經 `isHost` / `replyText`）。Pure / testable。
+    static func replayChatRow(for comment: LBComment) -> (isHost: Bool, replyText: String?) {
+        switch comment.kind {
+        case .hostReply:
+            return (isHost: true, replyText: comment.reply.isEmpty ? nil : comment.reply)
+        case .host:
+            return (isHost: true, replyText: nil)
+        default:
+            return (isHost: false, replyText: nil)
+        }
+    }
+
+    private func appendReplayComment(_ comment: LBComment) {
+        let row = Self.replayChatRow(for: comment)
+        activityFeed.appendChat(text: comment.text, name: comment.name,
+                                isHost: row.isHost, replyText: row.replyText)
+    }
+
+    /// 回放聊天 bridge：訂閱 core 通知型 seam `onReplayChatRevealed`，把「回放當前已揭露前綴」
+    /// reconcile 進 `activityFeed`，使 reference-ui 的 `ChatFeedView`（只讀 view-model 的
+    /// activity feed、不讀 core `chatView`）在回放也隨播放進度顯示歷史留言（與直播走相同的
+    /// `activityFeed` → `onChange` 管線）。前進只 append 新尾段（不閃爍）、倒退 / `[]` / 換片
+    /// 重建。一筆 reveal = 一次 coalesced `onChange`（D6）。直播絕不進來（core 非回放期不 fire）。
+    func handleReplayChatRevealed(_ comments: [LBComment]) {
+        let decision = Self.replayChatReconcile(incomingCount: comments.count,
+                                                appendedCount: replayChatAppendedCount)
+        coalescing {
+            switch decision {
+            case .appendDelta(let from, let to):
+                for comment in comments[from..<to] { appendReplayComment(comment) }
+            case .rebuild(let to):
+                activityFeed.clear()
+                for comment in comments[0..<to] { appendReplayComment(comment) }
+            }
+        }
+        replayChatAppendedCount = comments.count
+    }
+
     /// A poll `push[]` row → merged feed. A core event-BEGIN push
     /// (`push.isEventBegin`) is surfaced as an INDEPENDENT event-join item (host
     /// draws `LBEventJoinLine`); everything else — including event-END
@@ -1046,15 +1177,11 @@ public final class DefaultPlayerTemplate {
             // （舊版誤把 `#66F796` 當「商品介紹中」走 appendIntro，本批次語意校正。）
             activityFeed.appendNarrate(text: push.text)
         case .onsale:
-            // 商品開賣（chat5 群組①）→ 商品開賣卡 feed item（商品名 = `text`、現價 = **權威欄 `price`**），
-            // 供 reference-ui 渲染 `LBProductSaleCard`。`price` 為 wrapper 算好的已格式化開賣價（非上游
-            // 原始 `p`）。ProductController 來源已知限制（`text == ""`）→ 退回純文字系統通知（graceful，
-            // 不出空白卡）。皆 DE-DUPED（相鄰重送只顯示一列）。
-            if push.text.isEmpty {
-                activityFeed.appendSystemNotice(text: push.text)
-            } else {
-                activityFeed.appendProductSale(name: push.text, price: push.price ?? "")
-            }
+            // onsale 商品開賣改用「主播訊息」UI（主播氣泡：主播標＋暱稱＋accent 氣泡），不再走特製商品開賣卡。
+            // text 直顯後端組裝好的完整文案；name = push.name（主播名）；isHost = true。
+            // 空 text → 不 append（避免空氣泡；取代舊「退回系統通知」分支）。
+            guard !push.text.isEmpty else { break }
+            activityFeed.appendChat(text: push.text, name: push.name, isHost: true)
         case .comment:
             // 一般用戶 / 訪客留言 → chat row 帶暱稱（chat-nickname-display），isHost=false，不去重。
             activityFeed.appendChat(text: push.text, name: push.name)
@@ -1129,6 +1256,9 @@ public final class DefaultPlayerTemplate {
             // 換片後新場的第一批 backlog 應能正常 ingest（feed 已 clear、旗標 reset → 乾淨）
             // — chat-history-dedupe-template。
             hasIngestedBacklog = false
+            // 回放聊天游標同步歸 0（feed 已 clear，否則下一場前綴會誤判前進/倒退）—
+            // replay-chat-feed-bridge-template。core 也會在 resetPerSessionState 送 `[]`，兩路皆安全。
+            replayChatAppendedCount = 0
         }
     }
 

@@ -174,10 +174,33 @@ final class LiveBuyWidgetController: ObservableObject {
             }
     }
 
+    /// Restart the periodic list refresh when the widget re-appears (`onDisappear` stops it).
+    /// The FIRST `onAppear` already starts the timer inside `loadIfNeeded()`, so this is a no-op
+    /// then; every LATER `onAppear` early-returns from `loadIfNeeded()` (guarded by `didLoad`),
+    /// so this call is what re-arms the timer that `stopAutoRefresh()` invalidated. Idempotent —
+    /// `startAutoRefreshIfNeeded()` already guards `refreshTimer == nil`, so repeated calls never
+    /// spawn a second timer; skips while showing demo fixtures (mirrors `loadIfNeeded`'s demo gate).
+    func resumeAutoRefreshIfNeeded() {
+        guard !usingDemoData else { return }
+        startAutoRefreshIfNeeded()
+    }
+
     func stopAutoRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = nil
     }
+
+    #if DEBUG
+    /// Test-only read-only seam: whether the periodic list-refresh timer is currently armed.
+    /// Lets unit tests assert the start → stop → resume lifecycle (the reappear-restart regression)
+    /// without depending on the timer actually firing. Compiled only in DEBUG.
+    var isAutoRefreshActiveForTesting: Bool { refreshTimer != nil }
+
+    /// Test-only mutator: force the demo-fixtures state so a test can assert the demo gate on
+    /// `resumeAutoRefreshIfNeeded()` deterministically (without a 5s configure-poll). Compiled only
+    /// in DEBUG.
+    func setUsingDemoDataForTesting(_ value: Bool) { usingDemoData = value }
+    #endif
 
     @MainActor
     private func autoRefreshTick() async {
@@ -260,6 +283,12 @@ public struct LiveBuyWidget: View {
             .onAppear {
                 Task {
                     await controller.loadIfNeeded()
+                    // Re-arm the periodic list refresh on EVERY appear. First appear: `loadIfNeeded`
+                    // already started it → this is a no-op (idempotent). Later appears: `loadIfNeeded`
+                    // early-returns (`didLoad`), so this is what restarts the timer that `onDisappear`
+                    // stopped — otherwise the 30s refresh dies permanently after the widget leaves
+                    // and returns once (tab switch / player return / carousel scroll-out).
+                    controller.resumeAutoRefreshIfNeeded()
                     config.onVideosChanged?(controller.model.videos)
                 }
             }

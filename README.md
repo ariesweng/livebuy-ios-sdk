@@ -52,9 +52,9 @@ Embed live shopping experiences — live streams, replays, and shoppable VODs �
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", from: "3.0.0")
-    // Pre-release testing: pin an exact rc tag instead, e.g.
-    // .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", exact: "3.0.0-rc.3")
+    // Released:    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", from: "3.0.0")
+    // Pre-release: pin the exact rc tag
+    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", exact: "3.0.0-rc.1")
 ],
 targets: [
     .target(
@@ -282,14 +282,15 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
 }
 ```
 
-`LiveBuyPlayerConfig` — every field is optional with a documented default. The most common
-seams:
+`LiveBuyPlayerConfig` — every field is optional at the API level (no field will fail to
+compile), but `onLogin` is **effectively-required** for any integration whose guests may hit a
+login gate (see its row). The most common seams:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `eventListener` | `LiveBuyEventListener?` | none | Per-player event listener. |
 | `onProductTap` | `((LiveBuyPlayerViewController, LBProduct) -> Void)?` | core product-tap flow | Product row / pinned-card tap. |
-| `onLogin` | `(() -> Void)?` | inert | "前往登入" CTA on the login-gate modal → your login flow. The SDK never logs in by itself. |
+| `onLogin` | `(() -> Void)?` | CTA hidden ⚠️ | **Effectively-required.** The single "前往登入" CTA for every login gate (comment / subscribe / add-to-cart) → your login flow. The SDK never logs in by itself and has no fallback: leave it unwired and the CTA is hidden, so guests can never log in and every login-gated action dead-ends. Wire it to your own login screen. |
 | `onMinimize` | `(() -> Void)?` | core `minimize()` | Top-right minimize tap. |
 | `onVideoSwitched` | `((String) -> Void)?` | none | Fires with the new video id after an in-place switch (hot-pick / watch-next / swipe). |
 
@@ -382,11 +383,12 @@ final class MyListener: NSObject, LiveBuyEventListener {
             return true   // your app handles it; SDK skips its default UI
         case LBEvent.cartAddRequest:
             // Tier 2 notification: the SDK already added to the LiveBuy backend cart.
-            // Add it to YOUR cart, then best-effort report your cart token.
-            addToMyOwnCart(params)
-            let buyNo = params["buy_no"] as? String ?? ""
+            // Typed accessor decodes all fields in one shot (raw `params` dict access still
+            // works and is not deprecated — see the note below).
+            guard let req = LBCartAddRequest(params: params) else { return false }
+            addToMyOwnCart(req)   // req.goodsNo / req.buyNo / req.track?.attributeFields ...
             Task { try? await LiveBuy.reportCartTrack(
-                shopId: "Pw8PJ99J", buyNo: buyNo, trackId: myCartToken) }
+                shopId: "Pw8PJ99J", buyNo: req.buyNo, trackId: myCartToken) }
             return false  // notification: return value is ignored
         default:
             return false  // SDK shows its default behaviour
@@ -405,6 +407,18 @@ LiveBuy.setEventListener(MyListener())
 
 > The v1 request/response category (`cartCallback` + 5 s timeout) is **retired** as of Tier 2.
 > `cartCallback` is always `nil`, retained only for ABI compatibility.
+
+> **Typed payload accessors are additive, not a replacement.** `LBCartAddRequest(params:)` /
+> `LBViewCartIntent(params:)` / `LBCartTrack.attributeFields` decode `CART_ADD_REQUEST` and
+> `VIEW_CART` params in one shot. The `onEventTriggered` signature and the raw `params: [String:
+> Any]` dictionary are unchanged and remain fully supported — direct `params["..."]` access is
+> not deprecated and won't be removed; the typed structs are just a convenience layer for hosts
+> who want it.
+
+> **`INFO_CUSTOMER_SERVICE` default fallback.** If your listener returns `false` for **both**
+> `INFO_CUSTOMER_SERVICE` and `SERVICE_LINK_REQUEST` (i.e. you don't intercept either), the
+> drop-in now opens `channel.shop.serviceLink` in an in-app browser (`SFSafariViewController`) by
+> default — the same "unintercepted → SDK-side fallback" shape as the default share sheet.
 
 ### Cart flow
 

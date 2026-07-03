@@ -64,6 +64,13 @@ public final class FeedWinModel: ObservableObject {
     /// （core `LBPollResponse.top`）。nil → 無置頂（橫幅不出像素）。冪等：每輪覆蓋、取消釘選 → nil。
     @Published public private(set) var pinned: LBPinnedMessage?
 
+    /// Host / shop name (`DefaultPlayerHeaderState.hostName`, mirrored via `DefaultPlayer
+    /// Template.header.hostName` — same authoritative source + mirroring technique as
+    /// `PlayerShellModel.hostName`). Purely a display value for the `.eventJoin` row's
+    /// host-bubble name header (`rb-ios-loading-announce-restyle`); this layer does NOT own
+    /// header chrome (that stays family-1 `PlayerShellModel`'s job).
+    @Published public private(set) var hostName: String
+
     // -- Surface 2: WinEntryView ← unclaimed win entry (D-3) -------------------
 
     /// Distinct unclaimed-win count (`DefaultWinClaim.unclaimedCount`); the entry
@@ -122,7 +129,8 @@ public final class FeedWinModel: ObservableObject {
             unclaimedCount: t.winClaim.unclaimedCount,
             unclaimedWinners: t.winClaim.unclaimedWinners,
             resultState: t.winClaim.resultState,
-            pinned: t.pinnedMessage
+            pinned: t.pinnedMessage,
+            hostName: t.header.hostName
         )
     }
 
@@ -138,7 +146,8 @@ public final class FeedWinModel: ObservableObject {
         unclaimedCount: Int = 0,
         unclaimedWinners: [LBWinner] = [],
         resultState: LBAwardClaimResultState? = nil,
-        pinned: LBPinnedMessage? = nil
+        pinned: LBPinnedMessage? = nil,
+        hostName: String = ""
     ) {
         self.feedItems = feedItems
         self.feedHistory = feedHistory
@@ -146,6 +155,7 @@ public final class FeedWinModel: ObservableObject {
         self.unclaimedWinners = unclaimedWinners
         self.resultState = resultState
         self.pinned = pinned
+        self.hostName = hostName
     }
 
     deinit {
@@ -168,6 +178,7 @@ public final class FeedWinModel: ObservableObject {
         unclaimedWinners = t.winClaim.unclaimedWinners
         resultState = t.winClaim.resultState
         pinned = t.pinnedMessage
+        hostName = t.header.hostName
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)
