@@ -7,11 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> 🚀 **下一個發版 = v3.0.0（major / breaking）。** v2.0.0 從未發過正式版（只到 `v2.0.0-rc.5`）；
-> 其累積的 breaking（headless / token / rename）與後續的 **Tier 2 統一加購** breaking 一次發為 v3.0.0。
-> 完整對外說明見 [release notes](../docs/release-notes/v2.0.0.md)，升級照
-> [migration 總入口](../docs/migration/v2.0.0.md)。**發版時本 `[Unreleased]` → `[3.0.0] - <date>`**；
-> 未 tag 的 `[1.3.0]`（api-version）內容一併併入。
+_Nothing yet — next features accrue here toward v3.2.0 / v3.1.1._
+
+---
+
+## [3.1.0] - 2026-07-03
+
+> minor release，無 breaking。鎖點 `76a9baf4`。rc.1 真機煙囪（M1–M5）+ QA sign-off 皆過，
+> binary 與 `v3.1.0-rc.1` 等價（沿用同一顆 checksum-pinned zip，未重 build）。詳見
+> [`docs/release/v3.1.0-readiness.md`](../docs/release/v3.1.0-readiness.md)。
+
+### v3.1.0 — minor（總覽）
+
+**Added（新公開 API，皆 additive）**
+- `LBAuthTriggerAction.subscribe` — 訂閱登入 gate 觸發類別；未登入點訂閱時 `AUTH_REQUIRED` 帶此
+  trigger action，host 可精確分辨「因訂閱觸發的登入」。
+- `CHAT_HISTORY_LOADED` — 新通知型事件（回放進場自動載入歷史留言後派發，交付 headless host 自繪聊天）。
+- `POLL_RECEIVED` push row 透出穩定 `id`（headless host 去重用；欄位 omit-when-nil，舊 host 無感）。
+- `onReplayChatRevealed` — 回放聊天 reveal 的 core seam。
+- view-model 新欄位：`loadingCover` / `viewerCountVisible` / `isFinishedLiveReplay`。
+- reference-ui host config：`showViewerCount`（可關閉直播人數徽章）。
+
+**功能亮點**
+- **訂閱一整套** — 未登入點訂閱跳登入 modal；訂閱方向改讀 live mirror（修回放/VOD 只能切一次）；
+  在途連點 guard；登入/登出後 re-sync 徽章刷新。
+- **分享預設 sheet** — 直播/回放底部 bar + VOD 側欄未接 `onShare` → 開系統分享 sheet（承 v3.0.0
+  `performShare` 家族）。
+- **回放一整套** — 套用 LIVE 版型、自動載入歷史留言、彈幕式時間軸同步（`time`=播放偏移秒數）、
+  聊天室已關閉態。
+- **聊天** — push 以穩定 `id` 去重；主播訊息完整顯示（不再截斷）；商品開賣（onsale）改走主播氣泡。
+- **人數徽章** — honor 後端 `show_pv_num`；host 可用 `showViewerCount` 關閉。
+- **播放器 fix** — 無可播串流不再卡 loading；規格選擇提示可重複觸發（re-arm）；loading 畫面顯示
+  封面圖；加購 CTA 統一 accent 色。
+
+**Fixed** — 47 個 fix（含四端 parity 修正）。**無 BREAKING。**
+
+---
+
+## [3.0.0] - 2026-07-01
+
+> v2.0.0 從未發過正式版（只到 `v2.0.0-rc.5`）；其累積的 breaking（headless / token / rename）與
+> 後續的 **Tier 2 統一加購** breaking 一次發為 v3.0.0。完整對外說明見
+> [release notes](../docs/release-notes/v2.0.0.md)，升級照 [migration 總入口](../docs/migration/v2.0.0.md)。
+> 未 tag 的 `[1.3.0]`（api-version）內容一併併入。checksum `21ba7ee…`（沿用 `v3.0.0-rc.3` 同顆
+> binary，未重 build）。
 
 ### v3.0.0 — major / breaking（總覽）
 
