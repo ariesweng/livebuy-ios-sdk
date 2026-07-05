@@ -283,17 +283,42 @@ public struct LiveBuyLiveEntry: View {
         self.config = config
     }
 
+    /// Test-only injection point（internal-testability；NOT public，host app 只看得到
+    /// 上面 `init(shopId:config:)`）：讓 `@testable` 測試能用假 `fetch` 真的 mount 這個
+    /// `body`（透過 `UIHostingController` 走一輪真的 SwiftUI render pass），而不是直接呼叫
+    /// controller 方法——這是唯一能證明 `.onAppear` 真的被 SwiftUI 觸發的方式
+    /// （live-entry-onappear-poll-start-fix regression coverage）。
+    init(shopId: String,
+         config: LiveBuyLiveEntryConfig = LiveBuyLiveEntryConfig(),
+         fetchForTesting: @escaping (String) async throws -> LBVideoItem?) {
+        _controller = StateObject(wrappedValue: LiveBuyLiveEntryController(
+            shopId: shopId, pollInterval: config.pollInterval, fetch: fetchForTesting))
+        self.config = config
+    }
+
+    // live-entry-onappear-poll-start-fix：`content` 第一次 render 必然是 `EmptyView()`
+    // （controller 剛建構、`live` 必為 nil，還沒 poll 過），若 `.onAppear` 直接掛在 `content`
+    // 上，SwiftUI 對「當下解析成 EmptyView() 的分支」不保證觸發 `.onAppear`——已用 lldb 對
+    // 實機驗證：`body` / `content` getter 都有被呼叫，但 `.onAppear` closure 永遠不執行，
+    // 造成 `controller.start()` 永遠不跑、輪詢永遠不開始的死鎖。改把 `content` 包進一個「不論
+    // `controller.live` 是否為 nil 都恆不是 EmptyView()」的 `ZStack`（恆存在的 `Color.clear`
+    // sibling），`.onAppear`/`.onDisappear` 改掛在這個 `ZStack` 上——保證輪詢一掛載就必定起
+    // 跑，不受目前有沒有偵測到直播影響。`content` 自身的 `EmptyView()` / `entry(live)` 分支
+    // 完全不變。
     public var body: some View {
-        content
-            .onAppear { controller.start() }
-            .onDisappear { controller.stop() }
-            // Default-open player (dropin-live-entry-default-open-player)。`defaultPresented == nil`
-            // 時 inert（host 接了 onTap，或尚未點）→ 靜止時不加任何可見像素，既有 live-entry /
-            // FloatingWidgetView baseline byte-identical。
-            .fullScreenCover(item: $defaultPresented) { p in
-                LiveBuyPlayer(videoId: p.id, config: defaultPlayerConfig)
-                    .ignoresSafeArea()
-            }
+        ZStack {
+            Color.clear   // 恆存在、零視覺足跡——只為讓這一層永遠不是 EmptyView()。
+            content
+        }
+        .onAppear { controller.start() }
+        .onDisappear { controller.stop() }
+        // Default-open player (dropin-live-entry-default-open-player)。`defaultPresented == nil`
+        // 時 inert（host 接了 onTap，或尚未點）→ 靜止時不加任何可見像素，既有 live-entry /
+        // FloatingWidgetView baseline byte-identical。
+        .fullScreenCover(item: $defaultPresented) { p in
+            LiveBuyPlayer(videoId: p.id, config: defaultPlayerConfig)
+                .ignoresSafeArea()
+        }
     }
 
     /// `dismissed == false` 且 `live != nil` 才渲染入口，否則（含 live == nil）為 `EmptyView`。

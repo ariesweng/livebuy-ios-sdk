@@ -128,12 +128,63 @@ public struct ChatFeedView: View {
     public var body: some View {
         // `hostScrollable == false` keeps the original pure-VStack path (no ScrollView)
         // so the snapshot / `ImageRenderer` baseline stays byte-identical; `true` swaps
-        // in the scroll-up-for-history variant (runtime only).
+        // in the scroll-up-for-history variant (runtime only). `topOverlayStack` is mounted
+        // INSIDE `staticBody` / `scrollableBody` (rb-ios-activity-toast-position-fix), not as
+        // an `.overlay` here — see the rationale on `topOverlayStack` below.
         feedBody
-            // 置頂留言橫幅（chat-pinned-message-render ⑤c）覆於 feed 上緣。`pinned == nil` →
-            // overlay 為空 → 不出像素（snapshot baseline byte-identical）。`.overlay(_:alignment:)`
-            // 視圖參數形 iOS-13+，iOS-14-safe。
-            .overlay(pinnedBanner, alignment: .topLeading)
+    }
+
+    /// Activity-notification toast (rb-ios-activity-toast) stacked above the pinned banner
+    /// (`chat-pinned-message-render` ⑤c), mirroring `LBLiveChatStream`'s `gap:6` column
+    /// ([ActivityToast, PinnedMessage, feed]).
+    ///
+    /// rb-ios-activity-toast-position-fix: mounted as a LAYOUT-PARTICIPATING sibling directly
+    /// above the row content INSIDE `staticBody` / `scrollableBody`'s bottom-anchored stack —
+    /// NOT as an `.overlay(_:alignment: .topLeading)` on the full-height `feedBody` (the prior
+    /// approach). `feedBody`'s outer frame is stretched to `maxHeight: .infinity` (needed so
+    /// the full-bleed swipe / tap-to-mute gesture area still covers the whole player — see
+    /// `staticBody` / `scrollableBody`), so a `.topLeading` overlay anchored to THAT frame
+    /// lands near the top of the entire player, not above the actual bottom-packed visible
+    /// rows — that was the bug (toast rendering with a large empty gap above the chat, near
+    /// the screen top). Moving it INSIDE the same bottom-anchored `VStack` as the rows means
+    /// it moves DOWN together with them, landing directly above the visible content —
+    /// matching Android/RN/Flutter's wrap-content-bottom-anchored pattern and the design
+    /// source (`moments.jsx` `LBLiveChatStream`: `[ActivityToast, PinnedMessage, feed]` inside
+    /// ONE `flexDirection:'column'` block whose bottom edge is fixed and top edge grows with
+    /// content — the SwiftUI equivalent of a leading `Spacer` + intrinsically-sized content).
+    ///
+    /// Gated on `hasActivityItem` (a plain `if`, no `else`) so that when `items` has NO
+    /// `.activity` item at all — `ActivityToastView` can then structurally never show
+    /// anything — this branch contributes ZERO children/spacing to the parent stack
+    /// (SwiftUI's well-known spacing-collapse for an `if`-without-`else` that evaluates
+    /// false). That keeps the 3 existing baselines with no `.activity` item
+    /// (`chat-feed-nickname-demo` / `chat-feed-chat-roles` /
+    /// `chat-feed-event-announcement-no-cta`) byte-identical — this view is never even
+    /// instantiated for them, so there is no ambiguity about whether an idle
+    /// `ActivityToastView`'s own (possibly non-`EmptyView`) empty rendering would still
+    /// consume stack spacing. `pinnedBanner`'s own `if let` collapses the same way when
+    /// `pinned == nil`. The `.padding(.bottom, 6)` supplies the gap before the next sibling
+    /// (first row / scroll region) ONLY when this block actually renders something, so the
+    /// "nothing to show" case leaves `staticBody` / `scrollableBody`'s OWN pre-existing
+    /// `Spacer` → next-sibling adjacency (and its spacing value) completely unchanged.
+    @ViewBuilder
+    private var topOverlayStack: some View {
+        if hasActivityItem || pinned != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                if hasActivityItem {
+                    ActivityToastView(theme: theme, items: items)
+                }
+                pinnedBanner
+            }
+            .padding(.bottom, 6)
+        }
+    }
+
+    /// Whether `items` contains ANY `.activity` item — i.e. whether `ActivityToastView` could
+    /// EVER show something for this feed (reuses `ActivityToastTrigger.latestActivity`). Pure
+    /// — no side effects. See `topOverlayStack` for why this gates mounting the toast at all.
+    private var hasActivityItem: Bool {
+        ActivityToastTrigger.latestActivity(in: items) != nil
     }
 
     @ViewBuilder
@@ -149,7 +200,7 @@ public struct ChatFeedView: View {
         }
     }
 
-    /// 置頂橫幅 overlay；無置頂 → 空（不出像素）。
+    /// 置頂橫幅；無置頂 → 空（不出像素）。
     @ViewBuilder
     private var pinnedBanner: some View {
         if let pinned = pinned {
@@ -159,14 +210,27 @@ public struct ChatFeedView: View {
         }
     }
 
+    /// `items` with `.activity(tier:)` items excluded (rb-ios-activity-toast, design D-4):
+    /// group② 炒氣氛提示 no longer renders as inline rows — it is surfaced by the sibling
+    /// `ActivityToastView` (see `topOverlayStack`). This is the SINGLE policy point deciding
+    /// which kinds render as rows; `row(for:)` stays a pure per-kind dispatcher. Pure — no
+    /// side effects, order-preserving (oldest → newest, unchanged from `items`).
+    private var visibleItems: [LBFeedItem] {
+        items.filter { !$0.isActivity }
+    }
+
     /// The original bottom-anchored, newest-at-bottom column with a top fade mask
     /// (`LBLiveChatStream`). NO `ScrollView` — used by demo / snapshot (baseline path).
     private var staticBody: some View {
         VStack(alignment: .leading, spacing: Self.rowGap) {
-            // `Spacer` pins the rows to the bottom so the NEWEST (last) row sits
+            // `Spacer` pins the content to the bottom so the NEWEST (last) row sits
             // lowest — matching the design's bottom-anchored newest-at-bottom flow.
             Spacer(minLength: 0)
-            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+            // rb-ios-activity-toast-position-fix: mounted HERE (inside the same
+            // bottom-anchored stack as the rows) so it moves down together with them and
+            // sits directly above the topmost visible row — see `topOverlayStack`.
+            topOverlayStack
+            ForEach(Array(visibleItems.enumerated()), id: \.offset) { index, item in
                 row(for: item)
                     // `.contain` keeps the row a single addressable container while
                     // leaving its inline controls (eventJoinCta / saleBuy) as
@@ -194,13 +258,21 @@ public struct ChatFeedView: View {
             // the upper area — a full-bleed `ScrollView` would otherwise eat them. The
             // smaller viewport also lets scrolling engage with far fewer rows.
             let viewport = geo.size.height * Self.scrollableHeightFraction
-            VStack(spacing: 0) {
+            // `alignment: .leading` (was default `.center`) so `topOverlayStack` sits flush
+            // left like the rows below it, matching the design's `left:8` column — the
+            // ScrollView is unaffected (it always claims the full proposed width regardless
+            // of the stack's alignment, being a flexible, not intrinsically-sized, child).
+            VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
+                // rb-ios-activity-toast-position-fix: sits directly above the scroll
+                // viewport (mirroring `staticBody`), instead of at the top of the whole
+                // player. See `topOverlayStack`.
+                topOverlayStack
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: Self.rowGap) {
                             Spacer(minLength: 0)   // bottom-pin short content
-                            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                            ForEach(Array(visibleItems.enumerated()), id: \.offset) { index, item in
                                 row(for: item)
                                     // `.contain` — see staticBody (rb-ios-e2e-feed-row-contain).
                                     .accessibilityElement(children: .contain)
@@ -227,7 +299,10 @@ public struct ChatFeedView: View {
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 6).onChanged { _ in autoStick = false })
                     // New rows arrive: stick to newest only if the user hasn't scrolled up.
-                    .onChange(of: items.count) { _ in
+                    // Keyed on `visibleItems.count` (not `items.count`) so an `.activity`
+                    // arrival — which produces NO row (rb-ios-activity-toast) — does not
+                    // trigger a no-op scroll-to-bottom.
+                    .onChange(of: visibleItems.count) { _ in
                         guard autoStick else { return }
                         withAnimation(.easeOut(duration: 0.18)) {
                             proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
@@ -322,8 +397,17 @@ public struct ChatFeedView: View {
                         onJoinEvent?(eid, item.keyword ?? "")
                     }
                 })
-        case .activity(let tier):
-            LBActivityLineRow(theme: theme, text: item.text, tier: tier)
+        case .activity:
+            // rb-ios-activity-toast: `.activity(tier:)` no longer renders as an inline row
+            // (moments.jsx 2026-07-03 `LBLiveChatStream` `feed = items.filter(m => m.kind !==
+            // 'activity')`) — it is surfaced via the sibling `ActivityToastView` instead
+            // (mounted above this list in `ChatFeedView.topOverlayStack`). Callers MUST filter
+            // `.activity` items out of the rendered rows before reaching this dispatcher
+            // (`visibleItems`), so this branch is UNREACHABLE by construction; it exists only
+            // to satisfy Swift's exhaustive switch over `LBFeedItem.Kind` (defined in
+            // `LiveBuyUI`, not modifiable here). `EmptyView()` keeps a misuse silent rather
+            // than crashing.
+            EmptyView()
         case .productSale:
             // chat5 群組①「商品開賣」→ 醒目商品開賣卡（設計 `LBProductSaleCard`）：商品名 = `text`、
             // 現價 = `price`（已格式化）。demo seed 無 `.productSale` → 既有 golden byte-identical。

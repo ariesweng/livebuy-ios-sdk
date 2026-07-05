@@ -126,11 +126,18 @@ final class TemplateAuxListener: NSObject, LiveBuyEventListener {
             // previous video id existed AND differs from the new one; first-load /
             // same-video retry never reach here). Reset the per-video-session family-2
             // overlay so the next video starts CLEAN: clear the merged activity + chat
-            // feed AND the win-claim entry. VIDEO_SWITCH is a NOTIFICATION event, so the
-            // dispatcher fires it to the primary listener AND every aux listener — the
-            // reset is guaranteed regardless of host interception. Non-primary: returns
-            // false so the host's primary listener still sees the switch.
-            template?.handleVideoSwitch()
+            // feed AND the win-claim entry — UNLESS `to_video_id` is a video this same
+            // template instance already visited this session, in which case its history
+            // is restored from a bounded per-instance cache instead of being cleared
+            // (chat-history-video-switch-cache-template). `from_video_id` / `to_video_id`
+            // are already provided by `LiveBuyPlayerViewController.load(videoId:)`'s
+            // dispatch — pass them through so the template can save/restore by videoId.
+            // VIDEO_SWITCH is a NOTIFICATION event, so the dispatcher fires it to the
+            // primary listener AND every aux listener — the reset/restore is guaranteed
+            // regardless of host interception. Non-primary: returns false so the host's
+            // primary listener still sees the switch.
+            template?.handleVideoSwitch(from: params["from_video_id"] as? String,
+                                         to: params["to_video_id"] as? String)
             return false
         default:
             // PRODUCT_CLICK and every other event are handled by route A or by
@@ -312,10 +319,23 @@ enum TemplateWiring {
             // + per-session 旗標分流 feed ingestion——後續輪真實新訊息（含後台刻意重送）一律灌、首輪
             // backlog 首次灌當歷史首屏、已 ingest 過的 backlog 重放整批 skip（換片漏 clear / 重入疊加）。
             // `handlePollReceived`（header / pinned 等）維持每輪呼叫（冪等，不受 gate 影響）。
+            //
+            // live-chat-backlog-batch-ingest-template：首輪 `is_init` backlog（`isBacklogReplay ==
+            // true`，一次最多 ≤500 筆/桶）改走 `ingestBacklog` 批次原子 ingest（單次 trim + 單次
+            // 通知）——避免逐筆路徑對後進場觀眾保留錯誤（偏舊）子集、也避免 500 次逐筆 trim + 逐筆
+            // 通知的 redraw storm。per-bucket 順序假設已於 live-chat-backlog-ingest-order-fix-
+            // template 修正為「不反轉、視為原樣 oldest-first」（見該 change design.md D1/D2；原
+            // 「反轉＋newest-first」假設經實際直播回歸證實方向錯誤）。後續輪（真實即時 trickle，
+            // `isBacklogReplay == false`）維持逐筆 `handlePush`/`handleJoin`/`handlePurchase` 呼叫
+            // 方式完全不變。
             if template.shouldIngestPoll(response.isBacklogReplay) {
-                for push in response.push { template.handlePush(push) }
-                for user in response.user { template.handleJoin(text: user.text) }
-                for rush in response.rush { template.handlePurchase(text: rush.text) }
+                if response.isBacklogReplay {
+                    template.ingestBacklog(push: response.push, user: response.user, rush: response.rush)
+                } else {
+                    for push in response.push { template.handlePush(push) }
+                    for user in response.user { template.handleJoin(text: user.text) }
+                    for rush in response.rush { template.handlePurchase(text: rush.text) }
+                }
             }
             if response.liveEnd == 1 { template.handleLiveEnd() }
         }

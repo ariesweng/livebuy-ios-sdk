@@ -102,6 +102,31 @@ public func clampFloatingOffset(
     return CGSize(width: clampedX, height: clampedY)
 }
 
+/// Rebuilds a DISPLAY-ONLY copy of `video` with `liveStatus` (and the paired `type`, using the
+/// SAME `type: isLive ? 2 : 1` convention `LiveBuyPlayer.switchedVideoItem` already establishes)
+/// overridden to match `isLive` — the CURRENT authoritative live-status signal
+/// (`PlayerShellModel.onLiveStatusChange`, channel-load-driven) — instead of `video.liveStatus`'s
+/// switch-time GUESS (baked in synchronously at switch-initiation from PRE-switch adjacency
+/// data; see `LiveBuyPlayer.switchedVideoItem`). Every OTHER field (`cover` / `title` / `preview`
+/// / `goods` / …) passes through UNCHANGED — `PlayerShellModel` doesn't carry those, so `video`
+/// stays their only source. Returns `video` unchanged when its `liveStatus` already matches
+/// `isLive` (no unnecessary copy). This is what fixes the live→VOD-in-place-switch-then-minimize-
+/// still-shows-LIVE bug (rb-ios-floating-card-live-status-sync): `video` itself keeps carrying
+/// the switch-time guess (still fine for cover/title), only the FLOATING CARD's badge derivation
+/// is redirected to this single, self-correcting source of truth. Pure (no I/O) — unit-testable
+/// (internal-testability).
+func floatingCardDisplayItem(_ video: LBVideoItem, isLive: Bool) -> LBVideoItem {
+    let targetLiveStatus = isLive ? 1 : 0
+    guard video.liveStatus != targetLiveStatus else { return video }
+    return LBVideoItem(
+        id: video.id, type: isLive ? 2 : 1, title: video.title, sessionName: video.sessionName,
+        cover: video.cover, preview: video.preview, duration: video.duration,
+        publishAt: video.publishAt, watchNum: video.watchNum, pvNum: video.pvNum,
+        liveStatus: targetLiveStatus, pin: video.pin, showPvNum: video.showPvNum,
+        liveurl: video.liveurl, playbackurl: video.playbackurl, previewTime: video.previewTime,
+        showStock: video.showStock, goods: video.goods)
+}
+
 /// Presents the turnkey `LiveBuyPlayer` full-screen for the bound `video`, with a built-in
 /// minimize→bottom-right floating preview. Attach with `View.liveBuyPlayer(video:…)`.
 public struct LiveBuyPlayerPresenter: ViewModifier {
@@ -144,6 +169,15 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
     /// so an internal switch does NOT trip the host-swap auto-restore (D-2). False at rest.
     @State private var isInternalSwitch: Bool = false
 
+    /// The CURRENT authoritative live-status of the shown video
+    /// (`PlayerShellModel.onLiveStatusChange`, channel-load-driven), used ONLY to correct the
+    /// floating card's LIVE/VOD badge (see `floatingCardDisplayItem`). Seeded from the bound
+    /// `video.liveStatus` on every id change (`.onChange(of: video?.id)`) — a reasonable guess
+    /// for the brief window before the authoritative signal arrives — and corrected thereafter.
+    /// `video` itself keeps carrying the switch-time guess unchanged (still fine for cover /
+    /// title); only this mirror redirects the badge derivation (rb-ios-floating-card-live-status-sync).
+    @State private var isVideoLive: Bool = false
+
     public func body(content: Content) -> some View {
         content
             // KEEP-ALIVE full player overlay (issue 5): the player is composed as a PERSISTENT
@@ -165,6 +199,12 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
             // `isMinimized` via the card's own onTap), so it never trips this. Reset the drag
             // offset so the new video re-minimizes at the default corner.
             .onChange(of: video?.id) { newId in
+                // Reseed the floating card's live-status guess for the newly bound video (first
+                // open / host swap / internal switch): a fresh guess from `liveStatus` until the
+                // authoritative `onLiveStatusChange` corrects it once real channel data loads (or
+                // immediately, if it's already loaded — e.g. a host swap to a DIFFERENT,
+                // already-known video). rb-ios-floating-card-live-status-sync.
+                isVideoLive = video?.liveStatus == 1
                 // An IN-PLAYER in-place switch (swipe / hot-pick / watch-next) updates `video`
                 // OURSELVES (composed `onVideoSwitched`) and latches `isInternalSwitch`. That is
                 // NOT a host-driven swap, so it MUST NOT auto-restore full-screen — it keeps the
@@ -237,6 +277,12 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
             isInternalSwitch = true
             video = item
         }
+        // Authoritative live-status mirror (rb-ios-floating-card-live-status-sync): corrects
+        // `isVideoLive` whenever the CURRENTLY SHOWN video's real live status changes — fixing
+        // the switch-time `onVideoSwitchedItem` guess once the real post-switch channel data
+        // loads (e.g. live→VOD no longer stays permanently stuck showing LIVE). Fully owned by
+        // the presenter, same as `onMinimize` / `onDismiss` / `onVideoSwitchedItem` above.
+        c.onLiveStatusChange = { live in isVideoLive = live }
         return c
     }
 
@@ -272,8 +318,12 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
     /// player (`config.design`, passed through by `composedConfig`) so the card matches.
     /// Measures its own size into `floatingCardSize` (for drag clamping).
     private func floatingCard(_ v: LBVideoItem) -> some View {
+        // The card's LIVE/VOD badge reads the AUTHORITATIVE `isVideoLive` mirror (not `v`'s own
+        // possibly-stale switch-time `liveStatus` guess) — cover / title / preview / goods still
+        // come from `v` unchanged (rb-ios-floating-card-live-status-sync).
+        let displayVideo = floatingCardDisplayItem(v, isLive: isVideoLive)
         let context = FloatingCardContext(
-            video: v,
+            video: displayVideo,
             theme: resolvedTheme,
             live: true,
             onTap: { _ in

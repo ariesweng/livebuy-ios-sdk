@@ -143,6 +143,17 @@ public struct LiveBuyPlayerConfig {
     /// case the switch target is not an adjacency / hot / next item). Default `nil`.
     public var onVideoSwitchedItem: ((LBVideoItem) -> Void)?
 
+    /// Fired whenever the CURRENTLY SHOWN video's authoritative live status changes
+    /// (`PlayerShellModel.onLiveStatusChange` — channel-load-driven, edge-triggered), carrying
+    /// the new value. This is DISTINCT from `onVideoSwitchedItem`'s `LBVideoItem.liveStatus`,
+    /// which is only a switch-time GUESS built from the PRE-switch channel (adjacency nav / hot
+    /// / next items carry no per-item `liveStatus`) and never self-corrects once fired. A
+    /// host-bound "is the shown video live" mirror (e.g. the `liveBuyPlayer(video:)` minimized
+    /// floating preview card's LIVE/VOD badge) SHOULD consume THIS instead, so it never drifts
+    /// permanently stale after an in-place switch whose real post-switch status differs from the
+    /// guess (e.g. live→VOD) — rb-ios-floating-card-live-status-sync. Default `nil`.
+    public var onLiveStatusChange: ((Bool) -> Void)?
+
     /// The design that composes the overlay surfaces (D-decouple). DEFAULT: `MinimalDesign` —
     /// the existing minimal composition, pixel-for-pixel unchanged. A host supplies a custom
     /// `ReferenceUIDesign` to compose a whole different design (layout + surfaces, beyond what
@@ -307,6 +318,11 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
             config.onVideoSwitchedItem?(coordinator?.switchedItemForSwipe(id: id)
                 ?? switchedVideoItem(id: id, cover: "", title: "", duration: 0, liveStatus: 1))
         }
+        // Authoritative live-status mirror (rb-ios-floating-card-live-status-sync): forwards
+        // `PlayerShellModel`'s edge-triggered, channel-load-driven signal — DISTINCT from the
+        // switch-time `liveStatus` guess carried by `onVideoSwitchedItem` above, which never
+        // self-corrects once fired.
+        coordinator.model?.onLiveStatusChange = { live in config.onLiveStatusChange?(live) }
         coordinator.productModel = ProductSheetsModel(template: template)
         coordinator.feedModel = FeedWinModel(template: template)
         coordinator.momentsModel = MomentsModel(template: template)

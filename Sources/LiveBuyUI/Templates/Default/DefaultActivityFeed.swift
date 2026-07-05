@@ -273,6 +273,13 @@ public final class DefaultActivityFeed {
 
     // MARK: - Internal
 
+    /// True while a `batchIngest(_:)` batch is in progress (live-chat-backlog-batch-ingest-template).
+    /// While set, `append(_:)` still writes into `history` immediately (preserving the existing
+    /// dedupe-signature check's semantics), but SKIPS the per-call `historyRetain` trim and
+    /// `onMutation` fan-out — those are deferred to `batchIngest`'s single end-of-batch step.
+    /// Non-reentrant by construction: `ingestBacklog` is the only caller and never nests batches.
+    private var isBatching = false
+
     private func append(_ item: LBFeedItem, dedupeKey: String? = nil) {
         // Defensive de-dup for ACTIVITY / EVENT-JOIN rows (and SYSTEM-notice chat rows that
         // pass an explicit `dedupeKey`): the poll buckets carry no stable id, so a backend
@@ -291,12 +298,46 @@ public final class DefaultActivityFeed {
         // Append to the deep `history` buffer (cap `historyRetain`); the ambient
         // `items` slice (newest N=7) is derived from it.
         history.append(item)
-        if history.count > historyRetain {
-            history.removeFirst(history.count - historyRetain)
-        }
+        // Inside a `batchIngest` batch, the trim + notify are deferred to the batch's single
+        // end-of-batch step (live-chat-backlog-batch-ingest-template) — see that method's doc.
+        guard !isBatching else { return }
+        history = Self.trimmed(history, cap: historyRetain)
         // One append == one coalesced mutation (no redraw storm; each event
         // notifies exactly once).
         onMutation?()
+    }
+
+    /// Pure: keeps the last `cap` elements of `items` (a single, one-shot trim), or returns
+    /// `items` unchanged when already within `cap`. Used both by the live per-item `append(_:)`
+    /// path (one call per item) and by `batchIngest`'s single end-of-batch trim
+    /// (live-chat-backlog-batch-ingest-template) — the SAME primitive either way, just invoked
+    /// once vs. once-per-item. NOTE (design.md D1): for a FIXED append order, trimming after
+    /// every append vs. trimming once at the end produce the IDENTICAL final result — this
+    /// function alone does not fix an ordering bug. What determines correctness is the ORDER
+    /// `items` arrives in before this trim runs (see `DefaultPlayerTemplate.backlogIngestOrder`).
+    static func trimmed(_ items: [LBFeedItem], cap: Int) -> [LBFeedItem] {
+        items.count > cap ? Array(items.suffix(cap)) : items
+    }
+
+    /// Run `body` as ONE atomic ingest batch (live-chat-backlog-batch-ingest-template): every
+    /// `appendXXX` call made inside `body` (via the existing per-kind entry points — this does
+    /// NOT introduce a new item-construction path) accumulates into `history` without the
+    /// per-call `historyRetain` trim or `onMutation` firing; both are applied EXACTLY ONCE after
+    /// `body` returns. This matters for the messages `is_init` backlog round, which can deliver
+    /// up to 500 items in one poll response — feeding that through the live per-item path would
+    /// otherwise trim 500 times and fan out up to 500 redundant host-facing notifications for one
+    /// screen paint. `onMutation` fires only if `history` actually changed (a batch that appends
+    /// nothing — e.g. an empty backlog — stays silent, matching the live path's behaviour where a
+    /// no-op call never notifies).
+    func batchIngest(_ body: () -> Void) {
+        let before = history
+        isBatching = true
+        body()
+        isBatching = false
+        history = Self.trimmed(history, cap: historyRetain)
+        if history != before {
+            onMutation?()
+        }
     }
 
     /// De-dup signature for a feed row. **所有 kind 現在皆回 `nil`（不做內容指紋去重）**：`.chat`
@@ -332,6 +373,20 @@ public final class DefaultActivityFeed {
     /// a new session can re-show same-text activity.
     public func clear() {
         history.removeAll()
+        recentActivitySignatures.removeAll()
+        onMutation?()
+    }
+
+    /// Wholesale-replaces `history` with a previously-saved snapshot — used to restore a
+    /// per-videoId cached feed when an in-place video switch returns to a video already visited
+    /// earlier in this same session (`chat-history-video-switch-cache-template`), instead of
+    /// leaving the feed empty after a `clear()`. Applies the same `historyRetain` cap as ordinary
+    /// ingestion (defensive; a saved snapshot is already within cap) and resets the de-dup window
+    /// (mirrors `clear()` — the restored history is a distinct data set from whatever produced
+    /// the currently-tracked signatures). Fires `onMutation` exactly once, symmetric with
+    /// `clear()`, regardless of whether `items` is empty.
+    public func restore(_ items: [LBFeedItem]) {
+        history = Self.trimmed(items, cap: historyRetain)
         recentActivitySignatures.removeAll()
         onMutation?()
     }

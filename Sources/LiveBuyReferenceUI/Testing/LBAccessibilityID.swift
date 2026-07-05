@@ -75,6 +75,9 @@ public enum LBAccessibilityID {
     public static let saleBuy = "lb_sale_buy"
     public static let pinnedBanner = "lb_pinned_banner"
     public static let chatScrollToBottom = "lb_chat_scroll_to_bottom"
+    /// Activity-notification toast above the chat feed (`ActivityToastView`,
+    /// rb-ios-activity-toast).
+    public static let activityToast = "lb_activity_toast"
 
     public static let winEntry = "lb_win_entry"
     public static let winClaimSheet = "lb_win_claim_sheet"

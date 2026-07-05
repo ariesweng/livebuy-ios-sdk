@@ -257,9 +257,11 @@ public final class DefaultPlayerTemplate {
         viewCartRequester: ((String?) -> Void)? = nil,
         setAwaitGoods: ((String, Bool) -> Void)? = nil,
         setNoticeGoods: ((String, Bool) -> Void)? = nil,
-        addToCartRequester: ((LBCartRequest) async throws -> LBCartResult)? = nil
+        addToCartRequester: ((LBCartRequest) async throws -> LBCartResult)? = nil,
+        feedSnapshotCache: VideoFeedSnapshotCache = .shared
     ) {
         self.player = player
+        self.feedSnapshotCache = feedSnapshotCache
         self.effectiveConfig = EffectiveConfig(sdkConfig: sdkConfig, hostOptions: hostOptions)
         self.guestNameEditRequester = guestNameEditRequester
         self.viewCartRequester = viewCartRequester
@@ -326,6 +328,20 @@ public final class DefaultPlayerTemplate {
         // (main thread). Each model fires onMutation exactly once per state
         // change, so onChange fires exactly once per change (no redraw storm).
         wireChangeNotification()
+    }
+
+    /// Save THIS instance's current video's chat/activity feed into `feedSnapshotCache` before
+    /// deallocation (chat-history-video-switch-cache-cross-instance, fixing 「直播縮小關閉再進入
+    /// 也要保留」). `handleVideoSwitch`'s `from` save only covers an in-place SWITCH to a
+    /// DIFFERENT video — core never dispatches `VIDEO_SWITCH` on a plain dismiss/close (the whole
+    /// VC/template is torn down, not switched), so without this hook a closed-and-reopened video
+    /// would never populate the cache for its own next (brand-new) instance to restore from.
+    /// Guarded exactly like `VideoFeedSnapshotCache.save` itself (empty history → no-op) so a
+    /// video that never accumulated chat doesn't occupy a cache slot for nothing.
+    deinit {
+        if let videoId = currentVideoId, !activityFeed.history.isEmpty {
+            feedSnapshotCache.save(videoId: videoId, history: activityFeed.history, seenPushIds: seenPushIds)
+        }
     }
 
     /// Fan the two view-models' internal `onMutation` hooks into the single
@@ -478,12 +494,27 @@ public final class DefaultPlayerTemplate {
     /// (D4) and side-rail conditional enablement (D2). Internal so unit tests can
     /// drive it with a fabricated `LBChannel` without a live load. Coalesced so a
     /// single channel ingest fires at most one onChange.
+    ///
+    /// `ingestChannel` is ALSO this instance's earliest signal of its very FIRST video
+    /// (`currentVideoId == nil` before this call — subsequent calls for the SAME video, e.g.
+    /// `onChannelRefresh`'s mid-stream re-ingest, see `currentVideoId` already set and skip the
+    /// arrival check). On that first call, `arriveAt(videoId:)` restores `ch.id`'s chat/activity
+    /// history from `feedSnapshotCache` if ANY earlier instance this process already visited it
+    /// — e.g. closing the player and re-entering the same still-live video
+    /// (chat-history-video-switch-cache-cross-instance, fixing 「直播縮小關閉再進入也要保留」歷史
+    /// 訊息快取). `PollManager` still forces `is_init` on a brand-new instance regardless (
+    /// `chat-history-reentry-instance-scoped-cursor-core`, unchanged) — the incoming backlog
+    /// merges harmlessly against the restored snapshot via `seenPushIds` (no core changes here).
     func ingestChannel(_ ch: LBChannel) {
+        let isFirstChannelThisInstance = currentVideoId == nil
         // cart-add-tier2: track the current video id from the channel-injection path
         // so addToCart can thread it as CART_ADD_REQUEST.video_id (the template's
         // view-model truth; mirrors player.channel without reaching into player state).
         currentVideoId = ch.id
         coalescing {
+            if isFirstChannelThisInstance {
+                arriveAt(videoId: ch.id)
+            }
             handleHeaderChrome(title: ch.title, hostName: ch.shop.name,
                                shopLogo: ch.shop.logo, shareUrl: ch.shareUrl)
             handleInfo(title: ch.title, publishAt: ch.publishAt, shopName: ch.shop.name,
@@ -1158,6 +1189,13 @@ public final class DefaultPlayerTemplate {
     }
 
     func handlePush(_ push: LBPushMsg) {
+        // chat-push-id-dedupe-template：身分（identity）去重——同一 session 內同一非 nil `id` 只
+        // append 一次，drop 在到達任何 `activityFeed.appendXXX` 之前（不 append、不觸發
+        // `onMutation`）。`id == nil` 一律照原行為放行、NOT 被擋、NOT 拿去做內容比對。這與
+        // `dedupeSignature(for:)` 的「MUST NOT 比對任何訊息內容」正交、不衝突：本 guard 只比對
+        // `id`，後台刻意重送的真實通知（相同文字、新 id）不受影響仍會顯示。同時涵蓋批次
+        // `ingestBacklog` 與即時 trickle 兩條路徑（皆呼叫本函式）及兩者交錯的情境。
+        guard Self.shouldIngestPush(id: push.id, seen: &seenPushIds) else { return }
         // chat-message-kind ⑤：依 `push.kind` 判型路由，**停止以 `color` 反推**。
         // event-join-cta-isset-ek-template：`kind=event` 活動公告（與其他 kind 正交）仍**最先**判定 →
         // 獨立 event-join 項（套用 `LBEventJoinLine` 樣式）。判定用 `kind == .event` + `eid > 0`。
@@ -1222,6 +1260,68 @@ public final class DefaultPlayerTemplate {
             || !(push.p ?? "").isEmpty
     }
 
+    // MARK: - messages is_init backlog batch ingest (live-chat-backlog-batch-ingest-template,
+    // ordering corrected by live-chat-backlog-ingest-order-fix-template)
+
+    /// Pure: identity pass-through for one `is_init` backlog bucket (`push[]` / `user[]` /
+    /// `rush[]`) before batch ingestion — the bucket is appended in the ORDER it arrives.
+    ///
+    /// **History**: the original `live-chat-backlog-batch-ingest-template` change (2026-07-03,
+    /// archived) had this function REVERSE the bucket, under an explicitly documented-as-unproven
+    /// assumption (its design.md D2) that each bucket is delivered **newest-first**. A live
+    /// regression report (`歷史訊息的順序顛倒了, 新的要在舊的訊息下面` — history order reversed,
+    /// newest should render BELOW oldest) proved that assumption backwards: `DefaultActivityFeed`
+    /// stores newest-at-the-tail, and `ChatFeedView` renders `history` verbatim (oldest → newest,
+    /// top → bottom, no reordering at render time) — so reversing an already-oldest-first bucket
+    /// put the newest message at the HEAD (rendered at the top) and the oldest at the TAIL
+    /// (rendered at the bottom), exactly backwards. It also made `DefaultActivityFeed.trimmed`'s
+    /// `suffix(cap)` keep the WRONG (oldest) 50-item subset whenever a backlog round exceeds
+    /// `historyRetain`, silently un-fixing the original `後面進入直播的人看不到歷史訊息` bug.
+    ///
+    /// **Documented assumption** (`live-chat-backlog-ingest-order-fix-template/design.md` D2):
+    /// none of `LBPushMsg` / `LBUserMsg` / `LBRushMsg` carry a timestamp or sequence field, and no
+    /// spec documents this round's array direction — so this function now assumes each bucket is
+    /// delivered **oldest-first** (index 0 = oldest), the ordinary convention for a "history"
+    /// endpoint and the direction the live regression supports, and therefore does NOT reorder it.
+    /// This does NOT reorder ACROSS buckets — push/user/rush relative sequencing is untouched (no
+    /// evidence either way for that dimension). If backend confirmation ever shows a bucket is
+    /// actually newest-first, reinstate `Array(bucket.reversed())` here (isolated to this one
+    /// function) rather than touching the batching/notify plumbing.
+    static func backlogIngestOrder<T>(_ bucket: [T]) -> [T] {
+        bucket
+    }
+
+    /// Batch-ingest the messages `is_init` backlog round (≤500 筆一次性歷史per bucket) as ONE
+    /// atomic operation, instead of feeding it through the live per-item path.
+    ///
+    /// **Why**: `DefaultActivityFeed`'s shared `history` buffer is capped at `historyRetain`
+    /// (50). The live trickle path (`handlePush` / `handleJoin` / `handlePurchase`, called once
+    /// per item as messages arrive a few seconds apart) trims on every append — correct and
+    /// cheap for that cadence. But the `is_init` round can deliver up to 500 items in ONE poll
+    /// response; naively forwarding that array in FORWARD order through the same per-item path
+    /// assumes it is oldest-first (§`backlogIngestOrder` doc) — the direction this codebase now
+    /// assumes it actually is, so forward-order (unreversed) ingestion is correct: appending
+    /// oldest-first means the LAST-appended item (the newest message) lands at `history`'s tail,
+    /// matching `DefaultActivityFeed`'s "newest at the tail" invariant, and the single end-of-batch
+    /// `suffix(historyRetain)` trim correctly keeps the chronologically newest ≤50 items — fixing
+    /// the reported symptom (後面進入直播的人看不到歷史訊息: a late joiner must see the messages
+    /// right before they joined, not stale ones).
+    ///
+    /// This method feeds each bucket through `backlogIngestOrder` (now an identity pass-through)
+    /// and reuses the EXISTING, UNMODIFIED `handlePush` / `handleJoin` / `handlePurchase`
+    /// classification methods — called inside `activityFeed.batchIngest { ... }` so the
+    /// `historyRetain` trim and the host-facing notification each fire EXACTLY ONCE for the whole
+    /// round (was: up to 500 times). The live one-at-a-time trickle path is untouched — this
+    /// method is only invoked when `response.isBacklogReplay == true` (see
+    /// `TemplateAttachment.onPollReceived`).
+    func ingestBacklog(push: [LBPushMsg], user: [LBUserMsg], rush: [LBRushMsg]) {
+        activityFeed.batchIngest {
+            for item in Self.backlogIngestOrder(push) { handlePush(item) }
+            for item in Self.backlogIngestOrder(user) { handleJoin(text: item.text) }
+            for item in Self.backlogIngestOrder(rush) { handlePurchase(text: item.text) }
+        }
+    }
+
     /// Host-triggered「加入活動」intent for an event-join feed item. Calls the
     /// core's interceptable `requestEventJoin` (emits `eventJoinIntent`; if the
     /// host intercepts it, the host fulfils the join) and OPTIMISTICALLY marks
@@ -1242,30 +1342,84 @@ public final class DefaultPlayerTemplate {
     /// Live end (Task 3.4) — headless; host provides end screen
     func handleLiveEnd() {}
 
-    /// `VIDEO_SWITCH` (notification) → reset the per-video-session family-2 overlay so
-    /// the next video starts from a CLEAN feed / win entry. Clears the merged activity +
-    /// chat feed AND the win-claim unclaimed entry / result state, symmetric with core's
-    /// `resetPerSessionState()` (which clears `notifiedWinnerIds` etc.). Coalesced into a
-    /// single host-facing `onChange`. core only dispatches `VIDEO_SWITCH` when the previous
-    /// video id exists AND differs from the new one, so first-load and same-video retry /
-    /// buffering NEVER reach here (no false clears). Headless — clears data only.
-    func handleVideoSwitch() {
+    /// `VIDEO_SWITCH` (notification) → reset the per-video-session family-2 overlay so the next
+    /// video starts from a CLEAN feed / win entry — UNLESS the destination video (`to`) is one
+    /// ANY `DefaultPlayerTemplate` instance this process already visited (now that
+    /// `feedSnapshotCache` is `.shared`/process-level, chat-history-video-switch-cache-cross
+    /// -instance), in which case its chat/activity history is RESTORED via `arriveAt(videoId:)`
+    /// instead of being left empty (`chat-history-video-switch-cache-template`, fixing
+    /// 「切換影片再回來又看不到歷史訊息」). `winClaim` / `replayChatAppendedCount` are unaffected by
+    /// this cache — still cleared / reset unconditionally (separate concerns from the reported
+    /// bug: unclaimed award entries, VOD/replay reveal cursor).
+    ///
+    /// `from` / `to` are the core-supplied `VIDEO_SWITCH` params (`from_video_id` / `to_video_id`,
+    /// already sent by `LiveBuyPlayerViewController.load(videoId:)`, now threaded through by
+    /// `TemplateAttachment`). Both default to `nil` so existing no-arg call sites (tests exercising
+    /// OTHER, orthogonal behaviors) keep compiling and exercise exactly today's clear+reset path —
+    /// a missing `from` just means "nothing to save", a missing/uncached `to` means "no snapshot to
+    /// restore", both degrading safely to the pre-existing behavior. Coalesced into a single
+    /// host-facing `onChange`. core only dispatches `VIDEO_SWITCH` when the previous video id
+    /// exists AND differs from the new one, so first-load and same-video retry / buffering NEVER
+    /// reach here (no false clears/restores) — this instance's OWN first video load is instead
+    /// covered by `ingestChannel`'s `arriveAt` call (see there). Headless — clears/restores data
+    /// only.
+    func handleVideoSwitch(from: String? = nil, to: String? = nil) {
         coalescing {
-            activityFeed.clear()
+            // 離開前先把「這支影片目前的 feed + push id 去重集合」存進快取（history 空則 save 內部
+            // 自行略過，見 VideoFeedSnapshotCache.save）——chat-history-video-switch-cache-template。
+            if let from = from {
+                feedSnapshotCache.save(videoId: from, history: activityFeed.history, seenPushIds: seenPushIds)
+            }
             winClaim.clear()
+            // 回放聊天游標同步歸 0（feed 即將 clear 或 restore，否則下一場前綴會誤判前進/倒退）—
+            // replay-chat-feed-bridge-template。core 也會在 resetPerSessionState 送 `[]`，兩路皆安全。
+            replayChatAppendedCount = 0
+            arriveAt(videoId: to)
+        }
+    }
+
+    /// Shared arrival-side logic for BOTH `handleVideoSwitch(to:)` and this instance's very
+    /// FIRST video load (`ingestChannel`, chat-history-video-switch-cache-cross-instance) —
+    /// restore `activityFeed`/`seenPushIds`/`hasIngestedBacklog` from `feedSnapshotCache` if
+    /// `videoId` was already visited (by ANY template instance this process, now that the cache
+    /// is `.shared`/process-level), else fall through to today's clear+reset so the normal
+    /// `is_init`/backlog-fetch path populates it from the network. Caller MUST already be inside
+    /// a `coalescing { }` block (this does not fire its own `onChange`).
+    private func arriveAt(videoId: String?) {
+        if let videoId = videoId, let cached = feedSnapshotCache.snapshot(for: videoId) {
+            // 已造訪過 `videoId`——還原快照而非清空。連帶還原 seenPushIds（同一原子單位，
+            // chat-history-video-switch-cache-template design.md D1）；強制 hasIngestedBacklog =
+            // true 補上 user[]/rush[] 無 id 桶的防線（design.md D3）：即使罕見地又收到一輪 stray
+            // 整批 backlog，也整批 skip，不在還原的快照上重複疊加。
+            activityFeed.restore(cached.history)
+            seenPushIds = cached.seenPushIds
+            hasIngestedBacklog = true
+        } else {
+            // `videoId` 缺省，或本 process 內第一次出現——維持既有行為：clear + 重置旗標，交給
+            // 正常的 is_init / backlog-fetch 從網路取得歷史。
+            activityFeed.clear()
             // 換片後新場的第一批 backlog 應能正常 ingest（feed 已 clear、旗標 reset → 乾淨）
             // — chat-history-dedupe-template。
             hasIngestedBacklog = false
-            // 回放聊天游標同步歸 0（feed 已 clear，否則下一場前綴會誤判前進/倒退）—
-            // replay-chat-feed-bridge-template。core 也會在 resetPerSessionState 送 `[]`，兩路皆安全。
-            replayChatAppendedCount = 0
+            // 換片後新場的 id 不應與前一場撞名——chat-push-id-dedupe-template。
+            seenPushIds.removeAll()
         }
     }
+
+    /// 有界（bounded）的「videoId → 上次離開時的 feed 快照」快取，讓 in-place 換片切回本 session
+    /// 已造訪過的影片、以及**關閉播放器重進同一場**（全新實例的第一支影片）時都能還原歷史，不需要
+    /// （也不應該）等待後端重新回傳整批 backlog（`PollManager` 既有的 cursor / `is_init` 判斷本身
+    /// 正確，缺的只是消費端的記憶）。預設 `.shared`（process-level singleton，隨 app 存活，NOT
+    /// 隨本 template 實例生滅——chat-history-video-switch-cache-cross-instance）；ctor-injectable
+    /// 供測試傳入獨立實例，避免跨測試汙染（docs/unit-test-discipline.md）。
+    private let feedSnapshotCache: VideoFeedSnapshotCache
 
     // MARK: - 聊天歷史 backlog 分流（cursor-based，chat-history-dedupe-template）
 
     /// per-session 旗標：該場是否已 ingest 過第一批「首輪 backlog 重放」（`isBacklogReplay == true`）。
-    /// 換片 / 重入時由 `handleVideoSwitch` 重置為 false。
+    /// 由 `arriveAt(videoId:)` 分流（換片 / 本實例第一支影片皆經此）：重置為 `false`——除非命中
+    /// `feedSnapshotCache`（本 session 換回，或跨實例的關閉重進），此時強制設為 `true`（見
+    /// `arriveAt` 文件，chat-history-video-switch-cache-template design.md D3）。
     private var hasIngestedBacklog = false
 
     /// 純函式：是否 ingest 這一輪 poll 進 feed。**只依 cursor 訊號 + per-session 旗標，NOT 內容**
@@ -1283,6 +1437,31 @@ public final class DefaultPlayerTemplate {
     /// Instance wrapper：操作 per-session `hasIngestedBacklog`（chat-history-dedupe-template）。
     func shouldIngestPoll(_ isBacklogReplay: Bool) -> Bool {
         Self.shouldIngestPoll(isBacklogReplay: isBacklogReplay, alreadyIngestedBacklog: &hasIngestedBacklog)
+    }
+
+    // MARK: - push id 身分去重（chat-push-id-dedupe-template）
+
+    /// per-session 已見 push id 集合。**只 push 桶適用**——`LBUserMsg`（進場）／`LBRushMsg`
+    /// （搶購）不帶任何 id 欄位（只活在直播當下的即時氣氛糖，從不進歷史），故不受此集合影響。
+    /// 由 `arriveAt(videoId:)` 分流（換片 / 本實例第一支影片皆經此）：重置為空集合，避免新場的
+    /// id 與前一場撞名——除非命中 `feedSnapshotCache`（本 session 換回，或跨實例的關閉重進），此時
+    /// 改為還原該影片離開當下的 id 集合（與其 `history` 為同一原子單位一併還原，
+    /// chat-history-video-switch-cache-template design.md D1）。
+    private var seenPushIds: Set<String> = []
+
+    /// 純函式：template 層 push id 身分去重（port 自 core 的 `LiveBuyPlayerViewController
+    /// .shouldAppendPush(id:seen:)`，`chat-push-id-dedupe-core`——同構、非共用，因
+    /// `LiveBuyUI` 不得依賴 `LiveBuySDK` internal 實作，只依賴其 public `LBPushMsg.id`）。
+    ///
+    /// 這是**身分（identity）判定**，只比對 `id` 本身，NEVER 讀取或比較 `text`／`name` 等內容欄
+    /// 位——與 `DefaultActivityFeed.dedupeSignature(for:)`「MUST NOT 比對任何訊息內容」的
+    /// Requirement 正交、不衝突：後者防的是「以內容誤殺後台刻意重送的真實通知」（resend 依
+    /// 2026-07-01 後端定案一律換新 id，故不受本函式影響、仍會顯示）；本函式只擋「完全相同 id」
+    /// 的重複。`id == nil`（缺省 / 舊後端）一律回傳 true 且不記錄（fallback，不去重）。Pure /
+    /// testable（no I/O，操作傳入的 `inout Set`）。
+    static func shouldIngestPush(id: String?, seen: inout Set<String>) -> Bool {
+        guard let id = id else { return true }
+        return seen.insert(id).inserted
     }
 
     // MARK: - Layout well-known keys (Task 3.7)

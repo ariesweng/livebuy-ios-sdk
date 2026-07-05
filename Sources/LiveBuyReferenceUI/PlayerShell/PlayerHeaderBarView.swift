@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import LiveBuySDK
 import LiveBuyUI
 
@@ -215,10 +216,7 @@ public struct PlayerHeaderBarView: View {
         HStack(spacing: 8) {
             avatar
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 12 * theme.fontScale, weight: .bold))
-                    .foregroundColor(onGlass)
-                    .lineLimit(1)
+                titleView
 
                 HStack(spacing: 6) {
                     Text(hostName)
@@ -253,6 +251,75 @@ public struct PlayerHeaderBarView: View {
         .padding(.trailing, 12)
         .padding(.vertical, 4)
         .background(Capsule().fill(pillGlass))
+    }
+
+    // MARK: - Title (LBPMarqueeText) — rb-ios-marquee-title-scroll
+    //
+    // Parity `design/templates/minimal/sdk-components.jsx`'s `LBPMarqueeText` and the
+    // already-shipped Android port. Closes a documented design/implementation gap: the
+    // title used to always truncate with an ellipsis; it now marquee-scrolls when it
+    // overflows.
+
+    /// The title slot. The layout-participating (and therefore negotiation-affecting)
+    /// view is ALWAYS the exact same unconstrained, static `Text` this rendered before
+    /// this change — same modifiers, no `.frame`, no wrapper — so it hugs/squeezes in
+    /// the surrounding `HStack`/`VStack` negotiation IDENTICALLY to before this change,
+    /// for every title, every time. Zero behavior change / byte-identical for the
+    /// common (fits) case, guaranteed structurally, not just by a threshold check.
+    ///
+    /// The marquee, when needed, is attached as an `.overlay` — a PURELY VISUAL
+    /// addition that does not feed back into the base `Text`'s own reported size (this
+    /// is what makes it safe: an EARLIER attempt that instead swapped the
+    /// layout-participating view itself between the static `Text` and a
+    /// `.frame`-sized `MarqueeTitleLoopView` was found, by direct empirical testing, to
+    /// perturb the surrounding pill's negotiation — the fixed-frame marquee refused to
+    /// shrink under squeeze the way the original elastic `Text` did, redirecting that
+    /// squeeze pressure onto the host-name row below instead and spuriously
+    /// over-truncating it).
+    ///
+    /// The overlay's content is `GeometryReader` — used here specifically because
+    /// `.overlay(_:alignment:)` proposes its content the SAME size the base `Text`
+    /// itself resolved to (post-squeeze, if any), and `GeometryReader`'s closure can
+    /// read that proposed size and decide what to render SYNCHRONOUSLY, in the exact
+    /// same pass — no `@State` / `.onPreferenceChange` round trip needed. An earlier
+    /// attempt used this module's established `.background(GeometryReader {
+    /// ... }.preference(...))` + `.onPreferenceChange` measuring idiom instead (as used
+    /// elsewhere in this module for other views), which requires an `@State` write to
+    /// trigger a SECOND render pass before the measurement is available — and whether
+    /// `ImageRenderer` (this module's snapshot mechanism) performs that second
+    /// settling pass within one synchronous capture was found, by direct empirical
+    /// testing, to be UNPREDICTABLE across otherwise-equivalent view shapes. Reading
+    /// the proposed size directly inside the overlay's own `GeometryReader` sidesteps
+    /// that non-determinism entirely — no second pass is ever required.
+    ///
+    /// Purely content-driven — there is NO manual toggle; whether the overlay paints is
+    /// 100% determined by `marqueeTitleOverflows`.
+    private var titleView: some View {
+        let font = Font.system(size: 12 * theme.fontScale, weight: .bold)
+        let textWidth = Self.marqueeIntrinsicTextWidth(title, fontSize: 12 * theme.fontScale)
+        return Text(title)
+            .font(font)
+            .foregroundColor(onGlass)
+            .lineLimit(1)
+            .overlay(
+                GeometryReader { proxy in
+                    let containerWidth = proxy.size.width
+                    Group {
+                        if Self.marqueeTitleOverflows(textWidth: textWidth, containerWidth: containerWidth) {
+                            MarqueeTitleLoopView(
+                                title: title,
+                                font: font,
+                                color: onGlass,
+                                textWidth: textWidth,
+                                containerWidth: containerWidth,
+                                gap: Self.marqueeGap,
+                                durationSeconds: Self.marqueeDurationSeconds(textWidth: textWidth)
+                            )
+                        }
+                    }
+                },
+                alignment: .leading
+            )
     }
 
     /// Avatar — a white-backed 28×28 circle. The design fills it with the shop
@@ -408,6 +475,131 @@ public struct PlayerHeaderBarView: View {
         }
         return String(format: "%.1fK", rounded)
     }
+
+    // MARK: - Marquee pure helpers (rb-ios-marquee-title-scroll)
+    //
+    // Parity JSX `LBPMarqueeText` (`design/templates/minimal/sdk-components.jsx:282-330`)
+    // and the already-shipped Android port
+    // (`openspec/changes/archive/2026-07-03-rb-android-marquee-title-scroll/`). All three
+    // are pure / deterministic — no SwiftUI, no IO — directly unit-testable
+    // (`docs/unit-test-discipline.md`).
+
+    /// Marquee scroll speed in points/sec (parity JSX `speedPxPerSec = 32` and Android's
+    /// `MARQUEE_SPEED_DP_PER_SEC`). Points are iOS's device-independent layout unit — the
+    /// same conceptual role as Android's dp — so this is a direct port with no unit
+    /// adjustment, mirroring Android's own "no adjustment needed" determination.
+    static let marqueeSpeedPointsPerSecond: CGFloat = 32
+    /// Marquee minimum loop duration floor in seconds (parity JSX `Math.max(8, ...)` /
+    /// Android's `MARQUEE_MIN_DURATION_SECONDS`).
+    static let marqueeMinDurationSeconds: Double = 8
+    /// Gap between the two duplicated title copies in the marquee loop (parity JSX
+    /// `gap = 36` / Android's `MARQUEE_GAP_DP`).
+    static let marqueeGap: CGFloat = 36
+
+    /// Marquee overflow decision (parity JSX `LBPMarqueeText`'s `scrollWidth <=
+    /// clientWidth` / Android's `marqueeTitleOverflows`). Pure / deterministic. `textWidth`
+    /// is the title's measured intrinsic single-line width; `containerWidth` is the host
+    /// pill's actual available width for the title slot. Overflow (→ marquee) ⟺ the text
+    /// is strictly wider than the container — a direct, strict `>` port of Android's
+    /// decision (NOT the JSX's own `+ 1` CSS tolerance), kept for 2-platform-consistent
+    /// behavior rather than re-deriving from the JSX independently.
+    static func marqueeTitleOverflows(textWidth: CGFloat, containerWidth: CGFloat) -> Bool {
+        textWidth > containerWidth
+    }
+
+    /// Marquee loop duration in seconds (parity JSX `dur = Math.max(8, scrollWidthPx /
+    /// speedPxPerSec)` / Android's `marqueeDurationMillis` — direct pt-for-dp port, no
+    /// unit adjustment needed). Pure / deterministic.
+    static func marqueeDurationSeconds(
+        textWidth: CGFloat,
+        speedPointsPerSecond: CGFloat = Self.marqueeSpeedPointsPerSecond,
+        minDurationSeconds: Double = Self.marqueeMinDurationSeconds
+    ) -> Double {
+        max(minDurationSeconds, Double(textWidth / speedPointsPerSecond))
+    }
+
+    /// The title's intrinsic single-line width at `fontSize` (bold, matching the static
+    /// `Text`'s weight) — a pure, synchronous UIKit text-measurement calculation
+    /// (`NSString.size(withAttributes:)`), zero rendering / view-hierarchy dependency.
+    /// This module already bridges to UIKit/Foundation elsewhere for measurement-adjacent
+    /// needs (`ChatComposerBar.swift`'s `NSAttributedString`, `LoadingMarkAnimationView.swift`'s
+    /// `UIImage`) — following that precedent keeps this directly unit-testable with no
+    /// `View` involved, unlike a hidden SwiftUI probe view would be.
+    static func marqueeIntrinsicTextWidth(_ text: String, fontSize: CGFloat) -> CGFloat {
+        let font = UIFont.boldSystemFont(ofSize: fontSize)
+        return (text as NSString).size(withAttributes: [.font: font]).width
+    }
+}
+
+// MARK: - MarqueeTitleLoopView (LBPMarqueeText overflow branch) — rb-ios-marquee-title-scroll
+//
+// The continuously-looping title marquee (overflow branch of
+// `PlayerHeaderBarView.titleView`; parity JSX `LBPMarqueeText`'s covered branch —
+// duplicate the text with a gap, animate a seamless leftward loop; parity the
+// already-shipped Android `MarqueeLoop`). Follows this module's own established
+// continuous-loop idiom (`SpinnerRingView.swift`'s `@State` + `.onAppear` +
+// `withAnimation(.linear(duration:).repeatForever(autoreverses: false))`, also used by
+// `WinEntryView.swift`'s pulse and `StartScreenView.swift`'s spinner) rather than
+// introducing a new animation mechanism — a `Timer`-driven frame clock
+// (`LoadingMarkAnimationView.swift`'s idiom) is the wrong tool here: that exists for
+// *discrete* PNG-sequence frame stepping, whereas this is *continuous* interpolated
+// motion, which `withAnimation(...repeatForever...)` handles natively.
+//
+// Under `ImageRenderer` (this module's snapshot mechanism, `ReferenceUISnapshotHelper`),
+// `.onAppear` does not fire (established precedent — see `SpinnerRingView.swift`'s doc
+// comment, empirically reconfirmed for this change: `AddToCartSheetViewSnapshotTests
+// .testAddToCartSheetView_loadingState_rendersDeterministically`, which renders
+// `SpinnerRingView` via the identical idiom, was run twice in direct succession and
+// byte-exact-matched its existing golden both times). So a snapshot of this view
+// deterministically captures the RESTING frame (`scrolling == false`, offset `0`): two
+// duplicated title copies laid out side by side with the fixed gap, no scroll
+// displacement yet — still a real, meaningfully different visual from the ellipsized
+// static branch, proving the overflow branch renders.
+private struct MarqueeTitleLoopView: View {
+    let title: String
+    let font: Font
+    let color: Color
+    let textWidth: CGFloat
+    let containerWidth: CGFloat
+    let gap: CGFloat
+    let durationSeconds: Double
+
+    /// `false` at rest (and under `ImageRenderer`, permanently — see the file header
+    /// comment above); flips to `true` once in `.onAppear` to start the infinite loop.
+    @State private var scrolling = false
+
+    var body: some View {
+        HStack(spacing: gap) {
+            Text(title).font(font).foregroundColor(color).lineLimit(1).fixedSize()
+            Text(title).font(font).foregroundColor(color).lineLimit(1).fixedSize()
+        }
+        // Translating by exactly `-(textWidth + gap)` moves the second (duplicate) copy
+        // into the first copy's original starting position — a seamless loop, mirroring
+        // JSX's `-50%` of the doubled content / Android's identical `targetValue`.
+        .offset(x: scrolling ? -(textWidth + gap) : 0)
+        // This view only ever renders inside `PlayerHeaderBarView.titleView`'s
+        // `.overlay(GeometryReader { ... })`, which already proposes it EXACTLY
+        // `containerWidth` (the base `Text`'s own true resolved width) — so this
+        // `.frame(maxWidth:)` is belt-and-suspenders self-containment (correct even if
+        // reused in some other ambient proposal), not the primary defense. Critically,
+        // this view's sizing NEVER feeds back into the surrounding `HStack`/`VStack`
+        // negotiation at all (overlay content is layout-inert to its ancestors) — that
+        // is what actually keeps the host-name row unaffected, verified empirically
+        // during this change (an earlier version made this view part of the
+        // LAYOUT-PARTICIPATING tree via a `Group` if/else swap with a rigid
+        // `.frame(width:)`; that rigid frame refused to shrink under real squeeze,
+        // redirecting the excess pressure onto the host-name row and spuriously
+        // over-truncating it — switching to `maxWidth` alone did NOT fix it, since the
+        // real fix was removing this view from the negotiation entirely via `.overlay`).
+        // `.clipped()` clips to whatever width is proposed.
+        .frame(maxWidth: containerWidth, alignment: .leading)
+        .clipped()
+        .onAppear {
+            withAnimation(.linear(duration: durationSeconds).repeatForever(autoreverses: false)) {
+                scrolling = true
+            }
+        }
+    }
 }
 
 // MARK: - Deterministic demo (previews / snapshot tests)
@@ -417,13 +609,17 @@ extension PlayerHeaderBarView {
     /// `live` toggles the LIVE chrome (LIVE pill + viewer count) vs the VOD chrome;
     /// `replay` (only meaningful when `live`) drops the LIVE pill while keeping the
     /// viewer count (回放 = scrubbed behind the live edge). Seeds stable copy so the
-    /// baseline does not depend on a live player.
+    /// baseline does not depend on a live player. `title` defaults to the existing
+    /// short demo title (byte-identical for every existing call site); pass a
+    /// deliberately long one (rb-ios-marquee-title-scroll) to exercise the marquee
+    /// overflow branch in a snapshot.
     static func demo(theme: ReferenceUITheme = ReferenceUIThemePalette.minimal,
                      live: Bool = true,
-                     replay: Bool = false) -> PlayerHeaderBarView {
+                     replay: Bool = false,
+                     title: String = "夏日彩妝特賣") -> PlayerHeaderBarView {
         PlayerHeaderBarView(
             theme: theme,
-            title: "夏日彩妝特賣",
+            title: title,
             hostName: "BeautyTown 官方",
             shopLogo: "",
             viewerCount: 12345,

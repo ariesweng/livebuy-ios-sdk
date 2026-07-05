@@ -428,7 +428,14 @@ public final class PlayerShellModel: ObservableObject {
         bagCount = t.operationRail.bagCount
         heartBurstTick = t.operationRail.heartBurstTick
         muted = t.header.muted
+        // Edge-triggered: only fire `onLiveStatusChange` when the freshly re-derived value
+        // actually differs, so a host-bound mirror isn't spammed on every unrelated refresh
+        // (rb-ios-floating-card-live-status-sync).
+        let previousIsLive = isLive
         isLive = t.header.isLive
+        if isLive != previousIsLive {
+            onLiveStatusChange?(isLive)
+        }
         isFinishedLiveReplay = t.header.isFinishedLiveReplay
         position = t.playbackProgress.position
         duration = t.playbackProgress.duration
@@ -529,6 +536,21 @@ public final class PlayerShellModel: ObservableObject {
     /// truth). An empty-direction swipe (no adjacent video → close per swipe-nav-close-on-empty)
     /// does NOT fire this. nil on demo / snapshot instances.
     public var onDidSwitchVideo: ((String) -> Void)?
+
+    /// Fired from `refresh(from:)` whenever the freshly re-derived `isLive` (this model's
+    /// SAME authoritative, channel-load-driven flag the top chrome reads) differs from its
+    /// value before this refresh — i.e. edge-triggered, not fired on every unrelated refresh.
+    /// This is the single, ALWAYS-CURRENT live-status signal for "is the video currently shown
+    /// by this model live" — unlike a switch-time `LBVideoItem.liveStatus` GUESS baked in
+    /// synchronously at switch-initiation from PRE-switch adjacency data (see
+    /// `LiveBuyPlayer.switchedVideoItem`), this closure re-fires with the CORRECTED value once
+    /// the real post-switch channel data loads. A host-bound mirror of "is the currently shown
+    /// video live" (e.g. the collapsible presenter's floating preview card) SHOULD consume this
+    /// instead of a one-shot switch-time guess, so it never drifts permanently stale — fixing
+    /// the live→VOD-in-place-switch-then-minimize-still-shows-LIVE bug
+    /// (rb-ios-floating-card-live-status-sync). nil on demo / snapshot instances (no bound
+    /// template → `refresh(from:)` never runs → never fires).
+    public var onLiveStatusChange: ((Bool) -> Void)?
 
     /// Switch to the PREVIOUS adjacent video (vertical swipe-DOWN) — forward to the
     /// template's `navigateToPrev()` (→ core `load(videoId:)`); no-op when there is

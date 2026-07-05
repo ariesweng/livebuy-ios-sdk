@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — next features accrue here toward v3.2.0 / v3.1.1._
+_Nothing yet — next features accrue here toward v3.2.0 / v3.1.2._
+
+---
+
+## [3.1.1] - 2026-07-05
+
+> patch release，無 breaking。鎖點 `9bdbb1f6`。修復 v3.1.0 發布後密集浮現的 chat history 問題
+> （關閉播放器重進同一場直播看不到歷史留言，經多輪修正收斂），另含兩個純視覺 reference-ui
+> 呈現變更。詳見 [`docs/release/v3.1.1-readiness.md`](../docs/release/v3.1.1-readiness.md)。
+
+### v3.1.1 — patch（總覽）
+
+**Fixed**
+- **chat history reentry** — 關閉播放器重進同一場直播，歷史留言不再消失；`PollManager` 改依
+  per-instance `hasEverStarted` 旗標分流 `is_init`（不再誤判成「非首輪」）。
+- **is_init 首輪歷史訊息批次 ingest** — 修正順序反轉假設方向錯誤，改為批次 ingest；修復後進場
+  觀眾看得到歷史留言。
+- **push id 去重** — 歷史訊息改依穩定 `id` 去重，避免 backlog 與 trickle 重疊重複顯示。
+- **跨實例快取還原** — 歷史訊息快取升級為跨實例存活，關閉播放器重進同一場直播立即還原。
+- **in-place 換片還原快取** — 切回已造訪影片時還原快取歷史，避免不必要重抓。
+- **`LiveBuyLiveEntry` 輪詢死鎖** — onAppear 掛在 EmptyView 分支導致輪詢無法啟動，已修復。
+
+**功能亮點（純視覺，reference-ui 層）**
+- **跑馬燈標題** — 直播標題實作真正的捲動動畫（LBPMarqueeText parity），不擠壓主播名稱版面。
+- **炒氣氛提示改上方 toast** — 進場/選購/搶購/中獎不再混進聊天訊息列表，改由聊天室上方
+  toast 顯示最新一則。
+
+**無新增 host-facing public API。無 BREAKING。**
 
 ---
 
