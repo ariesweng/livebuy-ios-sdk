@@ -107,27 +107,26 @@ public final class MomentsModel: ObservableObject {
     /// (the player VC owns it; dependency stays one-way UI → core).
     private weak var template: DefaultPlayerTemplate?
 
-    /// The template's `onChange` we installed, so we can restore the previous one
-    /// on deinit (we chain rather than clobber — same as the family-1/2/3 models).
-    private var previousOnChange: (() -> Void)?
+    /// The independent observer registration token this model holds. Removed on
+    /// deinit so this model unsubscribes ONLY itself — never clobbers another
+    /// model's subscription (multi-observer registry, same as the family-1/2/3 models).
+    private var observerToken: LBTemplateObserverToken?
 
     // MARK: - Live initializer (design §"容器與 view-model 橋接")
 
     /// Bridge a live `DefaultPlayerTemplate`: take an initial snapshot and
-    /// subscribe to its single coalesced `onChange` so every start-phase change /
-    /// end-screen countdown advance / next / hot update / error record / clear
-    /// re-snapshots and republishes to the moment sub-views.
+    /// register an observer on its single coalesced change notification so every
+    /// start-phase change / end-screen countdown advance / next / hot update /
+    /// error record / clear re-snapshots and republishes to the moment sub-views.
     ///
     /// The host obtains the template via `LiveBuyUI.playerTemplate(for:)` and
     /// passes it here. Returns a model whose published values mirror the template
-    /// (read-only). The previous `onChange` (if any host already installed one) is
-    /// chained, not replaced.
+    /// (read-only). This registers an INDEPENDENT observer via `addObserver`; it
+    /// does NOT chain or replace the template's legacy `onChange`.
     public convenience init(template: DefaultPlayerTemplate) {
         self.init(snapshotting: template)
         self.template = template
-        self.previousOnChange = template.onChange
-        template.onChange = { [weak self] in
-            self?.previousOnChange?()
+        self.observerToken = template.addObserver { [weak self] in
             self?.refresh(from: template)
         }
     }
@@ -177,9 +176,10 @@ public final class MomentsModel: ObservableObject {
     }
 
     deinit {
-        // Restore the previous handler so a re-bound template is not left with a
-        // dangling closure capturing this (now gone) model.
-        template?.onChange = previousOnChange
+        // Remove ONLY this model's own observer so a re-bound template is not left
+        // with a dangling closure capturing this (now gone) model — other models'
+        // subscriptions are untouched (no chain to restore, no clobber).
+        if let token = observerToken { template?.removeObserver(token) }
     }
 
     // MARK: - Re-snapshot on change (design §"容器與 view-model 橋接")

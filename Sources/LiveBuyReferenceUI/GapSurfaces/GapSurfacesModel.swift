@@ -55,26 +55,26 @@ public final class GapSurfacesModel: ObservableObject {
     /// (the player VC owns it; dependency stays one-way UI → core).
     private weak var template: DefaultPlayerTemplate?
 
-    /// The template's `onChange` we installed, so we can restore the previous one
-    /// on deinit (we chain rather than clobber — same as the family-1/2/3/4 models).
-    private var previousOnChange: (() -> Void)?
+    /// The independent observer registration token this model holds. Removed on
+    /// deinit so this model unsubscribes ONLY itself — never clobbers another
+    /// model's subscription (multi-observer registry, same as the family-1/2/3/4 models).
+    private var observerToken: LBTemplateObserverToken?
 
     // MARK: - Live initializer (design §"容器與 view-model 橋接")
 
-    /// Bridge a live `DefaultPlayerTemplate`: subscribe to its single coalesced
-    /// `onChange` so every auth-gate set/clear, identity-label update, goods-tracking
-    /// flag flip / broadcast correction, or notice-tab open/close triggers an
-    /// `objectWillChange.send()` — the SwiftUI container then re-reads the computed
-    /// getters (which read the template directly). No snapshot is stored.
+    /// Bridge a live `DefaultPlayerTemplate`: register an observer on its single
+    /// coalesced change notification so every auth-gate set/clear, identity-label
+    /// update, goods-tracking flag flip / broadcast correction, or notice-tab
+    /// open/close triggers an `objectWillChange.send()` — the SwiftUI container then
+    /// re-reads the computed getters (which read the template directly). No snapshot
+    /// is stored.
     ///
     /// The host obtains the template via `LiveBuyUI.playerTemplate(for:)` and
-    /// passes it here. The previous `onChange` (if any host already installed one)
-    /// is chained, not replaced.
+    /// passes it here. This registers an INDEPENDENT observer via `addObserver`; it
+    /// does NOT chain or replace the template's legacy `onChange`.
     public init(template: DefaultPlayerTemplate) {
         self.template = template
-        self.previousOnChange = template.onChange
-        template.onChange = { [weak self] in
-            self?.previousOnChange?()
+        self.observerToken = template.addObserver { [weak self] in
             // Read-only bridge: there is no stored mirror to refresh — just tell
             // SwiftUI to re-render so the computed getters re-read the template.
             self?.objectWillChange.send()
@@ -91,9 +91,10 @@ public final class GapSurfacesModel: ObservableObject {
     }
 
     deinit {
-        // Restore the previous handler so a re-bound template is not left with a
-        // dangling closure capturing this (now gone) model.
-        template?.onChange = previousOnChange
+        // Remove ONLY this model's own observer so a re-bound template is not left
+        // with a dangling closure capturing this (now gone) model — other models'
+        // subscriptions are untouched (no chain to restore, no clobber).
+        if let token = observerToken { template?.removeObserver(token) }
     }
 
     // MARK: - Surface 1: AuthGateModalView ←「請先登入」auth-gate (auth-gate-template-state)

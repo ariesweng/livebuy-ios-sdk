@@ -327,8 +327,11 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
             theme: resolvedTheme,
             live: true,
             onTap: { _ in
-                // Restore the full player (re-presents → a fresh load, like a sheet
-                // re-present; the floating card is a minimized representation, not PiP).
+                // Restore the full player: a keep-alive RESUME, NOT a fresh load / sheet
+                // re-present. The same mounted player VC (never torn down on minimize) just
+                // flips back from `opacity 0` / hitTesting off to visible — playback continues
+                // uninterrupted, nothing reloads (see the keep-alive doc on `playerLayer`). The
+                // floating card is a minimized representation, not OS PiP.
                 withAnimation { isMinimized = false }
             },
             onClose: {
@@ -406,8 +409,10 @@ public extension View {
     /// `video` carries the `LBVideoItem` so the floating card can show its thumbnail; a host
     /// with only a video id passes `LBVideoItem.demo(id: theId, live: true)`.
     ///
-    /// NOTE: restoring from the floating preview re-presents the player (a fresh `load`),
-    /// not a resume — the floating card is a minimized card representation, not OS PiP.
+    /// NOTE: restoring from the floating preview is a keep-alive RESUME — the same mounted
+    /// player VC stays alive across minimize/restore, so playback continues uninterrupted; it is
+    /// NOT a fresh `load` / re-present. The floating card is a minimized card representation,
+    /// not OS PiP.
     func liveBuyPlayer(
         video: Binding<LBVideoItem?>,
         config: LiveBuyPlayerConfig = LiveBuyPlayerConfig(),

@@ -272,6 +272,23 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         player.enablePiP = true
         coordinator.armAutoPiP(for: player)
 
+        // FOURTH in-place switch path — core's SELF-DRIVEN VOD auto-advance
+        // (rb-ios-collapsible-autoadvance-switch-sync). core fires `onDidAutoAdvance` ONLY on the
+        // `.ended` auto-advance branch (`ios-vod-autoadvance-switched-item-core`), with the
+        // auto-advanced-to `LBNavItem`. The other three switch paths (swipe `onDidSwitchVideo` seam
+        // in `buildModels`, hot-pick, watch-next) fire `onVideoSwitchedItem` themselves; this fourth
+        // is core-internal and bypasses them. `applyAutoAdvanceSwitch` mirrors the swipe seam: it
+        // PRE-SYNCs the cover-guard id to next BEFORE firing `config.onVideoSwitchedItem` (so
+        // `updateUIViewController`'s cover-guard is a no-op → NO redundant reload; core already
+        // loaded next), and GATES on `onVideoSwitchedItem` being set (a direct `LiveBuyPlayer` host
+        // without it must not pre-sync/fire — see `applyAutoAdvanceSwitch`). The presenter's
+        // `onVideoSwitchedItem` latches `isInternalSwitch` → the minimized floating card does NOT
+        // reopen full-screen. `[weak coordinator]` breaks the retain cycle.
+        player.onDidAutoAdvance = { [weak coordinator] navItem in
+            applyAutoAdvanceSwitch(navItem, coordinator: coordinator,
+                                   onVideoSwitchedItem: config.onVideoSwitchedItem)
+        }
+
         // Force loadView/viewDidLoad so the core fires `onInstantiate` → LiveBuyUI attaches
         // the DefaultPlayerTemplate that `makeUIViewController` reads next.
         _ = player.view
@@ -740,4 +757,52 @@ func switchedVideoItem(id: String, cover: String, title: String,
         previewTime: "",
         showStock: false,
         goods: nil)
+}
+
+/// Build the `LBVideoItem` reported via `onVideoSwitchedItem` for the FOURTH in-place switch path —
+/// core's SELF-DRIVEN VOD auto-advance (`.ended` → `load(next)`, surfaced as
+/// `LiveBuyPlayerViewController.onDidAutoAdvance(LBNavItem)` by `ios-vod-autoadvance-switched-item-core`).
+/// The other three paths (swipe / hot-pick / watch-next) fire `onVideoSwitchedItem` themselves; this
+/// fourth one is core-internal and bypasses them, so the container relays it here so the collapsible
+/// presenter's floating card tracks the auto-advanced-to video's REAL cover / title / preview.
+///
+/// Reuses `switchedVideoItem` (same convention as the other three: `goods` / playback urls empty,
+/// KIND derived from `liveStatus`). `liveStatus = 0` is a switch-time GUESS: auto-advance only happens
+/// in a VOD / replay context (LIVE goes poll `live_end` → endScreen, never auto-advances), so the
+/// next video is VOD → `type = 1`. The floating card's LIVE/VOD badge self-corrects afterward via the
+/// authoritative `config.onLiveStatusChange` (rb-ios-floating-card-live-status-sync), exactly like the
+/// swipe / hot-pick / watch-next paths' switch-time guesses. `nav.title` is nil for `prev[]` items but
+/// auto-advance always targets `next.first` (title present) → "" only as a defensive fallback. Pure
+/// (no UIKit / I/O) so it is unit-testable (rb-ios-collapsible-autoadvance-switch-sync).
+func autoAdvanceSwitchedItem(_ nav: LBNavItem) -> LBVideoItem {
+    switchedVideoItem(id: nav.id, cover: nav.cover, title: nav.title ?? "",
+                      duration: nav.duration, liveStatus: 0, preview: nav.preview)
+}
+
+/// The auto-advance switch-sync step (rb-ios-collapsible-autoadvance-switch-sync): the body of the
+/// `player.onDidAutoAdvance` closure wired in `makePlayer`, extracted as a pure function (with the
+/// side effects injected via `coordinator` + `onVideoSwitchedItem`) so the iOS-specific PRE-SYNC +
+/// GATE logic is unit-testable without a real `LiveBuyPlayerViewController` / SwiftUI context.
+///
+/// GATE (iOS-specific, differs from Android): fire ONLY when the host set `onVideoSwitchedItem` — for
+/// the collapsible presenter it always is (its `composedConfig` sets a latch+rebind closure), and only
+/// then does the switch reach the bound `video`. A DIRECT `LiveBuyPlayer` host that did NOT set
+/// `onVideoSwitchedItem` gets no id-only signal on auto-advance either, so PRE-SYNCing the cover id
+/// would make the next re-render's cover-guard reload BACK to the (stale) bound entry id — a
+/// regression. Gating preserves that host's current no-reload behavior.
+///
+/// PRE-SYNC (mirrors the swipe `onDidSwitchVideo` seam): the presenter's `onVideoSwitchedItem` rebinds
+/// `video = item` (next) → SwiftUI drives `updateUIViewController(videoId: next)`, whose cover-guard
+/// (`coverVideoId != videoId`) would REDUNDANTLY reload (core already loaded next internally). Setting
+/// the coordinator's cover / current id to next BEFORE firing makes that guard a no-op → NO extra reload.
+/// The presenter's `onVideoSwitchedItem` also latches `isInternalSwitch`, so the minimized floating card
+/// does NOT reopen full-screen. This function never writes the host binding, never calls `player.load`,
+/// and never trips `shouldReopenOnVideoChange` directly.
+func applyAutoAdvanceSwitch(_ nav: LBNavItem,
+                           coordinator: LiveBuyPlayer.Coordinator?,
+                           onVideoSwitchedItem: ((LBVideoItem) -> Void)?) {
+    guard let onSwitchedItem = onVideoSwitchedItem else { return }
+    coordinator?.currentVideoId = nav.id
+    coordinator?.coverVideoId = nav.id
+    onSwitchedItem(autoAdvanceSwitchedItem(nav))
 }

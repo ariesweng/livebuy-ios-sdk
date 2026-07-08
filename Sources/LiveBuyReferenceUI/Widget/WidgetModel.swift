@@ -21,13 +21,14 @@ import LiveBuyUI
 //   - It does NOT own a second copy of authoritative state — it republishes
 //     SNAPSHOT VALUES taken from the template's own `private(set) public` read
 //     (`content.current`: `videos` / `mode` / `currentPage` / `lastPage` /
-//     `liveVideo` / `widgetColor` / `widgetBgcolor`) each time the template fires
-//     its single coalesced `onChange` (design §"容器與 view-model 橋接").
+//     `liveVideo` / `widgetColor` / `widgetBgcolor`) each time the template
+//     notifies its registered change observers (design §"容器與 view-model 橋接").
 //   - It does NOT add pixels and it does NOT add any accessor to `LiveBuyUI`
 //     (that would be a template-layer concern, out of scope here).
 //   - It does NOT subscribe to the content view-model's internal `onMutation`
-//     (that is a template-internal hook) — it observes ONLY the template's single
-//     public `onChange` (design §"守住的不變式": 只讀呈現).
+//     (that is a template-internal hook) — it observes ONLY the template's public
+//     change notification, registered via `template.addObserver` (design §"守住的
+//     不變式": 只讀呈現).
 //   - It carries NO mutating interactions / forwarders. The widget's real intents
 //     (card tap → open player / load-more pagination / floating close+expand) are
 //     HOST-WIRED CONTAINER closures carried by `WidgetOverlayView`, NOT this model.
@@ -91,27 +92,30 @@ public final class WidgetModel: ObservableObject {
     /// (the widget owns it; dependency stays one-way UI → core).
     private weak var template: DefaultWidgetTemplate?
 
-    /// The template's `onChange` we installed, so we can restore the previous one
-    /// on deinit (we chain rather than clobber — same as the family-1/2/3/4 models).
-    private var previousOnChange: (() -> Void)?
+    /// The removal token for this model's INDEPENDENT observer registration on the
+    /// template (`ios-refui-widget-overlay-migrate-onchange-to-observer`). Each
+    /// `WidgetModel` registers its OWN observer via `template.addObserver` and removes
+    /// ONLY this token on deinit — it never chains / restores a single shared
+    /// `onChange` var, so it is structurally impossible to wipe another observer's
+    /// subscription (mirrors the family-1/2/3/4 player overlay models).
+    private var observerToken: LBTemplateObserverToken?
 
     // MARK: - Live initializer (design §"容器與 view-model 橋接")
 
-    /// Bridge a live `DefaultWidgetTemplate`: take an initial snapshot and
-    /// subscribe to its single coalesced `onChange` so every videos update / mode
-    /// change / page advance / liveVideo update / color update re-snapshots and
-    /// republishes to the widget sub-views.
+    /// Bridge a live `DefaultWidgetTemplate`: take an initial snapshot and register
+    /// an INDEPENDENT change observer via `template.addObserver` so every videos
+    /// update / mode change / page advance / liveVideo update / color update
+    /// re-snapshots and republishes to the widget sub-views.
     ///
     /// The host obtains the template via `LiveBuyUI.widgetTemplate(for:)` and passes
     /// it here. Returns a model whose published values mirror the template
-    /// (read-only). The previous `onChange` (if any host already installed one) is
-    /// chained, not replaced.
+    /// (read-only). This model keeps its OWN `LBTemplateObserverToken` and removes
+    /// only that token on deinit — it never chains / clobbers a single shared
+    /// `onChange` var, so other observers on the same template are unaffected.
     public convenience init(template: DefaultWidgetTemplate) {
         self.init(snapshotting: template)
         self.template = template
-        self.previousOnChange = template.onChange
-        template.onChange = { [weak self] in
-            self?.previousOnChange?()
+        self.observerToken = template.addObserver { [weak self] in
             self?.refresh(from: template)
         }
     }
@@ -163,19 +167,20 @@ public final class WidgetModel: ObservableObject {
     }
 
     deinit {
-        // Restore the previous handler so a re-bound template is not left with a
-        // dangling closure capturing this (now gone) model.
-        template?.onChange = previousOnChange
+        // Remove ONLY this model's own observer registration; other observers on the
+        // same template are untouched (there is no single-`onChange`-var chain to
+        // restore, so this can never clobber another observer's subscription).
+        if let token = observerToken { template?.removeObserver(token) }
     }
 
     // MARK: - Re-snapshot on change (design §"容器與 view-model 橋接")
 
     /// Pull the latest values from the bound template's content snapshot into the
-    /// published mirrors. Always on the main thread (the template dispatches
-    /// `onChange` on main; the live init only installs this from the main-thread
-    /// `onChange`). `objectWillChange` fires once per `@Published` write —
-    /// acceptable for the skeleton; widget sub-views read final values within one
-    /// runloop.
+    /// published mirrors. Always on the main thread (the template dispatches its
+    /// change notification on main; the live init only registers this observer from
+    /// the main-thread `addObserver`). `objectWillChange` fires once per `@Published`
+    /// write — acceptable for the skeleton; widget sub-views read final values within
+    /// one runloop.
     private func refresh(from t: DefaultWidgetTemplate) {
         let c = t.content.current
         // Same in-app-unplayable-live hiding as the live seed init above

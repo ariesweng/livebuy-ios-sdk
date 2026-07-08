@@ -465,10 +465,11 @@ public struct ProductDetailSheetView: View {
 
     // MARK: - Variant pickers (one LBPVariantPicker per LBVariantState.group)
     //
-    // Chip group: label + wrapped pill chips; the selected chip (selection[gi]) is
+    // Chip group: label + flex-wrapped pill chips; the selected chip (selection[gi]) is
     // accent-outlined + accent-tinted (LBPVariantPicker). Chip tap →
-    // onSelectVariant(gi, oi). iOS-14-safe wrap via `WrapChips` (manual rows; no
-    // iOS-16 `Layout` / `LazyVGrid` adaptive).
+    // onSelectVariant(gi, oi). `WrapChips` flex-wraps by natural width via `ChipFlowLayout`
+    // (iOS 16+ `Layout`, no `GeometryReader`), falling back to chunked-3 on iOS 14/15 —
+    // aligned with the design's `LBPVariantPicker` `flexWrap:'wrap'` and Android `FlowRow`.
 
     private var variantPickers: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -797,12 +798,16 @@ public struct ProductDetailSheetView: View {
     }
 }
 
-// MARK: - WrapChips — iOS-14-safe wrapping chip row (LBPVariantPicker chips)
+// MARK: - WrapChips — flex-wrap chip layout (LBPVariantPicker chips)
 //
-// SwiftUI's `Layout` / adaptive `LazyVGrid` flow is iOS-16+. To stay iOS-14-safe we
-// lay out chips in manual fixed-count rows (chunked), which renders deterministically
-// for snapshots. Each chip mirrors `LBPVariantPicker`'s pill: accent-outlined +
-// accent-tinted when selected, neutral stroke otherwise.
+// Chips flow by NATURAL width and wrap to the next line when a row is full, aligning
+// with the design source `LBPVariantPicker` (`flexWrap:'wrap'; gap:8`) and Android's
+// `FlowRow`. iOS 16+ uses a hand-rolled `ChipFlowLayout` (`Layout` protocol — synchronous
+// measure, NO `GeometryReader`, so it stays snapshot-deterministic); iOS 14/15 (where the
+// `Layout` protocol is unavailable) falls back to the prior fixed `perRow`-wide chunked
+// rows. Each chip mirrors `LBPVariantPicker`'s pill: accent-outlined + accent-tinted when
+// selected, neutral stroke otherwise. Option text is never truncated (no `.lineLimit`),
+// so a single option wider than a row wraps to multiple lines with its full text visible.
 
 private struct WrapChips: View {
     let groupIndex: Int
@@ -814,18 +819,31 @@ private struct WrapChips: View {
     var disabled: Bool = false
     let onSelect: (Int) -> Void
 
-    /// Chips per row — fixed so the layout is deterministic (no GeometryReader,
-    /// which renders unreliably in headless snapshots). 3 reads well at 393pt.
+    /// Chips per row for the iOS 14/15 fallback path only — fixed so the chunked layout
+    /// is deterministic. 3 reads well at 393pt. (iOS 16+ uses `ChipFlowLayout` instead.)
     private let perRow = 3
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(rows, id: \.self) { row in
-                HStack(spacing: 8) {
-                    ForEach(row, id: \.self) { i in
+        Group {
+            if #available(iOS 16.0, *) {
+                // iOS 16+: real flex-wrap — each chip at its natural width, wrapping to the
+                // next line when the row is full (design `flexWrap:'wrap'`; Android `FlowRow`).
+                ChipFlowLayout(hSpacing: 8, vSpacing: 8) {
+                    ForEach(options.indices, id: \.self) { i in
                         chip(index: i)
                     }
-                    Spacer(minLength: 0)
+                }
+            } else {
+                // iOS 14/15 fallback: fixed `perRow`-wide chunked rows (unchanged behavior).
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(rows, id: \.self) { row in
+                        HStack(spacing: 8) {
+                            ForEach(row, id: \.self) { i in
+                                chip(index: i)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
                 }
             }
         }
@@ -865,6 +883,71 @@ private struct WrapChips: View {
         .buttonStyle(PlainButtonStyle())
         .disabled(disabled)
         .accessibilityIdentifier(LBAccessibilityID.variantChip(groupIndex, i))
+    }
+}
+
+// MARK: - ChipFlowLayout — iOS-16+ flex-wrap layout (natural-width chips, wrap on full row)
+//
+// A synchronous `Layout` (iOS 16+) that lays chips left-to-right at their natural width
+// and wraps to the next line when the next chip would exceed the available width — the
+// native equivalent of the design's `flexWrap:'wrap'` and Android's `FlowRow`. It measures
+// each subview directly (NO `GeometryReader`), so it renders deterministically for headless
+// snapshots. A single chip wider than the row is proposed the row width, so its `Text`
+// (no `.lineLimit`) wraps to multiple lines — the full option text stays visible.
+
+@available(iOS 16.0, *)
+private struct ChipFlowLayout: Layout {
+    var hSpacing: CGFloat = 8
+    var vSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .greatestFiniteMagnitude
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var widest: CGFloat = 0
+        for subview in subviews {
+            let size = measure(subview, maxWidth: maxWidth)
+            if x > 0 && x + size.width > maxWidth {
+                // wrap to next line
+                y += rowHeight + vSpacing
+                x = 0
+                rowHeight = 0
+            }
+            x += size.width + hSpacing
+            widest = max(widest, x - hSpacing)
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: proposal.width ?? widest, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let maxWidth = bounds.width
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = measure(subview, maxWidth: maxWidth)
+            if x > bounds.minX && (x - bounds.minX) + size.width > maxWidth {
+                x = bounds.minX
+                y += rowHeight + vSpacing
+                rowHeight = 0
+            }
+            subview.place(
+                at: CGPoint(x: x, y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: size.width, height: size.height))
+            x += size.width + hSpacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+
+    /// Natural size, capped to the row width so an over-long single chip wraps its text
+    /// (multi-line) instead of overflowing the container.
+    private func measure(_ subview: LayoutSubview, maxWidth: CGFloat) -> CGSize {
+        let natural = subview.sizeThatFits(.unspecified)
+        let capped = min(natural.width, maxWidth)
+        return subview.sizeThatFits(ProposedViewSize(width: capped, height: nil))
     }
 }
 

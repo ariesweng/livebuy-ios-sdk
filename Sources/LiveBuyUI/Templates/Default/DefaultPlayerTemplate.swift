@@ -6,6 +6,22 @@ import LiveBuySDK
 /// the diversion path with a fake opener without a live UIKit hierarchy.
 typealias InAppBrowserOpener = (URL) -> Void
 
+/// Opaque, identity-equality handle returned by
+/// `DefaultPlayerTemplate.addObserver(_:)`, used to `removeObserver(_:)` later
+/// (ios-player-template-multi-observer-registry).
+///
+/// A `final class` so identity (`===`) is the sole notion of equality — each
+/// registration yields a unique token the host holds; the host does NOT
+/// construct one (no host-facing `init`). This is a TEMPLATE-layer type: it
+/// MUST NOT depend on any core listener token (layer boundary — reference-ui →
+/// template → core is one-way, so the template's public API never leaks a core
+/// type). Same role as Android's `LBTemplateObserverToken`.
+public final class LBTemplateObserverToken {
+    /// Module-internal so the template mints tokens but hosts cannot fabricate
+    /// arbitrary ones — they only hold what `addObserver` returns.
+    init() {}
+}
+
 /// Default Player template event handler.
 /// Holds a weak reference to the player VC and provides standard live-shopping
 /// behaviour for interceptable SDK events.
@@ -220,6 +236,23 @@ public final class DefaultPlayerTemplate {
     /// carries the correct `video_id`. nil until a channel is ingested.
     private(set) public var currentVideoId: String?
 
+    /// 「本實例目前所知的、穩定的 videoId」——`deinit` 存快照的 save key 用它，避免依賴 teardown /
+    /// ARC 當下才去讀 `currentVideoId` / `player?.channel?.id`（那時可能都已為 nil：channel 尚未
+    /// `ingestChannel`、或只經 `handleVideoSwitch(to:)` 抵達新場而其 channel 未 ingest、或 player 已先
+    /// 釋放）。在生命週期中**盡早**、從任何學到 videoId 的時刻捕捉（見 `rememberVideoId`），且**只前進
+    /// 不退回 nil**，使 `deinit` 一定拿得到一個穩定 key 存進 `feedSnapshotCache`（否則下一個新實例
+    /// cache-miss → `clear()` → 歷史消失，即「跳到其他頁面直播歷史訊息快取失效」的破口）。
+    private var lastKnownVideoId: String?
+
+    /// 盡早捕捉一個穩定的 videoId 進 `lastKnownVideoId`。**只前進不退回**：傳入 `nil` / 空字串一律
+    /// no-op（never 把已學到的 id 抹回 nil）；傳入非空且不同時更新為最新（換片後反映新場，使 `deinit`
+    /// 存到正確的 video）。純函式風格（只寫一個 var），供 `ingestChannel` / `handleVideoSwitch` /
+    /// `handlePollReceived` 三處呼叫。
+    private func rememberVideoId(_ id: String?) {
+        guard let id = id, !id.isEmpty else { return }
+        lastKnownVideoId = id
+    }
+
     /// General (NOT upcoming-scoped) 封面圖 URL for the player **loading** surface
     /// (`player-loading-cover-background-template`). Channel-derived (`channel.cover`),
     /// fed by `ingestChannel` via `applyLoadingCover(_:)` — so a normal live / VOD
@@ -247,6 +280,44 @@ public final class DefaultPlayerTemplate {
     /// Purely additive: nil by default; when unset the template behaves exactly
     /// as before.
     public var onChange: (() -> Void)?
+
+    // MARK: - Multi-observer registry (ios-player-template-multi-observer-registry)
+
+    /// One registered change observer paired with its removal token. Stored in an
+    /// ORDERED array (not a dictionary — Swift closures aren't `Equatable`) so the
+    /// fire order equals registration order; removal is by token identity (`===`).
+    private struct ObserverEntry {
+        let token: LBTemplateObserverToken
+        let observer: () -> Void
+    }
+
+    /// Ordered observer registrations. Coexists with the legacy `onChange`: a
+    /// single state change dispatches to BOTH (legacy first, then observers in
+    /// registration order — see `dispatchOnChange`). Empty by default (purely
+    /// additive; a template with no observer behaves exactly as before).
+    private var observers: [ObserverEntry] = []
+
+    /// Register a change observer that fires on the SAME coalesced "state changed"
+    /// notification as `onChange`, and return an opaque token to remove it later.
+    /// Multiple observers each keep an independent subscription — registering one
+    /// NEVER clobbers another (the whole point vs. the single-`onChange`-var chain).
+    /// Fires alongside (and after) the legacy `onChange` on every dispatch.
+    ///
+    /// Main-thread contract: call from the main thread (same assumption as
+    /// assigning `onChange`; reference-ui overlays register/unregister on their
+    /// SwiftUI/UIKit attach/detach, which is main-thread).
+    public func addObserver(_ observer: @escaping () -> Void) -> LBTemplateObserverToken {
+        let token = LBTemplateObserverToken()
+        observers.append(ObserverEntry(token: token, observer: observer))
+        return token
+    }
+
+    /// Remove a previously registered observer by its token (identity match). An
+    /// unknown / already-removed token is a no-op. Main-thread contract mirrors
+    /// `addObserver`.
+    public func removeObserver(_ token: LBTemplateObserverToken) {
+        observers.removeAll { $0.token === token }
+    }
 
     init(
         player: LiveBuyPlayerViewController,
@@ -338,8 +409,19 @@ public final class DefaultPlayerTemplate {
     /// would never populate the cache for its own next (brand-new) instance to restore from.
     /// Guarded exactly like `VideoFeedSnapshotCache.save` itself (empty history → no-op) so a
     /// video that never accumulated chat doesn't occupy a cache slot for nothing.
+    ///
+    /// Save key SHALL be `lastKnownVideoId ?? currentVideoId` — NOT `currentVideoId` alone. Under
+    /// teardown / ARC ordering `currentVideoId` can still be `nil` here (channel not yet
+    /// `ingestChannel`'d, or the instance only ever `handleVideoSwitch(to:)`'d to a video whose
+    /// channel never ingested) even though `activityFeed` already holds that video's accumulated
+    /// history — and reaching into `player?.channel?.id` at deinit is unreliable too (the player may
+    /// already be released). `lastKnownVideoId` is captured EAGERLY during the instance's lifetime
+    /// (see `rememberVideoId`) and only ever advances, so it survives to deinit and yields the
+    /// correct key. Without it, a nil `currentVideoId` → no save → the next fresh instance's
+    /// `arriveAt` cache-misses → `clear()` → the history vanishes (the reported「跳到其他頁面直播歷史
+    /// 訊息快取失效」break).
     deinit {
-        if let videoId = currentVideoId, !activityFeed.history.isEmpty {
+        if let videoId = lastKnownVideoId ?? currentVideoId, !activityFeed.history.isEmpty {
             feedSnapshotCache.save(videoId: videoId, history: activityFeed.history, seenPushIds: seenPushIds)
         }
     }
@@ -411,11 +493,25 @@ public final class DefaultPlayerTemplate {
     }
 
     private func dispatchOnChange() {
-        guard let onChange = onChange else { return }
+        // Capture the legacy callback and a SNAPSHOT copy of the observer list at
+        // notify time. A callback that adds/removes an observer therefore affects
+        // only the NEXT dispatch — never this one (no mutation-during-iteration
+        // crash; matches the legacy `onChange`-captured-at-notify semantics).
+        let legacy = onChange
+        let observerSnapshot = observers.map { $0.observer }
+        // Gate: skip the dispatcher entirely ONLY when there is nothing to notify
+        // (no legacy onChange AND no registered observer). This preserves the prior
+        // "onChange nil → don't touch the dispatcher" behaviour for the pure
+        // no-observer case, while an observer-only registration still dispatches.
+        guard legacy != nil || !observerSnapshot.isEmpty else { return }
+        let fire = {
+            legacy?()                                     // legacy first (fixed order)
+            for observer in observerSnapshot { observer() } // then observers, in registration order
+        }
         if Thread.isMainThread {
-            onChange()
+            fire()
         } else {
-            DispatchQueue.main.async { onChange() }
+            DispatchQueue.main.async(execute: fire)
         }
     }
 
@@ -511,6 +607,8 @@ public final class DefaultPlayerTemplate {
         // so addToCart can thread it as CART_ADD_REQUEST.video_id (the template's
         // view-model truth; mirrors player.channel without reaching into player state).
         currentVideoId = ch.id
+        // Remember a stable videoId for the deinit save-key (only advances, never nils out).
+        rememberVideoId(ch.id)
         coalescing {
             if isFirstChannelThisInstance {
                 arriveAt(videoId: ch.id)
@@ -1068,6 +1166,13 @@ public final class DefaultPlayerTemplate {
     /// chat-message-kind ⑤：消費 `poll.top` 暴露置頂留言 view-model（冪等：取消釘選 → nil）。
     /// 值未變時不觸發多餘變更通知。
     func handlePollReceived(_ poll: LBPollResponse) {
+        // Lazy fallback capture of a stable videoId for the deinit save-key: this per-poll handler
+        // runs on EVERY poll and BEFORE any feed ingestion (`handlePush`/`handleJoin`/`handlePurchase`
+        // /`ingestBacklog`) in the same `onPollReceived` cycle, so it covers the edge where poll
+        // messages start accumulating history before the channel is ever `ingestChannel`'d
+        // (`currentVideoId` still nil). Only attempt while unknown; a nil `player?.channel?.id` is a
+        // harmless no-op (rememberVideoId never nils out).
+        if lastKnownVideoId == nil { rememberVideoId(player?.channel?.id) }
         if pinnedMessage != poll.top {
             pinnedMessage = poll.top
             notifyChange()
@@ -1374,6 +1479,9 @@ public final class DefaultPlayerTemplate {
             // 回放聊天游標同步歸 0（feed 即將 clear 或 restore，否則下一場前綴會誤判前進/倒退）—
             // replay-chat-feed-bridge-template。core 也會在 resetPerSessionState 送 `[]`，兩路皆安全。
             replayChatAppendedCount = 0
+            // 換片抵達端也記住新場 videoId：`handleVideoSwitch` 本身不設 `currentVideoId`，若這支影片的
+            // channel 之後才（或未）`ingestChannel`，deinit 仍能靠 `lastKnownVideoId` 存到正確的新場快照。
+            rememberVideoId(to)
             arriveAt(videoId: to)
         }
     }
@@ -1541,6 +1649,50 @@ public final class DefaultWidgetTemplate {
     /// unset the template behaves exactly as before.
     public var onChange: (() -> Void)?
 
+    // MARK: - Multi-observer registry (ios-widget-template-multi-observer-registry)
+
+    /// One registered widget-content-change observer paired with its removal token.
+    /// Stored in an ORDERED array (not a dictionary — Swift closures aren't
+    /// `Equatable`) so the fire order equals registration order; removal is by token
+    /// identity (`===`). Named `WidgetObserverEntry` (not the player's `ObserverEntry`)
+    /// so the two same-file registries stay unambiguous.
+    private struct WidgetObserverEntry {
+        let token: LBTemplateObserverToken
+        let observer: () -> Void
+    }
+
+    /// Ordered observer registrations. Coexists with the legacy `onChange`: a single
+    /// widget-content change dispatches to BOTH (legacy first, then observers in
+    /// registration order — see `notifyChange`). Empty by default (purely additive;
+    /// a template with no observer behaves exactly as before). REUSES the same
+    /// top-level `LBTemplateObserverToken` the player registry introduced (no second
+    /// token type; the template contract never leaks a core listener token — layer
+    /// boundary reference-ui → template → core is one-way).
+    private var observers: [WidgetObserverEntry] = []
+
+    /// Register a change observer that fires on the SAME coalesced "widget content
+    /// changed" notification as `onChange`, and return an opaque token to remove it
+    /// later. Multiple observers each keep an independent subscription — registering
+    /// one NEVER clobbers another (the whole point vs. the single-`onChange`-var
+    /// chain reference-ui widget overlays used to share). Fires alongside (and after)
+    /// the legacy `onChange` on every dispatch.
+    ///
+    /// Main-thread contract: call from the main thread (same assumption as assigning
+    /// `onChange`; reference-ui widget overlays register/unregister on their
+    /// SwiftUI/UIKit attach/detach, which is main-thread).
+    public func addObserver(_ observer: @escaping () -> Void) -> LBTemplateObserverToken {
+        let token = LBTemplateObserverToken()
+        observers.append(WidgetObserverEntry(token: token, observer: observer))
+        return token
+    }
+
+    /// Remove a previously registered observer by its token (identity match). An
+    /// unknown / already-removed token is a no-op. Main-thread contract mirrors
+    /// `addObserver`.
+    public func removeObserver(_ token: LBTemplateObserverToken) {
+        observers.removeAll { $0.token === token }
+    }
+
     init(widget: LiveBuyWidgetCore, sdkConfig: SDKConfig, hostOptions: LBUIOptions?) {
         self.widget = widget
         self.effectiveConfig = EffectiveConfig(sdkConfig: sdkConfig, hostOptions: hostOptions)
@@ -1605,15 +1757,34 @@ public final class DefaultWidgetTemplate {
         refreshContent()
     }
 
-    /// Dispatch `onChange` on the main thread. Already-main-thread calls run
-    /// synchronously; off-main calls are marshalled. Purely additive — a nil
-    /// `onChange` is a no-op.
+    /// Dispatch the "widget content changed" notification on the main thread.
+    /// Already-main-thread calls run synchronously; off-main calls are marshalled.
+    ///
+    /// Fires the legacy `onChange` (if set) FIRST, then every registered observer in
+    /// registration order — all inside ONE main-thread hop (multi-observer registry,
+    /// ios-widget-template-multi-observer-registry). Widget has NO coalescing batch
+    /// (that `coalesceDepth` / `dispatchOnChange` split is player-only); the content
+    /// view-model already diffs-then-notifies so each real change dispatches once.
     private func notifyChange() {
-        guard let onChange = onChange else { return }
+        // Capture the legacy callback and a SNAPSHOT copy of the observer list at
+        // notify time. A callback that adds/removes an observer therefore affects
+        // only the NEXT dispatch — never this one (no mutation-during-iteration
+        // crash; matches the legacy `onChange`-captured-at-notify semantics).
+        let legacy = onChange
+        let observerSnapshot = observers.map { $0.observer }
+        // Gate: skip the dispatcher entirely ONLY when there is nothing to notify
+        // (no legacy onChange AND no registered observer). This preserves the prior
+        // "onChange nil → don't touch the dispatcher" behaviour for the pure
+        // no-observer case, while an observer-only registration still dispatches.
+        guard legacy != nil || !observerSnapshot.isEmpty else { return }
+        let fire = {
+            legacy?()                                       // legacy first (fixed order)
+            for observer in observerSnapshot { observer() } // then observers, in registration order
+        }
         if Thread.isMainThread {
-            onChange()
+            fire()
         } else {
-            DispatchQueue.main.async { onChange() }
+            DispatchQueue.main.async(execute: fire)
         }
     }
 

@@ -28,7 +28,7 @@ Embed live shopping experiences — live streams, replays, and shoppable VODs �
 1. In Xcode, go to **File → Add Package Dependencies…**
 2. Paste the repository URL:
    ```
-   https://github.com/wpkc0429/livebuy-ios-sdk
+   https://github.com/ariesweng/livebuy-ios-sdk
    ```
 3. Dependency Rule:
    - **Released versions** — **Up to Next Major Version** starting from `3.0.0`.
@@ -52,9 +52,9 @@ Embed live shopping experiences — live streams, replays, and shoppable VODs �
 
 ```swift
 dependencies: [
-    // Released:    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", from: "3.0.0")
+    // Released:    .package(url: "https://github.com/ariesweng/livebuy-ios-sdk", from: "3.0.0")
     // Pre-release: pin the exact rc tag
-    .package(url: "https://github.com/wpkc0429/livebuy-ios-sdk", exact: "3.0.0-rc.1")
+    .package(url: "https://github.com/ariesweng/livebuy-ios-sdk", exact: "3.0.0-rc.1")
 ],
 targets: [
     .target(
@@ -512,8 +512,8 @@ anchors stored on the order to LiveBuy's backend for mapping:
   best-effort in real time via `reportCartTrack(...)`.
 
 Both anchors are independent and stored on your order; the webhook can map back via either one
-(redundant by design). For the payload and the three backend steps, see the
-[Tier 2 webhook contract](https://github.com/livebuy/livebuy-native-sdk/blob/master/docs/handoff/cart-add-tier2-webhook-contract.md).
+(redundant by design). For the payload and the three backend steps, see the Tier 2 webhook
+contract (covered in SDK-internal docs — not publicly linked here).
 
 > ⚠️ The client-side `LiveBuy.notifyCheckoutCompleted(...)` is **deprecated** — it only writes
 > offline telemetry, is **not** the attribution path, and will be removed in the next major.

@@ -7,7 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — next features accrue here toward v3.2.0 / v3.1.2._
+_Nothing yet — next features accrue here toward v3.2.0._
+
+---
+
+## [3.1.2] - 2026-07-08
+
+> patch release，無 breaking。鎖點 `e2c2fde0`（iOS 出貨內容等價於 `200903fb`；其後 RN/Flutter
+> 浮卡 parity commit 零碰 `ios/Sources/`）。修復 v3.1.1 發布後於 `ios/Example` 追修批次揭露的
+> 兩個功能性 bug（直播結束不跳結束畫面 / 跳頁後直播歷史失效），並帶入 core/template 多觀察者
+> 治本地基與浮卡縮圖同步自動接播。詳見 [`docs/release/v3.1.2-readiness.md`](../docs/release/v3.1.2-readiness.md)。
+
+### v3.1.2 — patch（總覽）
+
+**Fixed**
+- **直播結束不跳結束畫面** — `live_end` wire 改容忍 Int 與數值字串（後端偶以字串回傳），
+  直播結束時正確派發並跳 EndScreen（不再卡在播放中）。
+- **跳頁後直播歷史失效** — 播放器 `deinit` 存歷史快照改用穩定 `lastKnownVideoId` 作 key，
+  修復「跳頁後重進同一場直播看不到歷史留言」的破口。
+
+**Added（新公開符號，皆 additive、屬內部接線 seam、無 breaking）**
+- `LiveBuyPlayerViewController.onDidAutoAdvance: ((LBNavItem) -> Void)?` — core 於 VOD 自動接播
+  時 fire 的 instance seam（與 Android `LiveBuyPlayerView` 同名 parity），供 reference-ui 浮卡
+  同步縮圖；drop-in 容器自動接線，既有 host 呼叫碼零改動。
+- `DefaultPlayerTemplate` / `DefaultWidgetTemplate` 的 `addObserver(_:) -> LBTemplateObserverToken`
+  / `removeObserver(_:)` 與 `LBTemplateObserverToken` — view-model 層多觀察者註冊地基，
+  reference-ui 內部消費（治本 onChange 串鏈脆弱）。
+
+**功能亮點（純視覺，reference-ui 層）**
+- **浮卡縮圖同步 VOD 自動接播** — VOD 自動接播下一支後，縮小的 `CollapsibleLiveBuyPlayer`
+  浮卡縮圖同步更新為新片、不再 stale（補上換片同步的第四條路徑）。
+- **變體 chips flex-wrap** — 商品 sheet 規格 chips 選項多/字長時自然換行、看得到全文
+  （iOS 16+ 自刻 `ChipFlowLayout`；iOS 14/15 fallback 每行三個）。
+
+**內部重構（行為不變）**
+- player / widget overlay model 從 onChange 串鏈遷移到多觀察者註冊，根除換片後 overlay
+  凍在 stale 的脆弱模式。
+
+**無 BREAKING。**
 
 ---
 
