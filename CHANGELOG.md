@@ -11,6 +11,47 @@ _Nothing yet — next features accrue here toward v3.2.0._
 
 ---
 
+## [3.1.3] - 2026-07-10
+
+> patch release，無 breaking。鎖點 `60e2fa50`（iOS 出貨內容等價於最後一個碰 `ios/Sources/` 的
+> commit `a905f3af`；其後 Android/RN/Flutter/docs commit 零碰 iOS）。自 v3.1.2（`e2c2fde0`）以來
+> 碰 `ios/Sources/` 共 11 commit：6 fix / 4 feat / 1 pilot；其中 3 個 core commit 動到 binary
+> 核心，故 **binary 已重 build，checksum 為新值 `6bea1e20…`**（≠v3.1.2 `a08e318c…`）。
+> 詳見 [`docs/release/v3.1.3-readiness.md`](../docs/release/v3.1.3-readiness.md)。
+
+### v3.1.3 — patch（總覽）
+
+**Fixed**
+- **LIVE 釘選商品卡「關閉」鈕誤開明細** — 關閉鈕接 dismiss，點 X 不再冒泡誤開商品明細；點卡片
+  本體仍正常開明細。
+- **EndScreen「換一批」誤開播放** — 直播結束畫面點「換一批」改在本地推薦視窗內輪播，不再意外
+  開始播放某支影片。
+- **合流聊天歷史上限 50→500** — 跳頁重進同一場直播，歷史聊天訊息不因舊的偏低上限而提前消失。
+- **collapsible 播放器資源洩漏** — `LiveBuyPlayer` 新增 `dismantleUIViewController` 保證性釋放，
+  修復縮小浮卡播放器關閉時未 `unload()` 的資源洩漏。
+- **Player `unload()` 冪等化（core）** — 多條關閉路徑不再疊加成重複結束事件。
+- **系統 PiP 直播鎖定拖動（core）** — 進行中直播的 PiP 視窗停用拖動進度／快轉／快退（對齊
+  Android IVS `controlsEnabled`）；暫停鍵無任何 Apple 公開 API 可控，記為永久平台限制。
+
+**Added（新公開符號，皆 additive 或源碼相容的軟性 deprecate、無 breaking）**
+- `LBChannel.begin: Int?`（core）— 預錄直播（`liveStatus == 1`、走 IVS 引擎）此刻所有觀眾共同
+  播放到的秒數，供晚進場觀眾對齊播放進度；僅預錄直播情境有值，真．即時直播／預告／回放為 `nil`。
+  public init 新增 `begin: Int? = nil` 參數（帶預設值，源碼相容）。
+- `DefaultTemplateConstants.activityFeedChatRetain` / `.activityFeedActivityRetain`（view-model）
+  — 合流 feed 聊天列/活動列各自獨立保留上限（500 / 200），聊天列不再被活動列擠出（iOS-only
+  pilot；Android/RN/Flutter parity 為 follow-up）。既有 `activityFeedHistoryRetain` 加
+  `@available(*, deprecated, ...)` 標記（值/型別不變，源碼相容，非強制遷移）。
+
+**功能亮點（reference-ui 層）**
+- **EndScreen 推薦影片卡封面圖** — 推薦影片卡補上 live-gated 封面圖與預覽動畫。
+- **進行中直播隱藏商品分享入口** — LIVE 情境的 ProductDetailSheet 3-slot footer + 商品列分享
+  icon 隱藏，對齊 design R12。
+- **進行中直播禁止長按暫停** — 串流＋預錄直播禁止長按暫停手勢與提示；回放/VOD 維持可暫停。
+
+**無 BREAKING。**
+
+---
+
 ## [3.1.2] - 2026-07-08
 
 > patch release，無 breaking。鎖點 `e2c2fde0`（iOS 出貨內容等價於 `200903fb`；其後 RN/Flutter

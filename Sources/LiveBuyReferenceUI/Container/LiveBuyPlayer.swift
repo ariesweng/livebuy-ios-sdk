@@ -252,6 +252,30 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         player.load(videoId: videoId)
     }
 
+    /// SwiftUI is about to permanently remove this representable's backing `UINavigationController`
+    /// from the view hierarchy (a `.sheet`/`if`/`ForEach` membership toggled off, a parent was
+    /// popped, etc.) — the ONE guaranteed-fire hook, unlike any individual `onCloseRequest` /
+    /// `onDismiss` closure, which only runs for the SPECIFIC user gesture it is wired to and can be
+    /// skipped entirely by a caller that forgot to forward it (this is exactly what happened with
+    /// `LiveBuyPlayerPresenter`'s collapsible-player dismiss paths — `composedConfig.onDismiss` /
+    /// the floating card's `onClose` — which only reset presenter-local state and never called
+    /// `unload()` / `dismiss()`, leaking PollManager / VideoStatePollManager / the sold-out scanner
+    /// / the EndScreen countdown / the active playback engine — ios-refui-player-teardown-release-fix).
+    ///
+    /// Calls the bound player's `unload()` to release those resources. `LiveBuyPlayerPresenter`
+    /// needs NO changes for this fix to reach it: its `playerLayer` already conditionally renders
+    /// `LiveBuyPlayer` (`if let v = video { ... }`), so a dismiss (`video = nil`) removes this
+    /// representable from the tree and SwiftUI calls this hook automatically.
+    ///
+    /// `unload()` is idempotent (ios-player-unload-idempotent-core), so this is safe even when a
+    /// close path already unloaded explicitly earlier in the same session (e.g. `onCloseRequest`'s
+    /// default swipe-to-close branch, which calls `unload()` at gesture time — potentially well
+    /// before the host actually removes the view) — the second call is a no-op, no duplicate
+    /// `VIDEO_STATE_CHANGE` / moment-state publish reaches the host.
+    public static func dismantleUIViewController(_ uiViewController: UINavigationController, coordinator: Coordinator) {
+        coordinator.player?.unload()
+    }
+
     // MARK: - Compose helpers (D-6: each ≤ 40 lines; side effects injected via params)
 
     /// New core VC + optional listener + force `viewDidLoad` (so core's `onInstantiate`

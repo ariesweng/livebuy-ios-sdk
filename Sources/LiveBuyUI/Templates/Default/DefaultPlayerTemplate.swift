@@ -1379,9 +1379,9 @@ public final class DefaultPlayerTemplate {
     /// stores newest-at-the-tail, and `ChatFeedView` renders `history` verbatim (oldest → newest,
     /// top → bottom, no reordering at render time) — so reversing an already-oldest-first bucket
     /// put the newest message at the HEAD (rendered at the top) and the oldest at the TAIL
-    /// (rendered at the bottom), exactly backwards. It also made `DefaultActivityFeed.trimmed`'s
-    /// `suffix(cap)` keep the WRONG (oldest) 50-item subset whenever a backlog round exceeds
-    /// `historyRetain`, silently un-fixing the original `後面進入直播的人看不到歷史訊息` bug.
+    /// (rendered at the bottom), exactly backwards. It also made the end-of-batch trim keep the
+    /// WRONG (oldest) subset whenever a backlog round exceeds the retain cap, silently un-fixing
+    /// the original `後面進入直播的人看不到歷史訊息` bug.
     ///
     /// **Documented assumption** (`live-chat-backlog-ingest-order-fix-template/design.md` D2):
     /// none of `LBPushMsg` / `LBUserMsg` / `LBRushMsg` carry a timestamp or sequence field, and no
@@ -1399,23 +1399,24 @@ public final class DefaultPlayerTemplate {
     /// Batch-ingest the messages `is_init` backlog round (≤500 筆一次性歷史per bucket) as ONE
     /// atomic operation, instead of feeding it through the live per-item path.
     ///
-    /// **Why**: `DefaultActivityFeed`'s shared `history` buffer is capped at `historyRetain`
-    /// (50). The live trickle path (`handlePush` / `handleJoin` / `handlePurchase`, called once
-    /// per item as messages arrive a few seconds apart) trims on every append — correct and
-    /// cheap for that cadence. But the `is_init` round can deliver up to 500 items in ONE poll
-    /// response; naively forwarding that array in FORWARD order through the same per-item path
-    /// assumes it is oldest-first (§`backlogIngestOrder` doc) — the direction this codebase now
-    /// assumes it actually is, so forward-order (unreversed) ingestion is correct: appending
-    /// oldest-first means the LAST-appended item (the newest message) lands at `history`'s tail,
-    /// matching `DefaultActivityFeed`'s "newest at the tail" invariant, and the single end-of-batch
-    /// `suffix(historyRetain)` trim correctly keeps the chronologically newest ≤50 items — fixing
-    /// the reported symptom (後面進入直播的人看不到歷史訊息: a late joiner must see the messages
-    /// right before they joined, not stale ones).
+    /// **Why**: `DefaultActivityFeed`'s `history` buffer is trimmed by SEPARATE per-type caps
+    /// (chat rows at `chatRetain`, activity-bucket rows at `activityRetain` — chat-activity-
+    /// separate-retention-ios-template). The live trickle path (`handlePush` / `handleJoin` /
+    /// `handlePurchase`, called once per item as messages arrive a few seconds apart) trims on
+    /// every append — correct and cheap for that cadence. But the `is_init` round can deliver up
+    /// to 500 items in ONE poll response; naively forwarding that array in FORWARD order through
+    /// the same per-item path assumes it is oldest-first (§`backlogIngestOrder` doc) — the
+    /// direction this codebase now assumes it actually is, so forward-order (unreversed) ingestion
+    /// is correct: appending oldest-first means the LAST-appended item (the newest message) lands
+    /// at `history`'s tail, matching `DefaultActivityFeed`'s "newest at the tail" invariant, and
+    /// the single end-of-batch per-type trim correctly keeps the chronologically newest rows of
+    /// each type — fixing the reported symptom (後面進入直播的人看不到歷史訊息: a late joiner must
+    /// see the messages right before they joined, not stale ones).
     ///
     /// This method feeds each bucket through `backlogIngestOrder` (now an identity pass-through)
     /// and reuses the EXISTING, UNMODIFIED `handlePush` / `handleJoin` / `handlePurchase`
     /// classification methods — called inside `activityFeed.batchIngest { ... }` so the
-    /// `historyRetain` trim and the host-facing notification each fire EXACTLY ONCE for the whole
+    /// per-type trim and the host-facing notification each fire EXACTLY ONCE for the whole
     /// round (was: up to 500 times). The live one-at-a-time trickle path is untouched — this
     /// method is only invoked when `response.isBacklogReplay == true` (see
     /// `TemplateAttachment.onPollReceived`).

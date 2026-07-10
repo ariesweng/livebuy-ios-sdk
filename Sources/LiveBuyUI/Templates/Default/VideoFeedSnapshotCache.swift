@@ -41,8 +41,9 @@ import Foundation
 // resolves the immediately adjacent channel). Now that this cache is process-level, the relevant
 // question is "how many distinct videos might a user browse across MANY player sessions over the
 // app's lifetime" — a materially larger number than one session's revisit set, but each entry is
-// still meaningfully heavier than `MessagesCursorStore`'s single `Double` (up to `historyRetain`
-// (50) `LBFeedItem`s + a `Set<String>` of push ids) — so this stays smaller than that store's 50.
+// still meaningfully heavier than `MessagesCursorStore`'s single `Double` (up to the merged feed's
+// per-type retention total, `activityFeedChatRetain + activityFeedActivityRetain`, `LBFeedItem`s
+// + a `Set<String>` of push ids) — so this stays smaller than that store's bound.
 final class VideoFeedSnapshotCache {
 
     /// Process-wide shared instance used by production `DefaultPlayerTemplate`s so a

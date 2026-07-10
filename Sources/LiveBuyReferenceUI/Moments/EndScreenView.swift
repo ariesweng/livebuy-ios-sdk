@@ -94,6 +94,16 @@ public struct EndScreenView: View {
     /// snapshots render unchanged. No countdown, no auto-advance.
     public let liveEnded: Bool
 
+    /// Runtime media gate (mirrors `CarouselCardView.live`). `false` (the default —
+    /// every demo / snapshot / preview construction) → the recommended / next-video
+    /// cards ALWAYS draw the deterministic black placeholder (no `AVPlayer`, no async
+    /// network fetch), so `ImageRenderer` snapshot baselines stay byte-identical.
+    /// `true` (host runtime) → each card loads `preview` (animated) → `cover` (static)
+    /// → placeholder, exactly like the widget card (`CarouselCardView.mediaThumbnail`).
+    /// Wired by the container as `!paintsBackgroundPlaceholder` (the SAME flag the
+    /// product sheets / start-screen surfaces use).
+    public let live: Bool
+
     /// 倒數變體「立即觀看」CTA → host-wired `onWatchNext` → host → core load(next).
     /// nil for demo / snapshot instances — the CTA is inert (D §2). This layer NEVER
     /// loads / advances itself.
@@ -107,12 +117,20 @@ public struct EndScreenView: View {
     /// demo / snapshot instances.
     private let onCancel: (() -> Void)?
 
+    /// LOCAL presentation-only 熱門推薦 window index (page). Purely a view-state cursor
+    /// over `hot` for the「換一批」pill — it slides the FIXED SMALL set to the next page
+    /// of `maxHotCards` recommendations WITHOUT loading / switching any video. Default
+    /// `0` → shows `hot.prefix(maxHotCards)` (the existing behavior → baseline
+    /// byte-identical). NOT part of `init` — never bound from the view-model / core.
+    @State private var hotPage: Int = 0
+
     public init(
         theme: ReferenceUITheme,
         countdown: LBEndScreenCountdown?,
         next: [LBNavItem],
         hot: [LBHotItem],
         liveEnded: Bool = false,
+        live: Bool = false,
         onWatchNext: (() -> Void)? = nil,
         onPickHot: ((LBHotItem) -> Void)? = nil,
         onCancel: (() -> Void)? = nil
@@ -122,6 +140,7 @@ public struct EndScreenView: View {
         self.next = next
         self.hot = hot
         self.liveEnded = liveEnded
+        self.live = live
         self.onWatchNext = onWatchNext
         self.onPickHot = onPickHot
         self.onCancel = onCancel
@@ -196,13 +215,15 @@ public struct EndScreenView: View {
     }
 
     /// The 150×(9:16) preview card with the centered countdown ring (LBPEndScreen
-    /// 295-314). `cover` is a placeholder mock (no async image load at this layer);
-    /// the ring + remaining seconds are drawn centered over a dark veil.
+    /// 295-314). The cover area is `live`-gated real media of `next.first` (preview loop
+    /// → static cover → placeholder, mirroring the widget card); the ring + remaining
+    /// seconds are drawn centered over a dark veil.
     private func previewCard(remain: Int) -> some View {
         ZStack {
-            // 9:16 cover placeholder (ProductMock kind={n0.cover}).
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.black)
+            // 9:16 media of `next.first`: `live`-gated real cover / preview over the
+            // black placeholder (mirrors CarouselCardView.mediaThumbnail). `live == false`
+            // → placeholder only (snapshot byte-identical).
+            previewMedia(next.first)
             // Dark veil over the cover (`rgba(0,0,0,0.4)`).
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color.black.opacity(0.4))
@@ -212,6 +233,36 @@ public struct EndScreenView: View {
         .frame(width: 150, height: 150 * 16.0 / 9.0)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 12)
+    }
+
+    /// The 16-radius black cover placeholder (the existing baseline fill) — the base
+    /// layer of the countdown preview card, and the `live == false` / empty-URL fallback.
+    private var previewCoverPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(Color.black)
+    }
+
+    /// Live-gated preview-card media of `next.first` — mirrors `hotMedia` /
+    /// `CarouselCardView.mediaThumbnail`: `live` && `preview` → looping preview over the
+    /// placeholder; else `live` && `cover` → static still over the placeholder; else the
+    /// placeholder alone. Empty `preview` (the backend's current default) falls through
+    /// to `cover`; empty `cover` falls through to the placeholder. `live == false` /
+    /// `next.first == nil` → placeholder only (never constructs a runtime media view).
+    @ViewBuilder
+    private func previewMedia(_ n0: LBNavItem?) -> some View {
+        if live, let n0 = n0, let url = Self.nonEmptyURL(n0.preview) {
+            ZStack {
+                previewCoverPlaceholder
+                LoopingVideoView(url: url)
+            }
+        } else if live, let n0 = n0, let url = Self.nonEmptyURL(n0.cover) {
+            ZStack {
+                previewCoverPlaceholder
+                RemoteStillImageView(url: url)
+            }
+        } else {
+            previewCoverPlaceholder
+        }
     }
 
     /// The auto-advance-to-next countdown RING (LBPEndScreen 298-313). Per the
@@ -314,9 +365,23 @@ public struct EndScreenView: View {
     //
     // Mirrors `LBPEndScreen`'s 熱門 branch (moments.jsx 340-361): a「為你推薦」title
     // + a「換一批」pill, then the `hot` cards. The design uses a 2-col grid in a
-    // scroll; the reference-ui surface renders a FIXED SMALL set in a PLAIN `HStack`
-    // (NEVER lazy / scroll — `ImageRenderer` renders those blank). A drop-in 熱門 set
-    // is short; a very long set is a documented follow-up (host can wrap its own).
+    // scroll; the reference-ui surface renders a FIXED SMALL set (`maxHotCards` = 3)
+    // in a PLAIN `HStack` (NEVER lazy / scroll — `ImageRenderer` renders those blank).
+    //
+    // 「換一批」= LOCAL RECOMMENDATION-WINDOW ROLL (NOT a video open). The backend
+    // `hot` list has no upper bound (often > 3) and is fetched once at channel load;
+    // core has NO refetch-hot API and the backend has NO reshuffle endpoint. So the
+    // pill rolls a purely-presentational window (`hotPage`) over the already-loaded
+    // `hot` — showing the next page of `maxHotCards` recommendations — and MUST NOT
+    // load / switch any video. The design's pill is a refresh-arrow no-op stub
+    // (`moments.jsx:295-306`, demo wires `onPickHot={() => {}}`, `:957` — it never
+    // opened a video); all four reference-ui platforms previously mis-forwarded it to
+    // `onPickHot(hot.first)` (a four-platform proxy bug — Android / RN / Flutter are
+    // each a follow-up). Only the 熱門卡 itself opens a video (`onPickHot(item)`); the
+    // pill is now decoupled from it. When `hot.count <= 3` (a single page, nothing to
+    // roll) the pill is INERT (its action no-ops via a `pageCount > 1` guard) — kept
+    // rendered UNCHANGED so the baseline stays byte-identical. (Not `.disabled()`: that
+    // dims the pill in the `ImageRenderer` snapshot path; not hidden: that removes it.)
 
     private var hotVariant: some View {
         VStack(spacing: 0) {
@@ -349,17 +414,31 @@ public struct EndScreenView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// 為你推薦 title + 換一批 pill (LBPEndScreen 343-355). The「換一批」pill forwards
-    /// to `onPickHot(hot.first)` (the design wires the header refresh to onPickHot
-    /// with no item; this layer forwards the first hot item as the「換一批」proxy when
-    /// available — a host-wired refresh exit). Inert when `hot` is empty.
+    /// 為你推薦 title + 換一批 pill (LBPEndScreen 343-355). The「換一批」pill is a LOCAL
+    /// recommendation-window roll — it advances `hotPage` to the next page of
+    /// `maxHotCards` cards over the already-loaded `hot`, and NEVER opens / switches a
+    /// video (it does NOT call `onPickHot`). Inert (no-op via a `pageCount > 1` guard)
+    /// when there is only one page (`pageCount <= 1`, i.e. `hot.count <= 3`), kept
+    /// rendered UNCHANGED so the baseline stays byte-identical (not `.disabled()`,
+    /// which dims the pill in the snapshot path).
     private var hotHeader: some View {
         HStack {
             Text(Self.recommendTitle)
                 .font(.system(size: 18 * theme.fontScale, weight: .heavy))
                 .foregroundColor(.white)
             Spacer(minLength: 0)
-            Button(action: { if let first = hot.first { onPickHot?(first) } }) {
+            Button(action: {
+                // LOCAL window roll ONLY — advance to the next page of recommendations.
+                // No `onPickHot`, no `player.load` — the pill NEVER opens a video.
+                // Single page (`pageCount <= 1`, i.e. hot.count <= 3) → INERT no-op
+                // (nothing to roll → avoids the invalid interaction). Implemented as a
+                // guard rather than `.disabled()` because `.disabled()` DIMS the pill in
+                // the `ImageRenderer` snapshot path (verified — it changed the
+                // `end-screen-live-ended-hot` / `-no-hot` baselines), and the pill must
+                // stay byte-identical to the existing baseline.
+                guard pageCount > 1 else { return }
+                hotPage = (hotPage + 1) % pageCount
+            }) {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .semibold))
@@ -407,22 +486,32 @@ public struct EndScreenView: View {
         }
     }
 
-    /// The FIXED SMALL hot set actually rendered (first `maxHotCards`), so the
-    /// PLAIN `HStack` stays bounded and snapshot-stable.
+    /// The FIXED SMALL hot set actually rendered — the current `hotPage` window of
+    /// `maxHotCards` cards over `hot` (a PLAIN `HStack`, bounded, snapshot-stable).
+    /// `hotPage == 0` (the default) ⇒ `hot.prefix(maxHotCards)` (existing behavior →
+    /// baseline byte-identical).
     private var hotCards: [LBHotItem] {
-        Array(hot.prefix(Self.maxHotCards))
+        Self.hotWindow(hot, page: hotPage)
+    }
+
+    /// Number of `maxHotCards`-sized recommendation pages over `hot` (ceil division).
+    /// `1` (or `0` when empty) ⇒ nothing to roll ⇒ the「換一批」pill is disabled.
+    private var pageCount: Int {
+        Self.pageCount(forHotCount: hot.count)
     }
 
     /// One 熱門卡 (LBPHotCard, moments.jsx 226-264): a 9:16 cover with a duration
     /// pill (top-left) + a centered play affordance, then a 2-line title. `duration`
-    /// is rendered VERBATIM (it is an already-formatted string, NOT seconds).
+    /// is rendered VERBATIM (it is an already-formatted string, NOT seconds). The cover
+    /// area is `live`-gated real media (preview loop → static cover → placeholder).
     private func hotCard(_ item: LBHotItem) -> some View {
         Button(action: { onPickHot?(item) }) {
             VStack(alignment: .leading, spacing: 7) {
                 ZStack(alignment: .topLeading) {
-                    // 9:16 cover placeholder (ProductMock kind={item.cover}).
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.black)
+                    // 9:16 media: `live`-gated real cover / preview over the black
+                    // placeholder (mirrors CarouselCardView.mediaThumbnail). `live == false`
+                    // → placeholder only (snapshot byte-identical).
+                    hotMedia(item)
                     // Centered play affordance (`rgba(0,0,0,0.5)` circle + play glyph).
                     centeredPlay
                     // Duration pill (top-left, monospace, `rgba(0,0,0,0.55)`).
@@ -442,6 +531,36 @@ public struct EndScreenView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .frame(maxWidth: .infinity)
+    }
+
+    /// The 12-radius black cover placeholder (the existing baseline fill) — the base
+    /// layer of a hot card thumbnail, and the `live == false` / empty-URL fallback.
+    private var hotCoverPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(Color.black)
+    }
+
+    /// Live-gated hot-card media — mirrors `previewMedia` /
+    /// `CarouselCardView.mediaThumbnail`: `live` && `preview` → looping preview over the
+    /// placeholder; else `live` && `cover` → static still over the placeholder; else the
+    /// placeholder alone. Empty `preview` (the backend's current default) falls through
+    /// to `cover`; empty `cover` falls through to the placeholder. `live == false` →
+    /// placeholder only (never constructs a runtime media view → snapshot byte-identical).
+    @ViewBuilder
+    private func hotMedia(_ item: LBHotItem) -> some View {
+        if live, let url = Self.nonEmptyURL(item.preview) {
+            ZStack {
+                hotCoverPlaceholder
+                LoopingVideoView(url: url)
+            }
+        } else if live, let url = Self.nonEmptyURL(item.cover) {
+            ZStack {
+                hotCoverPlaceholder
+                RemoteStillImageView(url: url)
+            }
+        } else {
+            hotCoverPlaceholder
+        }
     }
 
     /// Centered play affordance over a hot card cover (LBPHotCard 242-249).
@@ -476,11 +595,41 @@ public struct EndScreenView: View {
 
     // MARK: - Helpers
 
+    /// Number of `maxHotCards`-sized recommendation pages over `hotCount` items (ceil
+    /// division). `hotCount <= 0 → 0`; otherwise `ceil(hotCount / maxHotCards)`
+    /// (e.g. 3 → 1, 4 → 2, 6 → 2, 7 → 3). Pure — no view state.
+    static func pageCount(forHotCount count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return (count + maxHotCards - 1) / maxHotCards
+    }
+
+    /// The `maxHotCards`-sized window of `hot` at `page` (the「換一批」recommendation
+    /// window). `page == 0` (or any out-of-range / negative `page`) SAFELY falls back
+    /// to `Array(hot.prefix(maxHotCards))` — the existing behavior → baseline
+    /// byte-identical; otherwise `hot[page*maxHotCards ..< min(+maxHotCards, count)]`.
+    /// Pure — never crashes on a stale / out-of-range `page`.
+    static func hotWindow(_ hot: [LBHotItem], page: Int) -> [LBHotItem] {
+        let start = page * maxHotCards
+        guard page > 0, start < hot.count else {
+            return Array(hot.prefix(maxHotCards))
+        }
+        return Array(hot[start ..< min(start + maxHotCards, hot.count)])
+    }
+
     /// Format `Int` seconds → `mm:ss` (for `LBNavItem.duration`, which IS seconds —
     /// unlike `LBHotItem.duration` which is an already-formatted string).
     static func formatSeconds(_ seconds: Int) -> String {
         let s = max(0, seconds)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    /// A trimmed non-empty URL, or nil (empty string → absent). Mirrors
+    /// `CarouselCardView.previewURL` / `coverURL`, so an empty `preview` (the backend's
+    /// current default for `hot[]` / `next[]`) falls through to `cover`, and an empty
+    /// `cover` falls through to the black placeholder (no broken image, no crash).
+    static func nonEmptyURL(_ raw: String) -> URL? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : URL(string: s)
     }
 
     // MARK: - Decorative design tokens (literal moments.jsx hex via Color(hex:))

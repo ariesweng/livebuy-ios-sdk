@@ -88,6 +88,14 @@ public struct LiveOverlayChromeView: View {
     /// presentation copy — no view-model binding.
     public let showGestureHints: Bool
 
+    /// Whether to draw the「長按畫面 = 暫停 / 繼續」hold-to-pause hint pill within the gesture
+    /// hints. Default `true` → all three pills (snapshot baseline unchanged). `PlayerShellView`
+    /// passes `!model.isLive`：進行中直播（`liveStatus == 1`，串流 + 預錄）禁止手勢暫停 → 該行提示
+    /// MUST NOT 顯示；已結束直播的回放（`isFinishedLiveReplay`, `isLive == false`）仍可暫停 → 保留。
+    /// Only gates the hold pill — the tap-to-mute / swipe hints are unaffected
+    /// （rb-ios-live-hold-pause-suppress）.
+    public let showsHoldPauseHint: Bool
+
     /// When true, the gesture-hint pills fade out shortly after appearing
     /// (onboarding affordance over a real live video). Defaults to `false` →
     /// static presentation so snapshot baselines stay deterministic.
@@ -97,6 +105,15 @@ public struct LiveOverlayChromeView: View {
     /// (PlayerShellView forwards to `model.performProductTap`). nil → the card is
     /// drawn but inert (demo / snapshot). No pixel change either way.
     private let onTapPinnedProduct: ((LBProduct) -> Void)?
+
+    /// Tap on the pinned-card close chip (top-right X) → host-wired per-product-id
+    /// local dismiss (PlayerShellView adds the id to a local `dismissedLivePinnedIds`
+    /// Set and re-filters the fed product list). The close chip is an INNER Button, so
+    /// its tap is consumed and does NOT bubble to the card's outer open-detail Button
+    /// (mirrors `MiniCartView.closeButton`'s `e.stopPropagation()`). nil → the chip is
+    /// drawn but inert (demo / snapshot). No pixel change either way
+    /// (rb-ios-live-pinned-card-dismiss; parity to Android `0f6b56a5`).
+    private let onDismissPinnedProduct: ((String) -> Void)?
 
     /// Tap on the announcement banner (`LBLiveAnnounce`) → host-wired navigation that
     /// opens the `VideoInfoPanelView` notice tab (PlayerShellView wires
@@ -111,8 +128,10 @@ public struct LiveOverlayChromeView: View {
                 live: Bool = false,
                 hostCaption: String = "",
                 showGestureHints: Bool = true,
+                showsHoldPauseHint: Bool = true,
                 autoFadeGestureHints: Bool = false,
                 onTapPinnedProduct: ((LBProduct) -> Void)? = nil,
+                onDismissPinnedProduct: ((String) -> Void)? = nil,
                 onTapAnnounce: (() -> Void)? = nil) {
         self.theme = theme
         self.announceText = announceText
@@ -120,8 +139,10 @@ public struct LiveOverlayChromeView: View {
         self.live = live
         self.hostCaption = hostCaption
         self.showGestureHints = showGestureHints
+        self.showsHoldPauseHint = showsHoldPauseHint
         self.autoFadeGestureHints = autoFadeGestureHints
         self.onTapPinnedProduct = onTapPinnedProduct
+        self.onDismissPinnedProduct = onDismissPinnedProduct
         self.onTapAnnounce = onTapAnnounce
     }
 
@@ -331,16 +352,24 @@ public struct LiveOverlayChromeView: View {
                 .frame(height: 92)
                 .clipped()
 
-                // Close affordance chip (presentation-only; tap is host-wired).
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.black.opacity(0.6))
-                    .frame(width: 18, height: 18)
-                    .overlay(
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                    )
-                    .padding(4)
+                // Close affordance chip → per-product-id local dismiss. An INNER Button
+                // intercepts the tap so the card's OUTER open-detail Button does NOT also
+                // fire (nested SwiftUI Buttons: the inner one wins within its bounds —
+                // mirrors `MiniCartView.closeButton`'s `e.stopPropagation()`). PlainButtonStyle
+                // keeps the pixels (baselines unchanged); inert when onDismissPinnedProduct == nil.
+                Button(action: { onDismissPinnedProduct?(product.id) }) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.black.opacity(0.6))
+                        .frame(width: 18, height: 18)
+                        .overlay(
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityIdentifier(LBAccessibilityID.pinnedCardClose)
+                .padding(4)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -431,11 +460,15 @@ public struct LiveOverlayChromeView: View {
     // MARK: - LBPGestureHint — centered static gesture hints
 
     /// Three centered dark hint pills (`LBPGestureHint`): tap-to-mute,
-    /// long-press-pause, swipe-to-switch. Pure static localized copy.
+    /// long-press-pause, swipe-to-switch. Pure static localized copy. The long-press-pause
+    /// pill is omitted when `showsHoldPauseHint == false` (進行中直播禁止手勢暫停 →
+    /// PlayerShellView 傳 `!model.isLive`; rb-ios-live-hold-pause-suppress). tap / swipe 不受影響。
     private var gestureHints: some View {
         VStack(spacing: 8) {
             gestureHintPill(symbol: "hand.point.up.left.fill", text: Self.hintTap)
-            gestureHintPill(symbol: "hand.raised.fill", text: Self.hintHold)
+            if showsHoldPauseHint {
+                gestureHintPill(symbol: "hand.raised.fill", text: Self.hintHold)
+            }
             gestureHintPill(symbol: "arrow.up.arrow.down", text: Self.hintSwipe)
         }
     }
@@ -485,6 +518,17 @@ public struct LiveOverlayChromeView: View {
     /// (core convention — see `LiveBuyPlayerViewController.narrating`).
     static func isNarrating(_ product: LBProduct) -> Bool {
         product.narrateStatus == 2
+    }
+
+    /// The pinned products that remain visible after applying the per-product-id local
+    /// dismiss set (rb-ios-live-pinned-card-dismiss). The DECISION of "filter the pinned
+    /// products by the dismissed set" — extracted as a pure function so the call-site wiring
+    /// is unit-testable without rendering a real View (library test target has no host app;
+    /// mirrors `WidgetVisibility.visibleVideos`). Empty `dismissedIds` → returns `products`
+    /// AS-IS so the default path is provably zero-change (snapshot-safe). Semantically mirrors
+    /// the VOD now-introducing card's `Set<String>` local hide + Android `0f6b56a5`.
+    static func visiblePinnedProducts(_ products: [LBProduct], dismissedIds: Set<String>) -> [LBProduct] {
+        dismissedIds.isEmpty ? products : products.filter { !dismissedIds.contains($0.id) }
     }
 
     /// A non-empty product image URL (`photos.first ?? pic`, whitespace-trimmed) for the

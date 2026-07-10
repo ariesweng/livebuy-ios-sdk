@@ -540,6 +540,9 @@ public struct ProductSheetsOverlayView: View {
                 // the retired family-6 dual-switch sheet (design 2026-06-06).
                 faved: model.favEnabled(forProductId: detail.productId),
                 live: live,
+                // 進行中直播隱藏分享鈕（rb-ios-live-hide-product-share, design R12）——既有已
+                // republish 欄位，零新增 state。與上面的 `live:`（真圖載入旗標）語意不同。
+                isLive: model.isLive,
                 // 商品說明（`brief`）由 products 快照以 productId 解析（問題 4，rb-ios-product-sheet-detail-polish）。
                 brief: model.brief(forProductId: detail.productId),
                 onSelectVariant: { groupIndex, optionIndex in

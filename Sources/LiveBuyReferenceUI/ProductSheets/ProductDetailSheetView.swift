@@ -102,6 +102,14 @@ public struct ProductDetailSheetView: View {
     /// (baselines unchanged). `true` (host runtime) → load `detail.photos[0]` over it via
     /// `RemoteStillImageView` (rb-ios-product-real-images).
     public let live: Bool
+    /// Genuinely-live signal (rb-ios-live-hide-product-share, design R12) — `ProductSheetsModel.isLive`
+    /// (`DefaultPlayerHeaderState.isLive` republish, `liveStatus == 1`). DISTINCT from `live` above
+    /// (that one only gates real-photo loading; this one gates the share button). `.detail`
+    /// presentation's 分享 (share) button in the 3-slot `[收藏][分享][CTA]` footer is hidden when
+    /// `isLive == true` — a genuinely-live product has no settled "start time" a share link could
+    /// carry (unlike VOD / a finished-live replay, which have a real `beginTime`). 收藏 (favorite) is
+    /// unaffected. Default `false` → existing call sites / snapshots byte-identical.
+    public let isLive: Bool
     /// 商品說明（`LBProduct.brief`）— `.detail` 呈現在價格下方畫一段說明（對齊設計 `ProductDetailSheet`
     /// 的說明文字）。`LBProductDetailState` 不帶 `brief`，故由容器 / `ProductSheetsModel` 從
     /// `productOverlay.products` 快照以 `detail.productId` 解析後傳入（`brief(forProductId:)`）。空字串
@@ -151,6 +159,7 @@ public struct ProductDetailSheetView: View {
         faved: Bool = false,
         presentation: Presentation = .detail,
         live: Bool = false,
+        isLive: Bool = false,
         brief: String = "",
         onSelectVariant: ((_ groupIndex: Int, _ optionIndex: Int) -> Void)? = nil,
         onSetQty: ((Int) -> Void)? = nil,
@@ -174,6 +183,7 @@ public struct ProductDetailSheetView: View {
         self.faved = faved
         self.presentation = presentation
         self.live = live
+        self.isLive = isLive
         self.brief = brief
         self.onSelectVariant = onSelectVariant
         self.onSetQty = onSetQty
@@ -571,10 +581,14 @@ public struct ProductDetailSheetView: View {
             // only forwards the intent to the host-wired `onShare` passthrough.
             HStack(spacing: 12) {
                 // `.addToCart` (compact purchase) drops 收藏 / 分享 — just the CTA (design's
-                // AddToCartSheet). `.detail` keeps the 3-slot `[收藏][分享][CTA]` footer.
+                // AddToCartSheet). `.detail` keeps the 3-slot `[收藏][分享][CTA]` footer, EXCEPT
+                // 分享 is additionally hidden while genuinely live (rb-ios-live-hide-product-share,
+                // design R12) — 收藏 is unaffected.
                 if presentation == .detail {
                     favButton
-                    shareButton
+                    if !isLive {
+                        shareButton
+                    }
                 }
                 addToCartButton
             }
@@ -656,7 +670,9 @@ public struct ProductDetailSheetView: View {
     /// `LBPFavButton` chrome (hand-drawn `ShareGlyph` = design `Icons.share` size 20 + 「分享」
     /// label, rb-ios-share-icon-design-align — no longer SF `square.and.arrow.up`). Share is a
     /// HOST CONCERN: the tap only forwards to the host-wired `onShare` (the headless SDK has no
-    /// share route) — reference-ui never builds share logic nor calls core / template.
+    /// share route) — reference-ui never builds share logic nor calls core / template. Hidden
+    /// entirely (not rendered) by the `footer`'s `!isLive` gate while genuinely live
+    /// (rb-ios-live-hide-product-share, design R12).
     private var shareButton: some View {
         Button(action: { onShare?() }) {
             VStack(spacing: 4) {

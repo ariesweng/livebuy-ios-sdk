@@ -331,6 +331,11 @@ struct PlayerOverlayRootView: View {
             MomentsOverlayView(
                 model: momentsModel,
                 theme: theme,
+                // Real video surface (placeholder bg suppressed) → the end-screen
+                // recommended / next-video cards load real cover / preview media;
+                // standalone / snapshot keeps deterministic placeholders (same flag the
+                // product sheets / start-screen surfaces use).
+                live: !paintsBackgroundPlaceholder,
                 onWatchNext: onWatchNext,
                 onPickHot: onPickHot,
                 onCancel: onCancel,

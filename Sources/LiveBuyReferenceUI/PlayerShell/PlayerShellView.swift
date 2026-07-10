@@ -125,6 +125,13 @@ public struct PlayerShellView: View {
     /// (rb-ios-now-introducing-real-image-carousel, 問題 10). Local presentation state only.
     @State private var dismissedVodProductIds: Set<String> = []
 
+    /// The LIVE pinned products the viewer has dismissed (by id) via the pinned-card close X.
+    /// Each card re-appears when a DIFFERENT pinned product (different id) enters the source list
+    /// (real live `narrate_status == 2` 換人 / replay timeline advancing). Mirrors the VOD
+    /// `dismissedVodProductIds` per-product-id local hide (rb-ios-live-pinned-card-dismiss; parity
+    /// to Android `0f6b56a5`). Local presentation state only.
+    @State private var dismissedLivePinnedIds: Set<String> = []
+
     /// Whether the「聯絡商家」confirm modal (`ContactMerchantModalView`) is presented.
     /// The rail `serviceLink` tap and the info-panel「與商家一對一對話」now present this
     /// confirm FIRST (design `contact_merchant`); only its「確定」proceeds to the existing
@@ -375,6 +382,12 @@ public struct PlayerShellView: View {
         return .tap
     }
 
+    /// PURE: whether hold-to-pause is available in the current mode. 進行中直播（`isLive`,
+    /// = `liveStatus == 1`, 涵蓋**串流直播**與**預錄直播**兩者）MUST NOT 用手勢暫停 / 播放
+    /// （rb-ios-live-hold-pause-suppress）；已結束直播的回放（`isFinishedLiveReplay`）與純 VOD
+    /// （兩者 `isLive == false`）維持可暫停。抽成純函式使此 gate 可單元測試（不需渲染手勢）。
+    static func allowsHoldToPause(isLive: Bool) -> Bool { !isLive }
+
     /// Drag in progress: on the first change schedule the hold timer; if the finger moves
     /// past `moveTolerance` before it fires, cancel the pending hold (it is a swipe/scroll,
     /// not a hold) so playback never pauses on a swipe.
@@ -409,6 +422,11 @@ public struct PlayerShellView: View {
     /// Schedule the hold promotion: after `holdDelay` of a sustained press, mark `isHolding`
     /// and fire `onHoldStart` (host → core pause). Cancelled by movement or release first.
     private func scheduleHold() {
+        // 進行中直播（`model.isLive` == `liveStatus == 1`, 涵蓋串流 + 預錄）禁止手勢暫停：直接不排程
+        // hold，使 `isHolding` 永不為 true → 不 fire `onHoldStart` / `onHoldEnd`、`GesturePauseIconView`
+        // 不顯示、`resolveGestureEnd` 自然回 tap / swipe（單擊仍切靜音、上下滑仍換片）。已結束直播的回放
+        // 與純 VOD（皆 `isLive == false`）不受影響、維持可暫停（rb-ios-live-hold-pause-suppress）。
+        guard Self.allowsHoldToPause(isLive: model.isLive) else { return }
         let work = DispatchWorkItem {
             self.isHolding = true
             self.onHoldStart?()
@@ -555,7 +573,11 @@ public struct PlayerShellView: View {
                     //            fallback 單一 activeProduct ?? first isHot，問題 7）。
                     //   回放   → vodActiveProducts（時間軸窗格 [beginTime,endTime) 含 playhead，隨
                     //            播放進度更新；回放無即時 narrate_status==2，改用後端介紹時間窗）。
-                    pinnedProducts: model.isLive ? model.livePinnedProducts : model.vodActiveProducts,
+                    // 先算來源分支、再以本地 dismiss set 過濾（涵蓋真直播 / 回放兩分支），使 close X
+                    // 逐商品本地隱藏（rb-ios-live-pinned-card-dismiss，鏡像 VOD dismissedVodProductIds）。
+                    pinnedProducts: LiveOverlayChromeView.visiblePinnedProducts(
+                        model.isLive ? model.livePinnedProducts : model.vodActiveProducts,
+                        dismissedIds: dismissedLivePinnedIds),
                     // Real product image on the pinned card only over a live video surface
                     // (placeholder suppressed) — same gate as the shop logo / VOD card
                     // (live-pinned-card-image-radius). Snapshot/demo keeps the placeholder.
@@ -563,11 +585,18 @@ public struct PlayerShellView: View {
                     // Host-suppressible: a host that has already shown the hint once
                     // passes showGestureHints: false (it owns the persisted flag).
                     showGestureHints: showGestureHints,
+                    // 進行中直播（`model.isLive`）禁止手勢暫停 → 一併隱藏「長按畫面 = 暫停 / 繼續」
+                    // 提示（gate 在 isLive，非 usesLiveChrome）；已結束直播的回放仍可暫停 → 保留提示
+                    // （rb-ios-live-hold-pause-suppress）。tap / swipe 兩行提示不受影響。
+                    showsHoldPauseHint: !model.isLive,
                     // Real video overlay (placeholder bg suppressed) → fade the gesture
                     // hints; standalone / snapshot keeps them static (deterministic).
                     autoFadeGestureHints: !paintsBackgroundPlaceholder,
                     // Pinned-product card tap → turnkey product-detail default flow.
                     onTapPinnedProduct: { product in model.performProductTap(product) },
+                    // 釘選卡 close X → 逐商品本地隱藏（把 id 加入本地 dismissedLivePinnedIds，
+                    // 下次過濾即不再餵入該卡；鏡像 VOD onDismiss，rb-ios-live-pinned-card-dismiss）。
+                    onDismissPinnedProduct: { id in dismissedLivePinnedIds.insert(id) },
                     // 公告橫幅 tap → 切到 VideoInfoPanel 公告分頁並開啟資訊面板（重用 host badge tap
                     // 的同一 infoPanelPresented 狀態）。公告顯示中 ⇒ notice 非空 ⇒ canOpenNotice
                     // ⇒ selectInfoTab(.notice) 生效（live-announce-tap-open-info-panel，問題 2）。

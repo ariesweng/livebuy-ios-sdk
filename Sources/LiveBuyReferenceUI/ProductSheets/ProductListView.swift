@@ -361,9 +361,11 @@ public struct ProductListView: View {
     //   • 64×64 rounded-12 thumbnail with a centered play affordance overlay.
     //   • name (14pt semibold) + price block. Sold-out → 「已售完」line; in-stock →
     //     strike original (`originalPriceShow`) + accent sale price (`priceShow`).
-    //   • trailing action group: detail circle + share circle (outline accent) +
-    //     cart circle (filled accent; bell glyph when sold out → 補貨通知, cart glyph
-    //     otherwise → 加購).
+    //   • trailing action group: detail circle + share circle (outline accent,
+    //     HIDDEN while the row's effective mode is genuinely-live —
+    //     rb-ios-live-hide-product-share, design R12) + cart circle (filled
+    //     accent; bell glyph when sold out → 補貨通知, cart glyph otherwise →
+    //     加購).
     // The whole name/price column AND the detail icon funnel the row tap to
     // `onOpenProduct(product)`. The THUMBNAIL tap forwards to `onSeekToIntro(product)`
     // (→ host → core `seek(seconds: beginTime)`, issue 5) and the SHARE icon forwards to
@@ -488,11 +490,16 @@ public struct ProductListView: View {
                 // 分享鈕 → 系統分享，連結帶該商品介紹時間 `?t=beginTime`（issue 6，對齊設計
                 // `LBPProductRow` 的 `onShare`）。轉發到 host-wired `onShareProduct`。glyph 為自繪
                 // `ShareGlyph`（設計 `Icons.share` size 16，rb-ios-share-icon-design-align）。
-                rowOutlineGlyph(action: { onShareProduct?(product) }) {
-                    ShareGlyph(size: 16, color: theme.accent)
+                // 進行中直播（`effectiveMode == .live`）MUST NOT 顯示（rb-ios-live-hide-product-share,
+                // design R12）：live 商品沒有已定案的開始銷售時間，分享連結無法帶對時間點；VOD /
+                // 回放（有真實 beginTime/endTime）維持顯示。單一決策點 `overlay.showShare`。
+                if overlay.showShare {
+                    rowOutlineGlyph(action: { onShareProduct?(product) }) {
+                        ShareGlyph(size: 16, color: theme.accent)
+                    }
+                    // E2E: per-item share circle (product-row-share).
+                    .accessibilityIdentifier(LBAccessibilityID.productRowShare(index))
                 }
-                // E2E: per-item share circle (product-row-share).
-                .accessibilityIdentifier(LBAccessibilityID.productRowShare(index))
                 rowCartButton(soldOut: soldOut, product: product)
                     // E2E: per-item cart/bell circle (product-row-cart).
                     .accessibilityIdentifier(LBAccessibilityID.productRowCart(index))

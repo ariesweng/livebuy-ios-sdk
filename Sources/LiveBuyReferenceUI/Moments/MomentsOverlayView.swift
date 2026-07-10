@@ -160,6 +160,14 @@ public struct MomentsOverlayView: View {
     /// The resolved reference-ui theme.
     public let theme: ReferenceUITheme
 
+    /// Runtime media gate threaded into `EndScreenView` (default `false` → snapshot /
+    /// demo construct action-free with placeholder-only cards). `true` (host runtime) →
+    /// the end-screen recommended / next-video cards load real `cover` / `preview`
+    /// media. Wired by the container as `!paintsBackgroundPlaceholder` (the SAME flag the
+    /// product sheets / start-screen surfaces use). Only the end-screen cards consume it;
+    /// the error moment has no media.
+    public let live: Bool
+
     // MARK: - Host-wired action closures (design §"守住的不變式": host-wired exit)
     //
     // No template / player moment INTENT exists to forward to — these are wired
@@ -182,6 +190,7 @@ public struct MomentsOverlayView: View {
     public init(
         model: MomentsModel,
         theme: ReferenceUITheme,
+        live: Bool = false,
         onWatchNext: (() -> Void)? = nil,
         onPickHot: ((LBHotItem) -> Void)? = nil,
         onCancel: (() -> Void)? = nil,
@@ -190,6 +199,7 @@ public struct MomentsOverlayView: View {
     ) {
         self.model = model
         self.theme = theme
+        self.live = live
         self.onWatchNext = onWatchNext
         self.onPickHot = onPickHot
         self.onCancel = onCancel
@@ -229,6 +239,7 @@ public struct MomentsOverlayView: View {
                 next: model.next,
                 hot: model.hot,
                 liveEnded: model.endScreenVisible && model.countdown == nil,
+                live: live,
                 onWatchNext: { onWatchNext?() },
                 onPickHot: { hot in onPickHot?(hot) },
                 onCancel: { onCancel?() })

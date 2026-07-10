@@ -41,6 +41,10 @@ public enum LBAccessibilityID {
 
     public static let announceBanner = "lb_announce_banner"
     public static let pinnedCard = "lb_pinned_card"
+    /// Pinned-card close chip (top-right X) — per-product-id local dismiss
+    /// (rb-ios-live-pinned-card-dismiss). Value mirrors Android
+    /// `LBTestTags.PINNED_CARD_CLOSE`.
+    public static let pinnedCardClose = "lb_pinned_card_close"
     public static let pinnedCarousel = "lb_pinned_carousel"
     public static func livePinnedDot(_ index: Int) -> String { "lb_live_pinned_dot_\(index)" }
 

@@ -136,12 +136,18 @@ public struct LBFeedItem: Equatable {
 public final class DefaultActivityFeed {
 
     private let tailRetain: Int
-    private let historyRetain: Int
+    /// Per-type retain cap for CHAT rows (`kind == .chat`). Chat is trimmed INDEPENDENTLY of
+    /// activity so it is never evicted by activity rows (chat-activity-separate-retention-ios-template).
+    private let chatRetain: Int
+    /// Per-type retain cap for ACTIVITY-bucket rows (everything that is NOT `.chat`).
+    private let activityRetain: Int
 
-    /// Full scrollable history buffer (cap `historyRetain`, deeper than the N=7
-    /// ambient slice), newest at the tail. The reference-ui SCROLLABLE chat feed binds
-    /// this so the user can scroll up to view recent history. Same merge / order /
-    /// de-dup / no-chat-double-write rules as `items`.
+    /// Full scrollable history buffer, newest at the tail. The reference-ui SCROLLABLE chat feed
+    /// binds this so the user can scroll up to view recent history. Same merge / order / de-dup /
+    /// no-chat-double-write rules as `items`. Trim is by SEPARATE per-type caps (chat-activity-
+    /// separate-retention-ios-template): chat rows capped at `chatRetain`, activity-bucket rows
+    /// (`.activity` / `.eventJoin` / `.productSale`) capped at `activityRetain`, the two never
+    /// affecting each other — so real chat (`.chat`) is NEVER pushed out by activity rows.
     private(set) public var history: [LBFeedItem] = []
 
     /// The ambient overlay slice — the newest `tailRetain` (N=7) rows of `history`.
@@ -168,11 +174,14 @@ public final class DefaultActivityFeed {
 
     public init(tailRetain: Int = DefaultTemplateConstants.activityFeedTailRetain,
                 dedupeWindow: Int = DefaultTemplateConstants.activityFeedDedupeWindow,
-                historyRetain: Int = DefaultTemplateConstants.activityFeedHistoryRetain) {
+                chatRetain: Int = DefaultTemplateConstants.activityFeedChatRetain,
+                activityRetain: Int = DefaultTemplateConstants.activityFeedActivityRetain) {
         self.tailRetain = max(1, tailRetain)
         self.dedupeWindow = max(1, dedupeWindow)
-        // History is at least as deep as the ambient slice (items derives from it).
-        self.historyRetain = max(max(1, tailRetain), historyRetain)
+        // Chat retain is at least as deep as the ambient slice: `items` (newest tailRetain of
+        // history) derives from a history that may be all chat, so chatRetain must cover it.
+        self.chatRetain = max(max(1, tailRetain), chatRetain)
+        self.activityRetain = max(1, activityRetain)
     }
 
     // MARK: - Activity ingestion (from core showJoin / showPurchase / showWin)
@@ -275,7 +284,7 @@ public final class DefaultActivityFeed {
 
     /// True while a `batchIngest(_:)` batch is in progress (live-chat-backlog-batch-ingest-template).
     /// While set, `append(_:)` still writes into `history` immediately (preserving the existing
-    /// dedupe-signature check's semantics), but SKIPS the per-call `historyRetain` trim and
+    /// dedupe-signature check's semantics), but SKIPS the per-call per-type trim and
     /// `onMutation` fan-out — those are deferred to `batchIngest`'s single end-of-batch step.
     /// Non-reentrant by construction: `ingestBacklog` is the only caller and never nests batches.
     private var isBatching = false
@@ -295,34 +304,66 @@ public final class DefaultActivityFeed {
                 recentActivitySignatures.removeFirst(recentActivitySignatures.count - dedupeWindow)
             }
         }
-        // Append to the deep `history` buffer (cap `historyRetain`); the ambient
-        // `items` slice (newest N=7) is derived from it.
+        // Append to the deep `history` buffer; the ambient `items` slice (newest N=7) is
+        // derived from it.
         history.append(item)
         // Inside a `batchIngest` batch, the trim + notify are deferred to the batch's single
         // end-of-batch step (live-chat-backlog-batch-ingest-template) — see that method's doc.
         guard !isBatching else { return }
-        history = Self.trimmed(history, cap: historyRetain)
+        // Separate per-type retention (chat-activity-separate-retention-ios-template): chat rows
+        // are trimmed independently of activity rows, so a busy stream's activity churn never
+        // evicts real chat.
+        history = Self.trimmedByType(history, chatCap: chatRetain, activityCap: activityRetain)
         // One append == one coalesced mutation (no redraw storm; each event
         // notifies exactly once).
         onMutation?()
     }
 
     /// Pure: keeps the last `cap` elements of `items` (a single, one-shot trim), or returns
-    /// `items` unchanged when already within `cap`. Used both by the live per-item `append(_:)`
-    /// path (one call per item) and by `batchIngest`'s single end-of-batch trim
-    /// (live-chat-backlog-batch-ingest-template) — the SAME primitive either way, just invoked
-    /// once vs. once-per-item. NOTE (design.md D1): for a FIXED append order, trimming after
-    /// every append vs. trimming once at the end produce the IDENTICAL final result — this
-    /// function alone does not fix an ordering bug. What determines correctness is the ORDER
-    /// `items` arrives in before this trim runs (see `DefaultPlayerTemplate.backlogIngestOrder`).
+    /// `items` unchanged when already within `cap`. A GENERIC single-cap primitive retained as a
+    /// building block (and exercised directly by unit tests with an explicit `cap:`); the live
+    /// merged-feed trim is now `trimmedByType(_:chatCap:activityCap:)` (chat-activity-separate-
+    /// retention-ios-template), which no longer uses one shared cap. NOTE (design.md D1): for a
+    /// FIXED append order, trimming after every append vs. trimming once at the end produce the
+    /// IDENTICAL final result — this function alone does not fix an ordering bug.
     static func trimmed(_ items: [LBFeedItem], cap: Int) -> [LBFeedItem] {
         items.count > cap ? Array(items.suffix(cap)) : items
+    }
+
+    /// Pure: enforce SEPARATE retention caps per row type on a chronologically-ordered buffer
+    /// (newest at the tail), preserving the survivors' original chronological interleaving
+    /// (chat-activity-separate-retention-ios-template). CHAT rows (`kind == .chat`) are kept up to
+    /// `chatCap`; every OTHER row (the "activity bucket": `.activity` / `.eventJoin` /
+    /// `.productSale`) is kept up to `activityCap`. The two caps are independent — trimming one
+    /// type never removes rows of the other — so real chat is NEVER evicted by activity rows.
+    /// When a type exceeds its cap, its OLDEST rows are dropped (walk from the head, skipping the
+    /// oldest surplus of each type). O(n), no sort. `items` (newest `tailRetain` of the result)
+    /// therefore still reflects the newest rows overall, keeping its contract unchanged.
+    static func trimmedByType(_ items: [LBFeedItem], chatCap: Int, activityCap: Int) -> [LBFeedItem] {
+        let chatCount = items.reduce(0) { $0 + ($1.kind == .chat ? 1 : 0) }
+        let activityCount = items.count - chatCount
+        // Fast path: nothing exceeds its cap → identical result to no trim.
+        if chatCount <= chatCap && activityCount <= activityCap { return items }
+        var chatToDrop = max(0, chatCount - chatCap)
+        var activityToDrop = max(0, activityCount - activityCap)
+        var result: [LBFeedItem] = []
+        result.reserveCapacity(items.count - chatToDrop - activityToDrop)
+        for item in items {
+            if item.kind == .chat {
+                if chatToDrop > 0 { chatToDrop -= 1; continue }
+            } else if activityToDrop > 0 {
+                activityToDrop -= 1
+                continue
+            }
+            result.append(item)
+        }
+        return result
     }
 
     /// Run `body` as ONE atomic ingest batch (live-chat-backlog-batch-ingest-template): every
     /// `appendXXX` call made inside `body` (via the existing per-kind entry points — this does
     /// NOT introduce a new item-construction path) accumulates into `history` without the
-    /// per-call `historyRetain` trim or `onMutation` firing; both are applied EXACTLY ONCE after
+    /// per-call per-type trim or `onMutation` firing; both are applied EXACTLY ONCE after
     /// `body` returns. This matters for the messages `is_init` backlog round, which can deliver
     /// up to 500 items in one poll response — feeding that through the live per-item path would
     /// otherwise trim 500 times and fan out up to 500 redundant host-facing notifications for one
@@ -334,7 +375,7 @@ public final class DefaultActivityFeed {
         isBatching = true
         body()
         isBatching = false
-        history = Self.trimmed(history, cap: historyRetain)
+        history = Self.trimmedByType(history, chatCap: chatRetain, activityCap: activityRetain)
         if history != before {
             onMutation?()
         }
@@ -380,13 +421,13 @@ public final class DefaultActivityFeed {
     /// Wholesale-replaces `history` with a previously-saved snapshot — used to restore a
     /// per-videoId cached feed when an in-place video switch returns to a video already visited
     /// earlier in this same session (`chat-history-video-switch-cache-template`), instead of
-    /// leaving the feed empty after a `clear()`. Applies the same `historyRetain` cap as ordinary
-    /// ingestion (defensive; a saved snapshot is already within cap) and resets the de-dup window
-    /// (mirrors `clear()` — the restored history is a distinct data set from whatever produced
-    /// the currently-tracked signatures). Fires `onMutation` exactly once, symmetric with
-    /// `clear()`, regardless of whether `items` is empty.
+    /// leaving the feed empty after a `clear()`. Applies the same separate per-type caps as
+    /// ordinary ingestion (defensive; a saved snapshot is already within cap) and resets the
+    /// de-dup window (mirrors `clear()` — the restored history is a distinct data set from
+    /// whatever produced the currently-tracked signatures). Fires `onMutation` exactly once,
+    /// symmetric with `clear()`, regardless of whether `items` is empty.
     public func restore(_ items: [LBFeedItem]) {
-        history = Self.trimmed(items, cap: historyRetain)
+        history = Self.trimmedByType(items, chatCap: chatRetain, activityCap: activityRetain)
         recentActivitySignatures.removeAll()
         onMutation?()
     }
