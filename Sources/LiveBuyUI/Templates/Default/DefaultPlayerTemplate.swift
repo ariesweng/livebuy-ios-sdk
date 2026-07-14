@@ -809,23 +809,6 @@ public final class DefaultPlayerTemplate {
     /// builds the detail-sheet state the family-3 overlay binds).
     public func performProductTap(_ product: LBProduct) { player?.performProductTap(product) }
 
-    /// 商品開賣卡「立即搶購」(問題5 / product-sale-open-detail): resolve the onsale 商品名 back to a
-    /// loaded `LBProduct` in `channel.goods` and open ITS product detail sheet (reusing the existing
-    /// `performProductTap` 開 detail path). The onsale push carries NO product id, so the 商品名 is the
-    /// only locator today — name matching is the interim; once the backend ships a product id /
-    /// deeplink on the onsale push this can locate by id. No match → no-op (the onsale product is
-    /// normally in `channel.goods`).
-    public func openProductSaleByName(_ name: String) {
-        guard let match = Self.matchSaleProduct(name: name, in: player?.channel?.goods ?? []) else { return }
-        performProductTap(match)
-    }
-
-    /// Resolve an onsale 商品名 to the first `LBProduct` in `goods` with an equal `name`, or nil.
-    /// Pure (no I/O) so the name resolution is unit-testable without a Simulator
-    /// (internal-testability / product-sale-open-detail).
-    static func matchSaleProduct(name: String, in goods: [LBProduct]) -> LBProduct? {
-        goods.first { $0.name == name }
-    }
     /// Request the next page of chat history.
     public func loadChatHistory() { player?.performLoadChatHistory() }
     /// Send a chat message — wraps the already-public async core `sendChat`.

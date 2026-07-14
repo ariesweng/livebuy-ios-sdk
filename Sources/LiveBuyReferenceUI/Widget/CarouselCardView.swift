@@ -526,18 +526,111 @@ public extension LBFeaturedGood {
 // (never in snapshot / demo). They are iOS-14-safe (AVQueuePlayer / AVPlayerLooper /
 // AVPlayerLayer / UIImageView), file-private to this card primitive.
 
-/// A control-free, looping, muted video view for the animated `preview` thumbnail —
-/// an `AVPlayerLayer`-backed `UIView` (resizeAspectFill, clipped by the card's 9:16
-/// rounded frame). Created lazily and torn down on disappear to bound resource use.
-struct LoopingVideoView: UIViewRepresentable {
+// MARK: - BACKGROUND / OFF-SCREEN DECODE STOP (ios-refui-widget-preview-lifecycle-pause)
+//
+// iOS parity of the "widget preview half" of Android `android-refui-player-lifecycle-pause`
+// (`LoopingVideoView` / media3 `ExoPlayer`) and Flutter `flutter-refui-widget-preview-lifecycle-pause`
+// (`LoopingVideoView` / `video_player`). Previously `LoopingPlayerUIView` called `player.play()`
+// UNCONDITIONALLY in `configure()` and only `pause()`d in `teardown()` (on `dismantleUIView`), with
+// NO app-lifecycle observer and NO off-screen probe. The widget uses non-lazy `HStack` / `VStack`
+// containers (golden determinism — the spec forbids `Lazy*` on the `ImageRenderer` path), so a card
+// scrolled out of the viewport stays MOUNTED and keeps decoding. A list of N live previews therefore
+// = N `AVPlayer` decoders still running when the card is off-screen — the same source Android measured
+// as ~150% background CPU on the consumer app.
+//
+// Two gaps closed here:
+//   (A) app background — a `UIApplication.didEnterBackgroundNotification` /
+//       `willEnterForegroundNotification` observer (imperative, UIKit-level — NOT SwiftUI-rebuild
+//       driven) sets the gate's `foreground` flag. `didEnterBackground` fires only on a REAL
+//       background (not transient inactive), matching the existing codebase convention (LiveBuyPlayer
+//       auto-PiP, `LiveBuyPlayer.swift`) and Android `ON_STOP`. iOS also tends to suspend
+//       `AVPlayerLayer` render in the background on its own, so this axis is defensive parity.
+//   (B) off-screen — a SwiftUI `GeometryReader` + `PreferenceKey` visibility probe (parity with
+//       Android `onGloballyPositioned` / `boundsInWindow` and Flutter `VisibilityDetector`): a card
+//       whose (global) frame no longer overlaps the screen bounds is off-screen → pause. This is the
+//       real gap (a scrolled-out card stays mounted).
+//
+// Both signals fold into ONE unified `foreground && onScreen` gate (`PreviewPlaybackController`,
+// edge-triggered, imperative — it calls `queuePlayer?.play()` / `.pause()` directly, it does NOT
+// tear down / rebuild the player view). A single gate (rather than two independent observers) is
+// deliberate: otherwise returning to the foreground would wake a card that is still scrolled
+// off-screen (mirrors the Android / Flutter decision). Because the current desired state is applied
+// via `gate.reapply()` once the player is (re)configured, a card that mounts while backgrounded /
+// off-screen does NOT start decoding.
+//
+// "Tab-cover" (host keeps the home widget mounted and merely COVERS it with another route: the card
+// stays laid-out, its global frame still overlaps the screen, the app stays active) is NOT detectable
+// from the widget layer alone (z-order coverage is invisible to `GeometryReader`, and coverage does not
+// background the app) — the same platform limit Android / Flutter recorded. It is closed by a THIRD gate
+// axis `notCovered`, fed by the opt-in host bridge `LiveBuyWidgetVisibility.setWidgetsCovered(_:)`
+// (ios-refui-widget-host-visibility-pause, iOS parity of Android `android-refui-widget-host-visibility-pause`):
+// the host declares when the widget-hosting screen is covered, and each mounted preview pauses. A host
+// that does NOT opt in leaves `notCovered == true`, so the gate degrades to `foreground && onScreen`
+// and behaviour is byte-identical to before this bridge existed — the residual gap still exists when
+// the host does not opt in (covered detection is the host's responsibility, not claimed as self-sufficient).
+// This preview is NEVER PiP content, so — like Flutter — no PiP guard is needed.
+
+/// A control-free, looping, muted video view for the animated `preview` thumbnail. Wraps an
+/// `AVPlayerLayer`-backed `UIView` (`LoopingPlayerUIView`, resizeAspectFill, clipped by the card's
+/// 9:16 rounded frame) and adds the off-screen half of the play-gate: a `GeometryReader` +
+/// `PreferenceKey` visibility probe forwards `onScreen` into the player view (the background half is
+/// observed inside `LoopingPlayerUIView`). Constructed ONLY on the `live == true` runtime path (never
+/// in snapshot / demo) so golden baselines are untouched. `init(url:)` is unchanged (all call sites —
+/// `CarouselCardView`, `EndScreenView` — keep working).
+struct LoopingVideoView: View {
     let url: URL
 
+    /// Whether the card currently overlaps the screen. Seeded `true` (a just-mounted card is assumed
+    /// visible until the probe reports otherwise); driven by the `GeometryReader` preference below.
+    @State private var onScreen: Bool = true
+
+    var body: some View {
+        LoopingPlayerRepresentable(url: url, onScreen: onScreen)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: OnScreenPreferenceKey.self,
+                        value: Self.isCardOnScreen(
+                            cardFrame: geo.frame(in: .global),
+                            screenBounds: UIScreen.main.bounds))
+                }
+            )
+            .onPreferenceChange(OnScreenPreferenceKey.self) { self.onScreen = $0 }
+    }
+
+    /// Pure visibility test (unit-testable): a card is on-screen when its (global) frame overlaps the
+    /// screen bounds. A zero-area frame (pre-layout) is treated as NOT on-screen. Mirrors Android's
+    /// `boundsInWindow()` intersect-with-window and Flutter's `visibleFraction > 0`.
+    static func isCardOnScreen(cardFrame: CGRect, screenBounds: CGRect) -> Bool {
+        guard cardFrame.width > 0, cardFrame.height > 0 else { return false }
+        return cardFrame.intersects(screenBounds)
+    }
+}
+
+/// The off-screen visibility signal, folded so ANY visible fragment counts as on-screen.
+private struct OnScreenPreferenceKey: PreferenceKey {
+    static var defaultValue: Bool = true
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
+    }
+}
+
+/// The `UIViewRepresentable` that hosts `LoopingPlayerUIView` and forwards the `onScreen` axis into
+/// it (the background axis is observed inside the UIView). Kept private — `LoopingVideoView` is the
+/// public entry the card / end-screen construct.
+private struct LoopingPlayerRepresentable: UIViewRepresentable {
+    let url: URL
+    let onScreen: Bool
+
     func makeUIView(context: Context) -> LoopingPlayerUIView {
-        LoopingPlayerUIView(url: url)
+        let view = LoopingPlayerUIView(url: url)
+        view.setOnScreen(onScreen)
+        return view
     }
 
     func updateUIView(_ uiView: LoopingPlayerUIView, context: Context) {
         uiView.update(url: url)
+        uiView.setOnScreen(onScreen)
     }
 
     static func dismantleUIView(_ uiView: LoopingPlayerUIView, coordinator: ()) {
@@ -553,10 +646,39 @@ final class LoopingPlayerUIView: UIView {
     private var looper: AVPlayerLooper?
     private var currentURL: URL?
 
+    /// The unified `foreground && onScreen` play-gate. `onPlay` / `onPause` drive the (nullable)
+    /// `queuePlayer` directly — imperative, never a view teardown. Bound weakly so it survives
+    /// player re-`configure`.
+    private lazy var gate = PreviewPlaybackController(
+        onPlay: { [weak self] in self?.queuePlayer?.play() },
+        onPause: { [weak self] in self?.queuePlayer?.pause() })
+
+    /// App-lifecycle observer tokens (background / foreground axis). Registered once, removed on
+    /// `teardown` (dismantle) and `deinit`.
+    private var lifecycleObservers: [NSObjectProtocol] = []
+
+    /// The `LiveBuyWidgetVisibility` subscription token (covered axis, ios-refui-widget-host-visibility-pause).
+    /// Registered once in `init` (register replays the current covered level → seeds `notCovered` before
+    /// the first `configure` reapply), unregistered on `teardown` (dismantle) and `deinit` alongside the
+    /// lifecycle observers.
+    private var visibilityToken: UUID?
+
     init(url: URL) {
         super.init(frame: .zero)
         backgroundColor = .black
         playerLayer.videoGravity = .resizeAspectFill
+        // Seed the foreground axis from the current app state so a card that mounts while the app is
+        // already backgrounded does NOT start decoding (`.inactive` counts as foreground — only a
+        // real background flips it, matching the notification below).
+        gate.setForeground(UIApplication.shared.applicationState != .background)
+        registerLifecycleObservers()
+        // Covered axis: subscribe to the opt-in host bridge. `register` immediately replays the current
+        // covered level, so a card mounting DURING a covered period seeds `notCovered = false` (pauses)
+        // before `configure`'s `reapply()`. Host that never opts in → covered stays false → notCovered
+        // stays true → byte-identical prior behaviour.
+        visibilityToken = LiveBuyWidgetVisibility.shared.register { [weak self] covered in
+            self?.gate.setNotCovered(!covered)
+        }
         configure(url: url)
     }
 
@@ -568,8 +690,26 @@ final class LoopingPlayerUIView: UIView {
         configure(url: url)
     }
 
+    /// Off-screen axis: forwarded from the SwiftUI `GeometryReader` visibility probe. Edge-triggered
+    /// inside the gate (redundant same-value sets are no-ops).
+    func setOnScreen(_ onScreen: Bool) {
+        gate.setOnScreen(onScreen)
+    }
+
+    private func registerLifecycleObservers() {
+        let nc = NotificationCenter.default
+        lifecycleObservers.append(nc.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) {
+                [weak self] _ in self?.gate.setForeground(false)
+            })
+        lifecycleObservers.append(nc.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) {
+                [weak self] _ in self?.gate.setForeground(true)
+            })
+    }
+
     private func configure(url: URL) {
-        teardown()
+        teardownPlayer()
         currentURL = url
         let player = AVQueuePlayer()
         player.isMuted = true
@@ -577,15 +717,119 @@ final class LoopingPlayerUIView: UIView {
         looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
         playerLayer.player = player
         queuePlayer = player
-        player.play()
+        // Apply the CURRENT gate decision instead of an unconditional `play()`: a card that mounts /
+        // re-configures while backgrounded or off-screen must NOT start decoding. `reapply()` also
+        // (re)plays a newly-built player when the card IS foreground + on-screen.
+        gate.reapply()
     }
 
-    func teardown() {
+    /// Pause + release the player only (keeps the lifecycle observers, since `configure` reuses them).
+    private func teardownPlayer() {
         queuePlayer?.pause()
         playerLayer.player = nil
         looper = nil
         queuePlayer = nil
         currentURL = nil
+    }
+
+    /// Full teardown (SwiftUI `dismantleUIView`): release the player AND drop the lifecycle observers.
+    func teardown() {
+        teardownPlayer()
+        removeLifecycleObservers()
+    }
+
+    private func removeLifecycleObservers() {
+        // Covered axis: drop the `LiveBuyWidgetVisibility` subscription (independent of the lifecycle
+        // observers below, and idempotent — a nil token is a no-op).
+        if let token = visibilityToken {
+            LiveBuyWidgetVisibility.shared.unregister(token)
+            visibilityToken = nil
+        }
+        guard !lifecycleObservers.isEmpty else { return }
+        let nc = NotificationCenter.default
+        lifecycleObservers.forEach { nc.removeObserver($0) }
+        lifecycleObservers.removeAll()
+    }
+
+    deinit {
+        removeLifecycleObservers()
+    }
+}
+
+// MARK: - PreviewPlaybackController (unified foreground && onScreen && notCovered play-gate)
+//
+// A pure, framework-free state machine (no UIKit / AVFoundation import → unit-testable in isolation,
+// mirroring Android's / Flutter's `PreviewPlaybackController`). The preview should play ONLY when the
+// app is foreground AND the card is on-screen AND the widget-hosting screen is not covered by the host.
+// The three axes fold into one `foreground && onScreen && notCovered` gate, applied edge-triggered so
+// play / pause are not churned. Keeping ONE gate (rather than independent observers) means returning to
+// the foreground / scrolling back never wakes a card that is still off-screen OR still covered
+// (ios-refui-widget-host-visibility-pause: the `notCovered` axis is fed by the `LiveBuyWidgetVisibility`
+// opt-in host bridge and defaults to `true` = the prior two-axis behaviour). `reapply()` force-applies
+// the current desired state once the underlying player is (re)configured (its earlier `onPlay` /
+// `onPause` calls were meaningful only against a live player).
+final class PreviewPlaybackController {
+
+    /// Called (once, on the rising edge — or forced by `reapply`) when the preview SHOULD play.
+    private let onPlay: () -> Void
+    /// Called (once, on the falling edge — or forced by `reapply`) when the preview SHOULD pause.
+    private let onPause: () -> Void
+
+    private var foreground: Bool = true
+    private var onScreen: Bool = true
+    /// Third axis (ios-refui-widget-host-visibility-pause): whether the widget-hosting screen is NOT
+    /// covered by another destination. `true` (the default) = not covered = the prior behaviour, so a
+    /// host that never opts into `LiveBuyWidgetVisibility` keeps a byte-identical `foreground && onScreen`
+    /// gate. Fed by `LiveBuyWidgetVisibility` (the host declares coverage the SDK cannot detect from the
+    /// widget layer — z-order coverage is invisible to `GeometryReader`, and coverage does not background
+    /// the app). Kept in the SAME single controller (not a separate observer) so returning to foreground /
+    /// scrolling back never wakes a card that is still covered.
+    private var notCovered: Bool = true
+
+    /// The last applied decision (`nil` = never applied yet). Edge-trigger latch.
+    private var applied: Bool?
+
+    init(onPlay: @escaping () -> Void, onPause: @escaping () -> Void) {
+        self.onPlay = onPlay
+        self.onPause = onPause
+    }
+
+    /// Whether the preview should currently be playing — the three-axis AND (any axis false → pause).
+    var shouldPlay: Bool { foreground && onScreen && notCovered }
+
+    func setForeground(_ value: Bool) {
+        guard foreground != value else { return }
+        foreground = value
+        apply()
+    }
+
+    func setOnScreen(_ value: Bool) {
+        guard onScreen != value else { return }
+        onScreen = value
+        apply()
+    }
+
+    /// Covered axis: forwarded from the `LiveBuyWidgetVisibility` opt-in host bridge (a listener passes
+    /// `!covered` here). Edge-triggered inside the gate (redundant same-value sets are no-ops).
+    func setNotCovered(_ value: Bool) {
+        guard notCovered != value else { return }
+        notCovered = value
+        apply()
+    }
+
+    /// Force-(re)apply the current desired state. Used once the underlying player becomes (re)ready —
+    /// its earlier `onPlay` / `onPause` callbacks acted on a now-replaced player, so the real state
+    /// must be (re)issued to the live one.
+    func reapply() {
+        applied = nil
+        apply()
+    }
+
+    private func apply() {
+        let desired = shouldPlay
+        guard desired != applied else { return }
+        applied = desired
+        if desired { onPlay() } else { onPause() }
     }
 }
 

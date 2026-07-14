@@ -233,7 +233,18 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
             let context = makeOverlayContext(player: player, template: template,
                                              theme: theme, coordinator: coordinator)
             let overlay = resolveDesign().playerOverlay(context)
-            attachOverlay(overlay, to: player, coordinator: coordinator)
+            // Wrap the overlay so its continuous decorative animations (win-entry pulse ring,
+            // long-title marquee) throttle with the device's thermal power profile + Reduce
+            // Motion (ios-power-profile-animation-throttle-reference-ui). The wrapper owns a
+            // `PowerProfileMotionGate` (`@StateObject`, one instance) that pulls
+            // `LiveBuySDK.currentPowerProfile` at attach and subscribes to `POWER_PROFILE_CHANGED`
+            // via `player.addEventListener` (aux, coexists with the host's primary listener),
+            // injecting the resolved gate into the SwiftUI environment. Purely additive: the
+            // leaf views default to a neutral "animate" gate when unwrapped (snapshot fixtures).
+            let throttled = AnyView(
+                PowerProfileMotionEnvironment(player: player) { overlay }
+            )
+            attachOverlay(throttled, to: player, coordinator: coordinator)
         }
 
         return startPlayback(player: player, coordinator: coordinator)

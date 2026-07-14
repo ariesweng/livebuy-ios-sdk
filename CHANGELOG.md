@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — next features accrue here toward v3.2.0._
+_Nothing yet — next features accrue here toward the version after v3.2.0._
+
+---
+
+## [3.2.0] - 2026-07-14
+
+> minor release，無 breaking，源碼相容，兩端 lockstep（iOS `v3.2.0` / Android `3.2.0`）。鎖點
+> `45fbf4f9`（iOS 出貨內容等價於最後一個碰 `ios/Sources/` 的 `7600fcd5`；其後 RN commit 零碰 iOS）。
+> 自 v3.1.3（`60e2fa50`）以來碰 `ios/Sources/` 共 13 commit（8 core / 4 reference-ui / 1 template）；
+> core 被動到，故 **binary 已重 build，checksum 為新值 `a58952dd…`**（≠v3.1.3 `6bea1e20…`）。
+> 詳見 [`docs/release/v3.2.0-readiness.md`](../docs/release/v3.2.0-readiness.md)。
+
+### ⚠️ 行為變更：`/stat` 統計埋點改「預設開」（opt-out）
+
+`configure(...)` 的 `enableStatReporting` 預設值由 `false` 改為 `true`：**升級後不帶此參數，SDK 就會開始
+送 `/stat`**（觀看 / 分享 / 加購 / 商品曝光等 10 型；端點 `https://livebuy.tv/stat`，unsigned、
+form-urlencoded、fire-and-forget，wire body **無 PII / device id / ip**）。要維持關閉：顯式帶
+`enableStatReporting: false`。只翻 stat、不動 `enableConversionAttribution`（涉 Meta 歸因 id，維持
+opt-in / 預設關）。ATT / GDPR 同意仍是 host 責任。
+
+### Added（新公開符號，皆 additive、無 breaking）
+
+- `configure(...)` 新增三個帶預設值參數：`enableStatReporting: Bool = true`、
+  `environment: LBEnvironment = .production`、`enablePowerProfileAdaptation: Bool = true`（既有呼叫碼不需改）。
+- **`LBEnvironment`**（`.production` / `.develop`）— SDK 全域環境選擇器，目前用於 `/stat` 端點切換
+  （`.develop` → `https://develop.livebuy.tv/stat`）；只選端點，不改是否送 stat / wire / no-HMAC 契約。
+- **`LBEvent.powerProfileChanged`**（`POWER_PROFILE_CHANGED`）— 熱狀態感知的 power profile tier 改變時派發
+  （param `profile` = `full` / `reduced` / `conservative` / `survival`），供 host / reference-ui 自適應。
+- **`enablePowerProfileAdaptation`**（opt-out，預設 `true`）— 關掉即停用熱狀態感知的自動降載（畫質 cap /
+  輪詢 backoff）。
+
+### 功能亮點
+
+**core**
+- **`/stat` 埋點子系統（10 型）** — 原生送出觀看 / 分享 / 加購 / 商品曝光等統計，含 `person_time`
+  （觀看時長）/ `person_duration`（前景停留）兩計時器。
+- **直播發熱優化** — thermalState 感知自動降載（畫質上限 cap + 輪詢 backoff 隨溫度 tier）、直播兩條 5s
+  輪詢合流到單一 scheduler tick（對齊 radio 喚醒省電）、螢幕感知畫質上限降低直播解碼發熱。
+
+**reference-ui**
+- **widget 預覽生命週期暫停** — widget live 預覽在 app 背景 / 離屏 / 被全螢幕 player 覆蓋時停止解碼，
+  回前景 / 可見時續播，消除背景無謂解碼發熱。
+- **連續裝飾動畫依 power profile 節流**。
+- **onsale 商品開賣卡死碼移除**（reference-ui + template，無行為變更）。
+
+**無 BREAKING。**（`/stat` 為預設值翻轉，非 API 破壞——見上方行為變更。）
 
 ---
 

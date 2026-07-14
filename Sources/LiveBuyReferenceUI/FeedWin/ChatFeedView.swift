@@ -67,12 +67,6 @@ public struct ChatFeedView: View {
     /// template upstream exit `joinEvent(eid:keyword:)`, so the container shape wins.)
     public let onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)?
 
-    /// 商品開賣卡「立即搶購」intent (問題5 / product-sale-card-buy-tap). The container forwards this
-    /// to `FeedWinModel.openSaleProduct(name:)` → template `openProductSaleByName(name)` (which
-    /// resolves the 商品名 → `channel.goods` → opens that product's detail sheet). nil (demo /
-    /// snapshot) → the 立即搶購 CTA renders but is inert. This layer NEVER opens detail itself.
-    public let onTapSaleBuy: ((_ name: String) -> Void)?
-
     /// Scrollable history gate (default `false`, sharing the widget `hostScrollable`
     /// convention + the reference-ui "no `ScrollView` on the snapshot path" invariant).
     /// `false` (demo / snapshot / `ImageRenderer`) → the existing pure-`VStack` bottom-
@@ -114,15 +108,13 @@ public struct ChatFeedView: View {
                 hostScrollable: Bool = false,
                 pinned: LBPinnedMessage? = nil,
                 hostName: String = "",
-                onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)? = nil,
-                onTapSaleBuy: ((_ name: String) -> Void)? = nil) {
+                onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)? = nil) {
         self.theme = theme
         self.items = items
         self.hostScrollable = hostScrollable
         self.pinned = pinned
         self.hostName = hostName
         self.onJoinEvent = onJoinEvent
-        self.onTapSaleBuy = onTapSaleBuy
     }
 
     public var body: some View {
@@ -233,9 +225,9 @@ public struct ChatFeedView: View {
             ForEach(Array(visibleItems.enumerated()), id: \.offset) { index, item in
                 row(for: item)
                     // `.contain` keeps the row a single addressable container while
-                    // leaving its inline controls (eventJoinCta / saleBuy) as
-                    // separately-queryable children — without it the row id shadows
-                    // the inner button (rb-ios-e2e-feed-row-contain).
+                    // leaving its inline control (eventJoinCta) as separately-queryable
+                    // children — without it the row id shadows the inner button
+                    // (rb-ios-e2e-feed-row-contain).
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(Self.rowAccessibilityID(for: item, index: index))
             }
@@ -409,12 +401,12 @@ public struct ChatFeedView: View {
             // than crashing.
             EmptyView()
         case .productSale:
-            // chat5 群組①「商品開賣」→ 醒目商品開賣卡（設計 `LBProductSaleCard`）：商品名 = `text`、
-            // 現價 = `price`（已格式化）。demo seed 無 `.productSale` → 既有 golden byte-identical。
-            // 「立即搶購」(問題5)：綁定時帶商品名上拋（容器 → openSaleProduct）；未綁定 → onTapBuy nil → inert。
-            LBProductSaleCardRow(
-                theme: theme, name: item.text, price: item.price ?? "",
-                onTapBuy: onTapSaleBuy.map { cb in { cb(item.text) } })
+            // onsale 商品開賣推播已改走 host 主播聊天氣泡（template `DefaultPlayerTemplate` 對
+            // `.onsale` 走 `appendChat(...isHost:true)`），已無 production 路徑產生 `.productSale`
+            // feed item — 原「商品開賣卡」渲染（`LBProductSaleCardRow`）為死碼、已移除。保留此 no-op
+            // case 以維持 Swift 對 `LBFeedItem.Kind`（定義於 `LiveBuyUI`，此處不可改）的窮盡 switch；
+            // 型別完整移除需跨層 change。比照上方 `.activity` 的 `EmptyView()` no-op。
+            EmptyView()
         }
     }
 
@@ -960,134 +952,6 @@ struct LBActivityLineRow: View {
     private var textWeight: Font.Weight {
         // join / purchase / intro = medium (500); win = bold (700).
         tier == .win ? .bold : .medium
-    }
-}
-
-// MARK: - 商品開賣卡（chat-message-taxonomy ⑤ 群組① onsale → LBProductSaleCard）
-
-/// 商品開賣 feed item 的醒目卡片（設計 `moments.jsx` `LBProductSaleCard`）：24px tag 軌 + 暗玻璃卡
-/// （accent 邊框 + 圓角 12）＝[46×46 縮圖 placeholder] +「開賣中」徽章 + 商品名 + 現價，底部滿版
-/// 「立即搶購」鈕。`name` = `push.text`（商品名）、`price` = `push.price`（已格式化開賣價，直接顯示）。
-/// **PARK（後端缺）**：listPrice 刪線原價、真實縮圖 URL、搶購 deeplink → 縮圖走確定性 placeholder、
-/// 搶購鈕暫 inert（無跳轉目標，待 deeplink 落地再 wire）。
-struct LBProductSaleCardRow: View {
-    let theme: ReferenceUITheme
-    let name: String
-    let price: String
-    /// 「立即搶購」tap (問題5 / product-sale-card-buy-tap). nil（demo / snapshot）→ 按鈕 inert 且
-    /// 渲染與綁定前 byte-identical；非 nil → 「立即搶購」變成可點按鈕（內容不變）。
-    var onTapBuy: (() -> Void)? = nil
-
-    // 暫時隱藏商品圖片與價格（後端真實縮圖 URL / 價格資料定案前，先收斂卡片為
-    // 「徽章 + 商品名 + 立即搶購」）。**還原**：把對應 flag 設回 `true`（或移除 gate）即可恢復
-    // 縮圖與現價——`thumbnail` 計算屬性與 `price` 參數刻意保留（資料仍流入，僅不渲染），無需改資料層。
-    private static let showsThumbnail = false
-    private static let showsPrice = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            // 24px accent 軌 — tag 圖示（共用聊天 / 活動軌 ACT_SLOT）。
-            Circle().fill(theme.accent).frame(width: 24, height: 24)
-                .overlay(Image(systemName: "tag")
-                    .font(.system(size: 11, weight: .bold)).foregroundColor(.white))
-            card
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var card: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 9) {
-                // 商品圖片暫時隱藏（showsThumbnail = false）；恢復時走確定性 placeholder。
-                if Self.showsThumbnail { thumbnail }
-                VStack(alignment: .leading, spacing: 2) {
-                    saleBadge
-                    Text(name)
-                        .font(.system(size: 11 * theme.fontScale, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    // 現價暫時隱藏（showsPrice = false）；恢復時直接顯示已格式化的 `price`（不補幣別前綴）。
-                    if Self.showsPrice {
-                        Text(price)
-                            .font(.system(size: 13 * theme.fontScale, weight: .heavy))
-                            .foregroundColor(.white)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(8)
-            buyButton
-        }
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.62)))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.accent, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    // 46×46 確定性縮圖 placeholder（gradient + 商品名首字 monogram；無網路 / AsyncImage → snapshot 穩定，
-    // 對齊 MiniCartView 的 ProductMock placeholder）。真實縮圖 URL 待後端。
-    private var thumbnail: some View {
-        ZStack {
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(hex: "#FFD7A8") ?? .orange,
-                    Color(hex: "#E27D5A") ?? .orange,
-                ]),
-                startPoint: .topLeading, endPoint: .bottomTrailing)
-            Text(Self.monogram(for: name))
-                .font(.system(size: 15 * theme.fontScale, weight: .heavy))
-                .foregroundColor(.white.opacity(0.92))
-        }
-        .frame(width: 46, height: 46)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-    // 「開賣中」徽章 — accent 圓點（外圈淡暈）+ accent 文字。
-    private var saleBadge: some View {
-        HStack(spacing: 4) {
-            ZStack {
-                Circle().fill(theme.accent.opacity(0.2)).frame(width: 11, height: 11)
-                Circle().fill(theme.accent).frame(width: 5, height: 5)
-            }
-            Text("開賣中")
-                .font(.system(size: 9.5 * theme.fontScale, weight: .heavy))
-                .foregroundColor(theme.accent)
-        }
-    }
-
-    // 立即搶購 — 滿版 accent 鈕 + bag 圖示。`onTapBuy` 綁定時 → 可點開該商品 detail（問題5）；
-    // 未綁定（demo / snapshot）→ inert，且像素與綁定前 byte-identical。
-    @ViewBuilder
-    private var buyButton: some View {
-        if let onTapBuy = onTapBuy {
-            // `.buttonStyle(.plain)` 不加任何 chrome → 與靜態 label 像素一致，只是變可點。
-            Button(action: onTapBuy) { buyButtonLabel }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier(LBAccessibilityID.saleBuy)
-        } else {
-            buyButtonLabel
-                .accessibilityIdentifier(LBAccessibilityID.saleBuy)
-        }
-    }
-
-    /// 「立即搶購」按鈕的視覺內容（按鈕化前後共用，確保像素不變）。
-    private var buyButtonLabel: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "bag")
-                .font(.system(size: 11, weight: .bold)).foregroundColor(.white)
-            Text("立即搶購")
-                .font(.system(size: 12 * theme.fontScale, weight: .heavy))
-                .foregroundColor(.white)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 7)
-        .background(theme.accent)
-    }
-
-    /// 商品名首個非空字元（大寫）作 monogram；空 → "?"。確定性 → snapshot 穩定。
-    static func monogram(for name: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard let first = trimmed.first else { return "?" }
-        return String(first).uppercased()
     }
 }
 

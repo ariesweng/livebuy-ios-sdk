@@ -214,13 +214,6 @@ public final class FeedWinModel: ObservableObject {
         template?.joinEvent(eid: eid, keyword: keyword)
     }
 
-    /// Forward a 商品開賣卡「立即搶購」intent (問題5) to the bound template
-    /// (`openProductSaleByName(_:)` → resolve the 商品名 in `channel.goods` → open that product's
-    /// detail sheet). No-op for demo instances (no bound template) / unmatched names.
-    public func openSaleProduct(name: String) {
-        template?.openProductSaleByName(name)
-    }
-
     // MARK: - Presentation classification (read-only)
     //
     // `LBAwardPresentation.init(awardType:)` is INTERNAL to the template layer, so

@@ -247,17 +247,6 @@ public final class DefaultActivityFeed {
         append(LBFeedItem(kind: .chat, text: text))
     }
 
-    /// 商品開賣 product-sale row (chat5 群組①「商品開賣」). Surfaces an onsale push as a
-    /// `.productSale` feed item carrying the 商品名 (`name` → `text`) + 現價 (`price`), for the
-    /// reference-ui's `LBProductSaleCard`. DE-DUPED like a system notice (the push bucket carries no
-    /// stable id; an adjacent-poll re-send of the same name+price within the window is dropped).
-    /// Routed here by `DefaultPlayerTemplate.handlePush` for `kind == .onsale` with a non-empty name.
-    public func appendProductSale(name: String, price: String) {
-        // **不再傳 dedupeKey**（chat-history-dedupe-template）：`ps|<name>|<price>` 內容指紋會誤殺
-        // 後台刻意重送的相同商品開賣公告。相鄰輪重送防重複改由 cursor-based backlog 分流承擔。
-        append(LBFeedItem(kind: .productSale, text: name, price: price))
-    }
-
     // MARK: - Event-join ingestion (from core event-begin push)
 
     /// Surface a core event-begin push as an INDEPENDENT event-join feed item

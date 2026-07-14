@@ -568,6 +568,13 @@ private struct MarqueeTitleLoopView: View {
     /// comment above); flips to `true` once in `.onAppear` to start the infinite loop.
     @State private var scrolling = false
 
+    /// Continuous-animation throttling gate (ios-power-profile-animation-throttle-reference-ui).
+    /// The infinite marquee `repeatForever` driver only STARTS when this allows it (device not
+    /// hot, Reduce Motion off, on-screen). This is layered ON TOP of the existing overflow gate
+    /// (this view is only instantiated when the title overflows) — it does NOT change whether
+    /// this view is built, only whether it scrolls. Defaults to neutral "animate" when unset.
+    @Environment(\.continuousAnimationGate) private var motionGate
+
     var body: some View {
         HStack(spacing: gap) {
             Text(title).font(font).foregroundColor(color).lineLimit(1).fixedSize()
@@ -594,10 +601,25 @@ private struct MarqueeTitleLoopView: View {
         // `.clipped()` clips to whatever width is proposed.
         .frame(maxWidth: containerWidth, alignment: .leading)
         .clipped()
-        .onAppear {
-            withAnimation(.linear(duration: durationSeconds).repeatForever(autoreverses: false)) {
-                scrolling = true
-            }
+        .onAppear { startScroll() }
+        // Re-evaluate when the power-profile / reduce-motion gate flips (heat → freeze at rest,
+        // cool → resume). `ContinuousAnimationGate` is `Equatable`.
+        .onChange(of: motionGate) { _ in startScroll() }
+        // Off-screen: reset to the resting position WITHOUT animation, so no `repeatForever`
+        // driver survives off-screen.
+        .onDisappear { scrolling = false }
+    }
+
+    /// (Re)start the infinite leftward loop — ONLY when the throttling gate allows it. Resets to
+    /// the resting offset first; under thermal pressure / Reduce Motion the two title copies stay
+    /// at their static side-by-side layout (`scrolling == false`), no `repeatForever` driver
+    /// starts. Only ever skips the animation DRIVER — both `Text` copies still instantiate + lay
+    /// out, so the overflow-branch snapshot (`player-header-bar-marquee-overflow`) is unchanged.
+    private func startScroll() {
+        scrolling = false
+        guard motionGate.allowsAnimation(visible: true) else { return }
+        withAnimation(.linear(duration: durationSeconds).repeatForever(autoreverses: false)) {
+            scrolling = true
         }
     }
 }

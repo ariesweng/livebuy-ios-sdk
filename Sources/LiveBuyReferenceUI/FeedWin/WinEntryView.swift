@@ -71,6 +71,14 @@ public struct WinEntryView: View {
     /// repeating cycle, mirroring `lbp-pulse-dot 1.8s infinite`.
     @State private var pulsing = false
 
+    /// Continuous-animation throttling gate (ios-power-profile-animation-throttle-reference-ui).
+    /// Read-only power-profile / reduce-motion / visibility policy: the pulse's
+    /// `repeatForever` driver only STARTS when this allows it (device not hot, Reduce Motion
+    /// off). Defaults to a neutral "animate" value when unset (direct-constructed snapshot /
+    /// preview instances) — and since `ImageRenderer` never fires `.onAppear`, the resting
+    /// frame is captured regardless, so the golden stays byte-identical.
+    @Environment(\.continuousAnimationGate) private var motionGate
+
     public init(
         theme: ReferenceUITheme,
         unclaimedCount: Int,
@@ -138,9 +146,17 @@ public struct WinEntryView: View {
         }
         .buttonStyle(PlainButtonStyle())
         // Start the repeating pulse on appear and restart it if the count changes
-        // (a fresh win arriving re-draws attention). iOS-14-safe.
+        // (a fresh win arriving re-draws attention). iOS-14-safe. Each path runs through
+        // `startPulse()`, which re-applies the throttling gate — so under thermal pressure
+        // a fresh win does NOT start the ring, and cooling back down resumes it.
         .onAppear { startPulse() }
         .onChange(of: unclaimedCount) { _ in startPulse() }
+        // Re-evaluate when the power-profile / reduce-motion gate flips (heat → freeze,
+        // cool → resume). `ContinuousAnimationGate` is `Equatable`.
+        .onChange(of: motionGate) { _ in startPulse() }
+        // Off-screen (incl. count → 0 where the body collapses to nothing): reset the ring to
+        // its resting state WITHOUT animation, so no `repeatForever` driver survives off-screen.
+        .onDisappear { pulsing = false }
         .accessibilityIdentifier(LBAccessibilityID.winEntry)
     }
 
@@ -162,11 +178,15 @@ public struct WinEntryView: View {
 
     // MARK: - Pulse driver
 
-    /// (Re)start the repeating pulse. Sets the ring to its at-rest state then
-    /// animates to the expanded / faded state on a forever-repeating cycle —
-    /// mirrors the design's `lbp-pulse-dot 1.8s infinite`. Pure presentation.
+    /// (Re)start the repeating pulse. Sets the ring to its at-rest state, then — ONLY when the
+    /// throttling gate allows it — animates to the expanded / faded state on a forever-repeating
+    /// cycle (mirrors the design's `lbp-pulse-dot 1.8s infinite`). Under thermal pressure /
+    /// Reduce Motion the ring is left at rest (`pulsing == false`), no `repeatForever` driver
+    /// starts. Pure presentation; only ever skips the animation DRIVER — the ring / glyph / badge
+    /// still render at their resting positions.
     private func startPulse() {
         pulsing = false
+        guard motionGate.allowsAnimation(visible: true) else { return }
         withAnimation(.easeOut(duration: Self.pulseDuration).repeatForever(autoreverses: false)) {
             pulsing = true
         }
