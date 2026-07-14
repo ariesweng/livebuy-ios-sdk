@@ -284,6 +284,10 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// before the host actually removes the view) — the second call is a no-op, no duplicate
     /// `VIDEO_STATE_CHANGE` / moment-state publish reaches the host.
     public static func dismantleUIViewController(_ uiViewController: UINavigationController, coordinator: Coordinator) {
+        // Remove the app-lifecycle observers + aux PiP listener FIRST (while the player is still
+        // alive so the aux listener detaches cleanly), then release playback resources. Idempotent
+        // with the Coordinator's `deinit` (ios-refui-player-foreground-resume).
+        coordinator.teardownLifecycleObservers()
         coordinator.player?.unload()
     }
 
@@ -304,6 +308,14 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         // capability — that is the host's Xcode project / Info.plist. When the capability is
         // absent (`isPiPPossible == false`) core falls back (`auto_pip_fallback` metric +
         // pause); the container does not crash and does not fake success.
+        //
+        // `armAutoPiP` ALSO wires the PAIRED `willEnterForeground` resume
+        // (ios-refui-player-foreground-resume): the fallback pause above had NO corresponding
+        // resume, so the video stayed frozen on the paused frame on return (esp. live, which is
+        // always meant to be at the live edge). `armAutoPiP` now un-freezes it on foreground,
+        // reaching iOS parity with Android `PauseOnBackground`. See `armAutoPiP` / the
+        // `ForegroundResumeController` doc for the latch / PiP-gate / `play()`-not-back-to-live
+        // rationale.
         player.enablePiP = true
         coordinator.armAutoPiP(for: player)
 
@@ -694,7 +706,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
 
     /// Retains the reference-ui models + the single overlay hosting controller for the
     /// player's lifetime, tracks cover-vs-shown video identity (in-place switches), and owns
-    /// the background→auto-PiP observer.
+    /// the app-lifecycle observers (background→auto-PiP AND foreground→resume).
     public final class Coordinator {
         var model: PlayerShellModel?
         var momentsModel: MomentsModel?
@@ -711,7 +723,25 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         /// What the player actually shows — cover loads AND default in-place switches.
         var currentVideoId: String?
 
+        // MARK: App-lifecycle wiring (background auto-PiP + foreground resume)
+
+        /// `didEnterBackground` observer — forwards to core `requestAutoPiP()`.
         private var bgObserver: NSObjectProtocol?
+        /// PAIRED `willEnterForeground` observer (ios-refui-player-foreground-resume) — drives the
+        /// resume state machine so a background fallback-pause is un-frozen on return.
+        private var fgObserver: NSObjectProtocol?
+        /// Pure background→foreground resume state machine (owns the `armed` latch). See
+        /// `ForegroundResumeController`. Strongly held here; its closures capture weakly (no cycle).
+        private var resumeController: ForegroundResumeController?
+        /// ACTUAL OS-PiP state, maintained by the aux `PIP_STATE_CHANGE` listener below. Read by the
+        /// resume gate so a genuine PiP return is left to AVKit's PiP restore (no double-resume).
+        private var isInPiP: Bool = false
+        /// Aux (non-primary) `PIP_STATE_CHANGE` listener. Retained here because core holds aux
+        /// listeners weakly (`addEventListener`); it NEVER intercepts, so the host's primary
+        /// listener is untouched.
+        private let pipStateListener = PiPStateAuxListener()
+        /// Removal token for `pipStateListener` (`player.removeEventListener`).
+        private var pipListenerToken: LBListenerToken?
 
         public init() {}
 
@@ -725,21 +755,87 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
                                           liveStatus: ch.liveStatus)
         }
 
-        /// Forward the genuine background transition to core's existing `requestAutoPiP()`
-        /// (task 4.1). `didEnterBackground` fires only on a real background (not transient
-        /// interruptions), so this never over-triggers; core guards `enablePiP` + capability
-        /// and falls back safely if PiP is impossible (task 4.3).
+        /// Wire the app-lifecycle transitions that keep drop-in playback correct across a
+        /// background round trip. TWO paired observers:
+        ///
+        /// 1. `didEnterBackground` → core's existing `requestAutoPiP()`: enters OS PiP when the
+        ///    host app target has the Background Modes capability + a ready PiP controller,
+        ///    else FALLS BACK to `activeEngine.pause()` (`LiveBuyPlayerViewController.swift:1309`)
+        ///    — the drop-in's ONLY source of background pausing. `didEnterBackground` fires only on
+        ///    a real background (not transient interruptions), so it never over-triggers; core
+        ///    guards `enablePiP` + capability and falls back safely if PiP is impossible.
+        /// 2. `willEnterForeground` → `ForegroundResumeController.appWillEnterForeground()`: un-freezes
+        ///    that fallback pause on return (ios-refui-player-foreground-resume). BEFORE this change
+        ///    iOS had only the pause half — the video stayed frozen on the paused frame. This is the
+        ///    iOS parity of Android `PauseOnBackground`'s `ON_START → play()` (the container
+        ///    `BackgroundPauseController`).
+        ///
+        /// Design points (see `ForegroundResumeController`):
+        /// - The resume GATE is a「was playing when we backgrounded」latch captured in
+        ///   `appDidEnterBackground()` (called BEFORE `requestAutoPiP()` so it reads the pre-pause
+        ///   state) — NOT the live `playerState == .paused`. The IVS live backend never maps to
+        ///   `.paused` (`IVSLivePlaybackEngine.player(_:didChangeState:)` has no `.paused` case), so
+        ///   a backgrounded live stays stale-`.playing`; a `.paused` gate would never fire for live.
+        /// - The resume ACTION is `player.play()` (idempotent un-freeze, works for AVPlayer VOD AND
+        ///   IVS live), NOT `performBackToLive()` — the latter is gated by `inReplayMode`
+        ///   (`OperationPanelView.simulateBackToLiveTap`, `:229`) and is a no-op for a
+        ///   merely-paused (not scrubbed) live.
+        /// - Resume is GATED on the ACTUAL PiP state (`isInPiP`, tracked via the aux
+        ///   `PIP_STATE_CHANGE` listener): a genuine PiP return is still `active` at
+        ///   `willEnterForeground` (the system posts `didStopPictureInPicture` only after the
+        ///   return), so we SKIP resume and let AVKit's PiP restore run — no contention.
+        /// - `willEnterForeground` (not `didBecomeActive`): it is PAIRED with `didEnterBackground`,
+        ///   so it fires only on a real foreground; `didBecomeActive` also fires after a transient
+        ///   interruption (Control Center / notification pull) that never backgrounded, which would
+        ///   be a spurious resume (the latch also guards this, but the pairing is cleaner + earlier).
         func armAutoPiP(for player: LiveBuyPlayerViewController) {
             self.player = player
+
+            // Pure resume state machine — closures capture WEAKLY (Coordinator strongly holds it).
+            resumeController = ForegroundResumeController(
+                isPlaying: { [weak player] in player?.playerState == .playing },
+                isInPiP:   { [weak self] in self?.isInPiP == true },
+                resume:    { [weak player] in player?.play() })
+
+            // Track ACTUAL OS-PiP state via an aux (non-primary) listener — coexists with the host's
+            // primary listener; core holds it weakly so `pipStateListener` is retained by `self`.
+            pipStateListener.onActiveChange = { [weak self] active in self?.isInPiP = active }
+            pipListenerToken = player.addEventListener(pipStateListener)
+
             bgObserver = NotificationCenter.default.addObserver(
                 forName: UIApplication.didEnterBackgroundNotification,
-                object: nil, queue: .main) { [weak player] _ in
+                object: nil, queue: .main) { [weak self, weak player] _ in
+                    // Capture wasPlaying BEFORE requestAutoPiP() — its fallback may pause.
+                    self?.resumeController?.appDidEnterBackground()
                     player?.requestAutoPiP()
+                }
+            fgObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.willEnterForegroundNotification,
+                object: nil, queue: .main) { [weak self] _ in
+                    self?.resumeController?.appWillEnterForeground()
                 }
         }
 
+        /// Remove both lifecycle observers + the aux PiP listener. Idempotent (safe to call from
+        /// BOTH `dismantleUIViewController` and `deinit`): each token is niled after removal so a
+        /// second call is a no-op and never crashes.
+        func teardownLifecycleObservers() {
+            if let bgObserver = bgObserver {
+                NotificationCenter.default.removeObserver(bgObserver)
+                self.bgObserver = nil
+            }
+            if let fgObserver = fgObserver {
+                NotificationCenter.default.removeObserver(fgObserver)
+                self.fgObserver = nil
+            }
+            if let token = pipListenerToken {
+                player?.removeEventListener(token)
+                self.pipListenerToken = nil
+            }
+        }
+
         deinit {
-            if let bgObserver = bgObserver { NotificationCenter.default.removeObserver(bgObserver) }
+            teardownLifecycleObservers()
         }
     }
 }
@@ -840,4 +936,90 @@ func applyAutoAdvanceSwitch(_ nav: LBNavItem,
     coordinator?.currentVideoId = nav.id
     coordinator?.coverVideoId = nav.id
     onSwitchedItem(autoAdvanceSwitchedItem(nav))
+}
+
+// MARK: - Background→foreground resume (ios-refui-player-foreground-resume)
+
+/// Pure background→foreground resume state machine. iOS counterpart of Android
+/// `BackgroundPauseController`, but it owns ONLY the「resume half」: the background-PAUSE half is
+/// done INDIRECTLY by core `requestAutoPiP()`'s fallback `activeEngine.pause()`
+/// (`LiveBuyPlayerViewController.swift:1309`) when the host lacks the Background Modes capability /
+/// a ready PiP controller. Before this controller existed, iOS had only that pause half → the
+/// video stayed frozen on the paused frame on foreground return.
+///
+/// TESTABILITY (internal-testability): every environment access is an injected closure — no UIKit /
+/// notification / view-controller dependency — so all branches are unit-testable off-Simulator
+/// (mirrors Android `PlayerLifecyclePauseTest`). The `Coordinator`'s observer add/remove + aux
+/// listener wiring is verified by code-reading + build + the existing suite / snapshots staying
+/// green (the SDK VC + PiP are not deterministically drivable headless).
+///
+/// SEAMS:
+/// - `isPlaying`: was the player playing at the moment we entered background? (= `playerState ==
+///   .playing`). The resume gate MUST use THIS latch, NOT the live `playerState == .paused`: the
+///   IVS live backend never maps to `.paused` (`IVSLivePlaybackEngine.player(_:didChangeState:)`
+///   has no `.paused` case, `.idle` is a no-op), so a backgrounded live stays stale-`.playing` and
+///   a `.paused` gate would never fire for live — the exact case the user reported.
+/// - `isInPiP`: is the app CURRENTLY in real OS PiP? Read FRESH on every foreground so a genuine
+///   PiP return (still `active` at `willEnterForeground`) is left to AVKit's PiP restore.
+/// - `resume`: `player.play()` — an idempotent un-freeze that works for BOTH AVPlayer VOD and IVS
+///   live. It MUST NOT be `performBackToLive()`, which is gated by `inReplayMode`
+///   (`OperationPanelView.simulateBackToLiveTap`, `:229`) and is a no-op for a merely-paused (not
+///   scrubbed) live.
+///
+/// INVARIANTS (two guards): (1) never resume without a prior `appDidEnterBackground` (the `armed`
+/// latch starts false → an initial / spurious `willEnterForeground` does nothing); (2) never resume
+/// when actually in PiP. `appDidEnterBackground()` MUST be called BEFORE the container forwards
+/// `requestAutoPiP()`, so the latch captures the PRE-pause playing state.
+final class ForegroundResumeController {
+
+    private var armed = false
+    private let isPlaying: () -> Bool
+    private let isInPiP: () -> Bool
+    private let resume: () -> Void
+
+    init(isPlaying: @escaping () -> Bool,
+         isInPiP: @escaping () -> Bool,
+         resume: @escaping () -> Void) {
+        self.isPlaying = isPlaying
+        self.isInPiP = isInPiP
+        self.resume = resume
+    }
+
+    /// Entering background: latch「was playing」. MUST run BEFORE `requestAutoPiP()` (whose fallback
+    /// may pause), so the latch reflects the pre-pause state.
+    func appDidEnterBackground() {
+        armed = isPlaying()
+    }
+
+    /// Returning to foreground: resume ONLY if we were playing when backgrounded (latch) AND we are
+    /// not genuinely in PiP; then clear the latch (so a repeat foreground without a new background
+    /// does nothing, and each round trip re-arms independently).
+    func appWillEnterForeground() {
+        if armed && !isInPiP() { resume() }
+        armed = false
+    }
+}
+
+/// Auxiliary (non-primary) `LiveBuyEventListener` that tracks the ACTUAL OS-PiP state by observing
+/// `PIP_STATE_CHANGE` (`LBEvent.pipStateChange`, params `["active": Bool]`, dispatched by core's
+/// `pipManager.onPiPStart/onPiPStop`). Mirrors `PowerProfileAuxListener`: it NEVER intercepts
+/// (returns `false`), so the host's primary listener still sees the event and core default
+/// semantics stay intact. Held STRONGLY by `Coordinator` (core holds aux listeners weakly — the
+/// caller must retain).
+final class PiPStateAuxListener: NSObject, LiveBuyEventListener {
+
+    /// Invoked with the new PiP-active value on every `PIP_STATE_CHANGE`.
+    var onActiveChange: ((Bool) -> Void)?
+
+    func onEventTriggered(
+        eventName: String,
+        params: [String: Any],
+        cartCallback: LBCartResultCallback?,
+        shareContext: LBShareContext?
+    ) -> Bool {
+        if eventName == LBEvent.pipStateChange, let active = params["active"] as? Bool {
+            onActiveChange?(active)
+        }
+        return false   // non-primary aux listener: never intercept
+    }
 }

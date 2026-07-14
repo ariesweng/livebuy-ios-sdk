@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — next features accrue here toward the version after v3.2.0._
+_Nothing yet — next features accrue here toward the version after v3.2.1._
+
+---
+
+## [3.2.1] - 2026-07-14
+
+> PATCH release，無 breaking，源碼相容，**iOS-only**（Android 留 `3.2.0`；本版是 iOS 追平 Android 既有
+> lifecycle 行為，非兩端功能分歧）。鎖點 `8ebd9004`（本版唯一碰 `ios/Sources/` 的 commit）。自 v3.2.0
+> （iOS 出貨鎖點內容 `7600fcd5`）以來碰 `ios/Sources/` 僅 **1 commit**（1 reference-ui fix）；
+> **`ios/Sources/LiveBuySDK/`（binary target）零變更 → 不重 build，checksum 沿用 v3.2.0 `a58952dd…`
+> （同一顆 XCFramework 原封重傳）**。詳見 [`docs/release/v3.2.1-readiness.md`](../docs/release/v3.2.1-readiness.md)。
+
+### Fixed
+
+- **直播背景回前景「定格幀」修復（drop-in `LiveBuyPlayer`）** — App 退背景後回前景時，直播（IVS 引擎）
+  畫面先前會定格在暫停幀不續播：core 在系統 PiP 進不去時 fallback 暫停播放引擎，但 iOS 容器缺回前景
+  續播的另一半。本版 reference-ui 容器補回與「進背景」成對的「回前景自動續播」，並在真正進入系統 PiP
+  時交還 AVKit PiP restore（不雙重 resume）；回放 / VOD 情境同樣回前景可續播。對齊 Android
+  `android-refui-player-lifecycle-pause` 的 `ON_STOP`/`ON_START` 行為。**core 零改、僅呼叫既有 public
+  API；未新增 / 移除任何 host-facing public 符號、無新增 bundled 資源。**
 
 ---
 
