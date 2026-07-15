@@ -7,7 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — next features accrue here toward the version after v3.2.1._
+_Nothing yet — next features accrue here toward the version after v3.2.2._
+
+---
+
+## [3.2.2] - 2026-07-15
+
+> PATCH release，無 breaking，源碼相容。版號與 Android SDK `3.2.2` **收斂同號**（兩端一起切 3.2.2，
+> 延續 3.2.0 / 3.2.1 模式）——**同號、diff 各異**：兩端**共有** presenter 依相位驅動 widget-cover
+> （iOS `5fcbc391` / Android `87702dcf`，實作互為 parity）＋ `LiveBuyWidgetVisibility` KDoc 對齊
+> （`a992bcfa`，四端同步）；**iOS 額外**多一筆 PiP 內暫停回前景續播（`e06cb761`），對 Android 為
+> **N/A**（Android 無 PiP 暫停控制項 / 同 player 無縫延續，AVKit-restore 缺陷 iOS 特有）。同號 = 同
+> parity 水位（如 3.2.1），各自獨立走各自通道（iOS SPM dist / Android Maven）。內容鎖點 `a992bcfa`
+> （最後碰 `ios/Sources/` 的 commit）。自 v3.2.1（iOS 出貨鎖點內容 `8ebd9004`）以來碰 `ios/Sources/`
+> 共 **3 commit**（3 reference-ui fix）；**`ios/Sources/LiveBuySDK/`（binary target）零變更 → 不重
+> build，checksum 沿用 v3.2.0/3.2.1 `a58952dd…`（同一顆 XCFramework 原封重傳）**。詳見
+> [`docs/release/v3.2.2-readiness.md`](../docs/release/v3.2.2-readiness.md)。
+
+### Fixed
+
+- **首頁 widget 輪播預覽在被覆蓋 / 縮小後恢復（presenter 依相位驅動，drop-in collapsible player）** —
+  用收合播放器（`.liveBuyPlayer(video:)` presenter）時，影片開全螢幕覆蓋首頁 `LiveBuyWidget` 輪播、或
+  縮小成右下浮卡後，首頁輪播預覽先前會因硬體解碼器爭用卡住不播。本版讓 `LiveBuyPlayerPresenter` 成為
+  `setWidgetsCovered` 單一 owner（契約 `covered ⟺ 相位 .full`）：全螢幕 → 讓首頁預覽讓出解碼器；縮小 /
+  關閉 / 移除 → 恢復。補齊 host-visibility-pause 的「host 從未呼叫」缺口。對齊 Android `87702dcf`。
+  **host 不需改任何呼叫碼。**
+- **真 PiP 內暫停回前景自動續播（定格幀修復，iOS-only）** — 影片真進系統 PiP、在 PiP 內手動暫停後回
+  前景時，畫面先前會定格在暫停幀（AVKit restore 只還原畫面、不 un-pause 使用者在 PiP 內手動暫停的
+  串流）。本版把回前景續播**延後到 PiP 結束**（`ForegroundResumeController` 新增 `resumeOnPiPExit`
+  意圖 latch，待 `PIP_STATE_CHANGE` active→false 由 aux listener 觸發一次 `play()`）；fallback pause
+  情境維持立即續播；背景前已暫停 / 背景關 PiP 皆不誤 resume。此筆對 Android 為 N/A。
+- **`LiveBuyWidgetVisibility` KDoc 對齊 presenter-owned 兩路徑** — 文件更新為「主路徑＝presenter 依相位
+  自動驅動（host 免呼叫）；手動路徑＝僅裸 / 自管 host，且自製 floating 勿用 `presentedVideo != null`」，
+  移除過時範例與 accepted over-pause 框架，使文件與 presenter 分流一致（四端同步、doc-comment only、
+  無行為變更）。
+
+### Notes
+
+- **未新增 / 移除 / 改名任何 host-facing public 符號**（修復以容器內部邏輯 / presenter wiring 完成）；
+  無欄位型別變更、無行為預設值翻轉、無新增 bundled 資源。三筆修復皆 drop-in `LiveBuyPlayer` /
+  collapsible presenter 使用者自動生效。
+- **binary 沿用 v3.2.0/3.2.1**：本版無任何 core 變更，XCFramework 與 v3.2.0/3.2.1 逐 byte 相同——未重
+  build、checksum 維持 `a58952dd…`，同一顆 `LiveBuySDK.xcframework.zip` 原封重傳至 `v3.2.2` release。
+  `LiveBuyUI`（view-model）本版亦未動；三處變更都在 `LiveBuyReferenceUI`（source 出貨）。
 
 ---
 

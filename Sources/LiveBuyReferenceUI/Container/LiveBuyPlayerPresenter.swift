@@ -38,6 +38,26 @@ public func collapsiblePhase(hasVideo: Bool, isMinimized: Bool) -> CollapsiblePl
     return isMinimized ? .floating : .full
 }
 
+/// Whether the presenter, at the given phase, SHALL declare the home `LiveBuyWidget` previews
+/// COVERED via the opt-in `LiveBuyWidgetVisibility.setWidgetsCovered` bridge — driving the
+/// preview play-gate's third axis (`ios-refui-presenter-widget-cover-by-phase`).
+///
+/// `covered ⟺ phase == .full` (i.e. `hasVideo && !isMinimized`). The full-screen player is a
+/// KEEP-ALIVE overlay (`playerLayer`): while `.full` it is decoding a live/VOD stream and, being
+/// kept alive, KEEPS decoding even after minimize — so the N home carousel previews (each its own
+/// `AVQueuePlayer`) contend for the finite hardware video decoders and stall. Declaring the home
+/// previews COVERED only while `.full` makes them yield those decoders; on minimize (`.floating`)
+/// the previews resume (still gated by foreground / on-screen) because the small floating card
+/// alone frees enough decoding headroom, and `.closed` has no session. This is what fixes
+/// "shrink the full-screen live player → home previews still don't play": the residual gap left by
+/// `ios-refui-widget-host-visibility-pause` (the bridge existed but NOTHING in production ever
+/// called `setWidgetsCovered`, since only THIS presenter knows the full/floating/closed phase —
+/// `isMinimized` is its private `@State`, invisible to the host). Pure so the phase→cover mapping
+/// is unit-testable without SwiftUI (internal-testability).
+func presenterWidgetCovered(hasVideo: Bool, isMinimized: Bool) -> Bool {
+    collapsiblePhase(hasVideo: hasVideo, isMinimized: isMinimized) == .full
+}
+
 /// Whether a change of the bound video's id should auto-restore the full-screen player.
 /// True ONLY when a new (non-nil) video arrives while the presenter is currently minimized
 /// (collapsed to the floating preview) — i.e. the host swapped in another video (tapping a
@@ -222,7 +242,32 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
                     committedOffset = .zero
                     dragTranslation = .zero
                 }
+                // Drive the opt-in cover bridge from the resulting phase (open / close / host-swap
+                // auto-restore / internal switch all change `video?.id`). Placed at the TAIL so a
+                // just-applied auto-restore (`isMinimized = false` above) is already reflected.
+                syncWidgetCover()
             }
+            // full ⇄ floating phase flips (minimize / restore-tap) drive the cover bridge too.
+            .onChange(of: isMinimized) { _ in syncWidgetCover() }
+            // First mount: `.onChange` never fires for an initial value, so seed the cover state
+            // for "host mounts the presenter already carrying a non-nil video → open full-screen".
+            .onAppear { syncWidgetCover() }
+            // Presenter removed while covered (`.full`): release the cover so the home previews are
+            // NOT left permanently paused (important edge case — the bridge is a stateful level).
+            .onDisappear { LiveBuyWidgetVisibility.setWidgetsCovered(false) }
+    }
+
+    /// Drive the opt-in `LiveBuyWidgetVisibility` cover bridge from the CURRENT presentation phase:
+    /// `covered ⟺ .full` (`presenterWidgetCovered`). Called from every phase-affecting hook
+    /// (`onAppear` / `onChange(of: isMinimized)` / the tail of `onChange(of: video?.id)`). The
+    /// presenter is the SINGLE owner of this call — it is the only place that knows the
+    /// full/floating/closed phase (`isMinimized` is private `@State`, invisible to the host), so no
+    /// host wiring is needed. `setWidgetsCovered` is edge-triggered (same value → no-op), so being
+    /// called from several hooks (and re-entrantly via `withAnimation` state writes) is safe and
+    /// never churns; the settled invariant is `covered == (video != nil && !isMinimized)`.
+    private func syncWidgetCover() {
+        LiveBuyWidgetVisibility.setWidgetsCovered(
+            presenterWidgetCovered(hasVideo: video != nil, isMinimized: isMinimized))
     }
 
     /// The KEEP-ALIVE full player overlay (issue 5). Mounted whenever a session exists

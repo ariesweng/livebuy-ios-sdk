@@ -780,10 +780,15 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         ///   IVS live), NOT `performBackToLive()` — the latter is gated by `inReplayMode`
         ///   (`OperationPanelView.simulateBackToLiveTap`, `:229`) and is a no-op for a
         ///   merely-paused (not scrubbed) live.
-        /// - Resume is GATED on the ACTUAL PiP state (`isInPiP`, tracked via the aux
+        /// - Resume TIMING is gated on the ACTUAL PiP state (`isInPiP`, tracked via the aux
         ///   `PIP_STATE_CHANGE` listener): a genuine PiP return is still `active` at
         ///   `willEnterForeground` (the system posts `didStopPictureInPicture` only after the
-        ///   return), so we SKIP resume and let AVKit's PiP restore run — no contention.
+        ///   return), so instead of resuming THERE (mid-restore contention) we DEFER — record the
+        ///   intent and resume from the aux listener when PiP flips `active → false` (restore done).
+        ///   This fixes「user paused IN the PiP window, returned to App, stayed frozen」: AVKit's PiP
+        ///   restore only re-parents the video, it does NOT un-pause a manually-paused stream, so the
+        ///   container owns that resume (`ForegroundResumeController.pipDidExit()`). fallback-pause
+        ///   (PiP never entered) still resumes immediately on `willEnterForeground`.
         /// - `willEnterForeground` (not `didBecomeActive`): it is PAIRED with `didEnterBackground`,
         ///   so it fires only on a real foreground; `didBecomeActive` also fires after a transient
         ///   interruption (Control Center / notification pull) that never backgrounded, which would
@@ -799,7 +804,14 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
 
             // Track ACTUAL OS-PiP state via an aux (non-primary) listener — coexists with the host's
             // primary listener; core holds it weakly so `pipStateListener` is retained by `self`.
-            pipStateListener.onActiveChange = { [weak self] active in self?.isInPiP = active }
+            // On PiP EXIT (`active == false`, restore done) also drive the resume state machine's
+            // deferred `pipDidExit()`: the「real PiP → user paused in PiP → returned to App」case
+            // records `resumeOnPiPExit` on `willEnterForeground` (PiP still active then) and resumes
+            // HERE, because AVKit's PiP restore does NOT un-pause a manually-paused stream.
+            pipStateListener.onActiveChange = { [weak self] active in
+                self?.isInPiP = active
+                if !active { self?.resumeController?.pipDidExit() }
+            }
             pipListenerToken = player.addEventListener(pipStateListener)
 
             bgObserver = NotificationCenter.default.addObserver(
@@ -960,19 +972,43 @@ func applyAutoAdvanceSwitch(_ nav: LBNavItem,
 ///   has no `.paused` case, `.idle` is a no-op), so a backgrounded live stays stale-`.playing` and
 ///   a `.paused` gate would never fire for live — the exact case the user reported.
 /// - `isInPiP`: is the app CURRENTLY in real OS PiP? Read FRESH on every foreground so a genuine
-///   PiP return (still `active` at `willEnterForeground`) is left to AVKit's PiP restore.
+///   PiP return can be DEFERRED to the moment PiP actually ends (see below).
 /// - `resume`: `player.play()` — an idempotent un-freeze that works for BOTH AVPlayer VOD and IVS
 ///   live. It MUST NOT be `performBackToLive()`, which is gated by `inReplayMode`
 ///   (`OperationPanelView.simulateBackToLiveTap`, `:229`) and is a no-op for a merely-paused (not
 ///   scrubbed) live.
 ///
-/// INVARIANTS (two guards): (1) never resume without a prior `appDidEnterBackground` (the `armed`
-/// latch starts false → an initial / spurious `willEnterForeground` does nothing); (2) never resume
-/// when actually in PiP. `appDidEnterBackground()` MUST be called BEFORE the container forwards
-/// `requestAutoPiP()`, so the latch captures the PRE-pause playing state.
+/// TWO BACKGROUND-PAUSE SOURCES, TWO RESUME TIMINGS:
+/// - (a) FALLBACK PAUSE (PiP impossible): `requestAutoPiP()` falls back to `activeEngine.pause()`.
+///   PiP never enters (`isInPiP == false` throughout) → resume IMMEDIATELY on `willEnterForeground`.
+/// - (b) REAL PiP + user pauses IN the PiP window: the video was playing in the PiP window; the user
+///   taps pause (AVKit / `MPRemoteCommandCenter` pauses the underlying player), then taps back to the
+///   App. At `willEnterForeground` the system has NOT yet posted `didStopPictureInPicture`, so
+///   `isInPiP` is STILL true. We MUST NOT `play()` here — AVKit's PiP restore is mid-flight and a
+///   direct `play()` would contend with it; worse, **AVKit's PiP restore only re-parents the video
+///   into the App, it does NOT un-pause a stream the user manually paused in the PiP window** — so if
+///   we skipped resume entirely (the earlier design) the frame stays frozen. Instead we RECORD the
+///   intent (`resumeOnPiPExit = true`) and let `pipDidExit()` — called when `PIP_STATE_CHANGE` flips
+///   `active → false` (restore done, PiP truly gone) — do the single `play()`.
+///
+/// This DELIBERATELY reverses the predecessor change's「genuine PiP return → never resume, leave it
+/// to AVKit」carve-out (`2026-07-14-ios-refui-player-foreground-resume`): AVKit does not un-pause, and
+/// the user reported they expect playback to continue on return. The gate stays「was playing BEFORE
+/// backgrounding」(`armed`), so a pre-background manual pause is still respected.
+///
+/// INVARIANTS (three guards): (1) never resume without a prior `appDidEnterBackground` (the `armed`
+/// latch starts false → an initial / spurious `willEnterForeground` does nothing); (2) a genuine PiP
+/// return does NOT resume IMMEDIATELY — it defers to `pipDidExit()`; (3) `resumeOnPiPExit` is set ONLY
+/// inside `appWillEnterForeground` (App is FOREGROUND), so a PiP closed while the App is still in the
+/// BACKGROUND (no `willEnterForeground` fired) leaves it false → `pipDidExit()` does NOT resume.
+/// `appDidEnterBackground()` MUST be called BEFORE the container forwards `requestAutoPiP()`, so the
+/// latch captures the PRE-pause playing state.
 final class ForegroundResumeController {
 
     private var armed = false
+    /// Deferred-resume intent for the「real PiP → user paused in PiP → returned to App」case: set true
+    /// in `appWillEnterForeground` when returning WHILE still in PiP; consumed once by `pipDidExit()`.
+    private var resumeOnPiPExit = false
     private let isPlaying: () -> Bool
     private let isInPiP: () -> Bool
     private let resume: () -> Void
@@ -991,12 +1027,37 @@ final class ForegroundResumeController {
         armed = isPlaying()
     }
 
-    /// Returning to foreground: resume ONLY if we were playing when backgrounded (latch) AND we are
-    /// not genuinely in PiP; then clear the latch (so a repeat foreground without a new background
-    /// does nothing, and each round trip re-arms independently).
+    /// Returning to foreground. Only acts when we were playing when backgrounded (`armed`):
+    /// - NOT in PiP (fallback-pause case) → resume IMMEDIATELY.
+    /// - Still in PiP (user paused in the PiP window, `didStopPictureInPicture` not yet posted) → do
+    ///   NOT resume now; record `resumeOnPiPExit` so `pipDidExit()` resumes once PiP truly ends (AVKit
+    ///   restore does not un-pause).
+    /// Always clears `armed` afterward (the intent, if any, has been transferred to `resumeOnPiPExit`),
+    /// so a repeat foreground without a new background does nothing and each round trip re-arms
+    /// independently. When `armed` is false (pre-background manual pause) neither resume nor the intent
+    /// latch fires — the user's pause is respected.
     func appWillEnterForeground() {
-        if armed && !isInPiP() { resume() }
+        if armed {
+            if isInPiP() {
+                resumeOnPiPExit = true
+            } else {
+                resume()
+            }
+        }
         armed = false
+    }
+
+    /// PiP truly ended (`PIP_STATE_CHANGE` `active → false`, forwarded by the container's aux listener).
+    /// Resume the ONE deferred `willEnterForeground`-in-PiP case, then clear the intent. Because
+    /// `resumeOnPiPExit` is set ONLY on a foreground return, a PiP dismissed while the App is still
+    /// backgrounded leaves it false → no resume (we never wake playback in the background). The
+    /// underlying `resume()` (`player.play()`) is idempotent, so「returned without pausing in PiP」is a
+    /// harmless no-op.
+    func pipDidExit() {
+        if resumeOnPiPExit {
+            resume()
+            resumeOnPiPExit = false
+        }
     }
 }
 
