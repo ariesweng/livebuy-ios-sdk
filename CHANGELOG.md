@@ -7,7 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet — next features accrue here toward the version after v4.0.0._
+_Nothing yet — next features accrue here toward the version after v4.1.0._
+
+---
+
+## [4.1.0] - 2026-07-17
+
+> minor release，無 breaking，源碼相容，兩端 lockstep（iOS `v4.1.0` / Android `4.1.0`）。鎖點
+> `35cd642e`（本版最後一個碰 `ios/Sources/` 的 commit）。自 v4.0.0 以來碰 `ios/Sources/` 共 **2 commit**
+> （`94d4d89a` environment 擴張 + `35cd642e` 預錄直播 live-edge 修復），**皆動到 `ios/Sources/LivebuySDK/`
+> （binary target）→ binary 已重 build，checksum 為新值**（≠v4.0.0；由 `release-ios.yml` 於 `v4.1.0` tag
+> 產生）。詳見 [`docs/release/v4.1.0-tag-runbook.md`](../docs/release/v4.1.0-tag-runbook.md) 與
+> [release notes](../docs/release-notes/v4.1.0.md)。
+
+### Changed
+
+- **`configure(environment:)` 現同時切換資料 API base URL（不再只切 `/stat`）** — `LBEnvironment.develop`
+  由原本「只把 `/stat` 指向 `https://develop.livebuy.tv/stat`」擴張為連同**資料 API base URL** 一起切到
+  `https://develop-admin.livebuy.tv/v1`；`.production`（或省略）維持 `https://api.livebuy.tv/v1`（**預設行為
+  不變**）。切換經單一 chokepoint `APIClient.baseURL` 生效，涵蓋所有 `/sdk/*` 請求（config / video / widget /
+  poll / comments / event upload / config refresh）。`/sdk/config` 本地快取 key 環境化（`.develop` 加
+  `_develop` 後綴），杜絕 prod / dev 同 `shopId` 快取互污；`.production` 快取 key 維持 `lb_sdk_config_{shopId}`
+  不變，既有正式用戶快取無縫升級。**只換 URL、不換憑證**（host 切 `.develop` 須自備 dev 憑證，SDK 不內建）；
+  HMAC 簽章機制不變（只簽 `apiKey` + `timestamp`）。移除未使用的 `localBaseURL` dead code。**無新增 / 改名
+  host-facing public 符號**（`LBEnvironment` case 未增未改，純既有參數行為擴張）。
+
+### Fixed
+
+- **預錄直播 live-edge 牆上時間錨點修復（一次修 3 個 bug，drop-in `LivebuyPlayer`）** — 預錄直播
+  （`liveStatus == 1`、走 IVS 引擎）先前缺牆上時間錨點、到處誤把整片長 `duration` 當 live edge，導致三個
+  症狀：(1) **App 退背景 / 真 PiP 後回前景，播放頭凍住、落後「現在」不追回 live**（唯一使用者可達路徑）；
+  (2) **`isBehindLiveEdge` 全程誤判成回放**（LIVE 徽章消失、聊天鎖為回放態）；(3) **back-to-live 誤跳到
+  片尾**（`performBackToLive` seek 到 `duration`）。本版建立牆上時間錨點模型：首次 begin-align 對齊時記錄
+  錨點 `(錨點牆上時間, 錨點位置 = begin)`，純函式 `預期 live 位置 = 錨點位置 + max(0, 現在 − 錨點牆上時間)`
+  （用牆上時間，背景 / 休眠仍前進）；回前景依錨點追回 live（落後 >5s 才 seek）、`isBehindLiveEdge` 改比對
+  預期 live 位置、back-to-live 改 seek 到預期 live 位置（clamp 到 `duration`）。錨點持續整個 session，
+  re-align **只在背景→前景觸發**（前景手動暫停不碰，避免與刻意 scrub-back 衝突）。此為既有模型缺陷修復
+  （病根早於 v4.0.0，非改名 regression），對齊 Android `548bde9d`（本版兩端同步）。
+
+### Notes
+
+- **未新增 / 移除 / 改名任何 host-facing public 符號**（兩筆變更皆以 core 內部邏輯完成）；無欄位型別變更、
+  無新增 bundled 資源。`.develop` 環境擴張、live-edge 修復皆 drop-in `LivebuyPlayer` 使用者自動生效。
+- **binary 重 build**：本版 core（`ios/Sources/LivebuySDK/`）被動到（environment `APIClient.baseURL` +
+  live-edge 錨點模型），XCFramework 已重 build、checksum 為新值（≠v4.0.0）——由 `release-ios.yml` 於
+  `v4.1.0` tag 自動產生並 patch dist `Package.swift` / podspec。`LivebuyReferenceUI`（source 出貨）本版
+  未動。
+- **environment smoke 已驗**：develop 端 `POST /sdk/config` 回 HTTP 200 / inner code 200、body 為合法
+  `SDKConfig`，坐實 base URL 正解 + 憑證有效 + 簽章正確。
 
 ---
 

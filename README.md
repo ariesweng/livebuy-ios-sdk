@@ -31,7 +31,7 @@ Embed live shopping experiences — live streams, replays, and shoppable VODs �
    https://github.com/ariesweng/livebuy-ios-sdk
    ```
 3. Dependency Rule:
-   - **Released versions** — **Up to Next Major Version** starting from `3.0.0`.
+   - **Released versions** — **Up to Next Major Version** starting from `4.0.0`.
    - **Pre-release testing (release candidates)** — choose **Exact Version** and enter the
      rc tag, e.g. `3.0.0-rc.1`. SPM does not auto-resolve pre-releases from a range, so an
      `exact` pin is required.
@@ -52,7 +52,7 @@ Embed live shopping experiences — live streams, replays, and shoppable VODs �
 
 ```swift
 dependencies: [
-    // Released:    .package(url: "https://github.com/ariesweng/livebuy-ios-sdk", from: "3.0.0")
+    // Released:    .package(url: "https://github.com/ariesweng/livebuy-ios-sdk", from: "4.0.0")
     // Pre-release: pin the exact rc tag
     .package(url: "https://github.com/ariesweng/livebuy-ios-sdk", exact: "3.0.0-rc.1")
 ],
