@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ProductSheetsModel — family-3 product sheet-stack observable snapshot bridge
 //
@@ -10,7 +10,7 @@ import LiveBuyUI
 //
 // This is the SKELETON for rb-ios-product-sheets. It bridges the headless template
 // view-models exposed by `DefaultPlayerTemplate` (obtained via
-// `LiveBuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
+// `LivebuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
 // four family-3 surface sub-views read. It is a read-only mirror — IDENTICAL
 // pattern to `PlayerShellModel` (family-1) / `FeedWinModel` (family-2):
 //
@@ -20,7 +20,7 @@ import LiveBuyUI
 //     `qtyStepper.state` / `miniCart.peek` / `cartCTA.state.count` +
 //     `needsVariantSelection` / `addToCartFailed`) each time the template fires its
 //     single coalesced `onChange` (D-1).
-//   - It does NOT add pixels and it does NOT add any accessor to `LiveBuyUI`
+//   - It does NOT add pixels and it does NOT add any accessor to `LivebuyUI`
 //     (that would be a template-layer concern, out of scope here).
 //   - It does NOT subscribe to each model's internal `onMutation` (that is a
 //     template-internal hook); it observes ONLY the template's single public
@@ -32,7 +32,7 @@ import LiveBuyUI
 //     core `addToCart` directly — `addToCart()` forwards to `template.addToCart()`,
 //     which assembles the route-B `LBCartRequest` internally.
 //   - PRODUCT-ROW TAP IS NOT A TEMPLATE FORWARDER. Opening a product detail is the
-//     CORE product-tap exit (`LiveBuyPlayerViewController.simulateProductTap`); the
+//     CORE product-tap exit (`LivebuyPlayerViewController.simulateProductTap`); the
 //     reference-ui list row only forwards the tap to a HOST-WIRED closure on the
 //     CONTAINER (`ProductSheetsOverlayView.onProductTap`). This model carries NO
 //     row-tap forwarder (mirrors family-2 `ChatFeedView`'s eventJoin host-wired
@@ -153,7 +153,7 @@ public final class ProductSheetsModel: ObservableObject {
     /// product snapshot / detail open / variant / qty / mini-cart / cart-CTA /
     /// goods-tracking change re-snapshots and republishes to the surface sub-views.
     ///
-    /// The host obtains the template via `LiveBuyUI.playerTemplate(for:)` and
+    /// The host obtains the template via `LivebuyUI.playerTemplate(for:)` and
     /// passes it here. Returns a model whose published values mirror the template
     /// (read-only). This registers an INDEPENDENT observer via `addObserver`; it
     /// does NOT chain or replace the template's legacy `onChange`.
@@ -272,7 +272,7 @@ public final class ProductSheetsModel: ObservableObject {
     //   • setQty / incQty / decQty → `DefaultPlayerTemplate.setQty/incQty/decQty`
     //   • addToCart → `DefaultPlayerTemplate.addToCart()` (template assembles the
     //     route-B `LBCartRequest` + delegates to the injected core requester — the
-    //     reference-ui layer NEVER calls `LiveBuy.addToCart` itself).
+    //     reference-ui layer NEVER calls `Livebuy.addToCart` itself).
     //   • dismissMiniCart / openMiniCartDetail → `DefaultMiniCart.dismissMiniCart()`
     //     / `DefaultMiniCart.openDetail()`.
     //   • openCart → `DefaultCartCTA.openCart()` (host passthrough; no checkout page).

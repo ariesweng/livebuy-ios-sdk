@@ -1,5 +1,5 @@
 import SwiftUI
-import LiveBuyUI
+import LivebuyUI
 
 // MARK: - NowIntroducingCarouselView — VOD now-introducing products carousel
 //

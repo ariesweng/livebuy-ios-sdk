@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - MomentsModel — family-4 player moment-state observable snapshot bridge
 //
@@ -10,7 +10,7 @@ import LiveBuyUI
 //
 // This is the SKELETON for rb-ios-moments. It bridges the headless template
 // view-models exposed by `DefaultPlayerTemplate` (obtained via
-// `LiveBuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
+// `LivebuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
 // three family-4 full-screen moment sub-views read. It is a read-only mirror —
 // IDENTICAL pattern to `PlayerShellModel` (family-1) / `FeedWinModel` (family-2) /
 // `ProductSheetsModel` (family-3):
@@ -22,7 +22,7 @@ import LiveBuyUI
 //     single coalesced `onChange` (design §"容器與 view-model 橋接"). The start
 //     lifecycle (`startScreen.phase`) is NO LONGER mirrored here — it is a
 //     player-shell concern (`PlayerShellModel.startPhase`).
-//   - It does NOT add pixels and it does NOT add any accessor to `LiveBuyUI`
+//   - It does NOT add pixels and it does NOT add any accessor to `LivebuyUI`
 //     (that would be a template-layer concern, out of scope here).
 //   - It does NOT subscribe to each moment model's internal `onMutation` (that is
 //     a template-internal hook); it observes ONLY the template's single public
@@ -119,7 +119,7 @@ public final class MomentsModel: ObservableObject {
     /// start-phase change / end-screen countdown advance / next / hot update /
     /// error record / clear re-snapshots and republishes to the moment sub-views.
     ///
-    /// The host obtains the template via `LiveBuyUI.playerTemplate(for:)` and
+    /// The host obtains the template via `LivebuyUI.playerTemplate(for:)` and
     /// passes it here. Returns a model whose published values mirror the template
     /// (read-only). This registers an INDEPENDENT observer via `addObserver`; it
     /// does NOT chain or replace the template's legacy `onChange`.

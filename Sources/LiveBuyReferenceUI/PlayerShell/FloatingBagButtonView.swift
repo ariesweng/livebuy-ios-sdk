@@ -1,5 +1,5 @@
 import SwiftUI
-import LiveBuyUI
+import LivebuyUI
 
 // MARK: - FloatingBagButtonView — family-1 floating shopping-bag affordance (LBPBagButton)
 //

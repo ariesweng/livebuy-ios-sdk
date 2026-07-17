@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - CarouselRowView — family-5 carousel sub-surface (LBPCarousel card strip)
 //

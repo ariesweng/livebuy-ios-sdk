@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - PlayerShellView — family-1 player-shell container (SKELETON)
 //

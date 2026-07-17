@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - VideoInfoPanelView — family-1 player-shell surface 3 (info / notice panel)
 //

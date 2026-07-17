@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ReferenceUITheme — reference-ui resolved palette + tokens
 //

@@ -1,13 +1,35 @@
 # Changelog
 
-All notable changes to the LiveBuy iOS SDK will be documented in this file.
+All notable changes to the Livebuy iOS SDK will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_Nothing yet — next features accrue here toward the version after v3.2.2._
+_Nothing yet — next features accrue here toward the version after v4.0.0._
+
+---
+
+## [4.0.0] - 2026-07-16
+
+> **⚠ MAJOR — BREAKING（品牌大小寫識別字改名）。** 全庫程式識別字由 `LiveBuy*` → `Livebuy*`
+> （`liveBuy*` → `livebuy*`），與品牌顯示形（`Livebuy`）一致。**乾淨改名、無 alias。**
+> **SwiftPM/CocoaPods 模組名硬 break（無消費端別名機制）**——`import LiveBuySDK` / `LiveBuyUI` /
+> `LiveBuyReferenceUI` 一律改成 `import LivebuySDK` / `LivebuyUI` / `LivebuyReferenceUI`。因核心模組
+> 更名，binary XCFramework **重 build、checksum 更新**（由 `release-ios.yml` 於 `v4.0.0` tag 產生）。
+> 詳見 [`docs/migration/brand-casing-livebuy-rename.md`](../docs/migration/brand-casing-livebuy-rename.md)。
+
+### Changed
+
+- **模組 / product / target 名**：`LiveBuySDK` → `LivebuySDK`、`LiveBuyUI` → `LivebuyUI`、
+  `LiveBuyReferenceUI` → `LivebuyReferenceUI`（consumer `import` 必改；無 SwiftPM 別名）。
+- **公開型別**：`LiveBuy` → `Livebuy`（class）、`LiveBuyEventListener` → `LivebuyEventListener`（protocol）、
+  drop-in `LiveBuyPlayer` / `LiveBuyWidget` / `LiveBuyLiveEntry` + 各 `*Config`、`LiveBuyPlayerViewController`、
+  `LiveBuyWidgetVisibility` 等一律 → `Livebuy*`。`@objc` 型別的 ObjC runtime 名同步改（無 `@objc(舊名)` 保留）。
+- **public modifier**：`View.liveBuyPlayer(video:)` → `View.livebuyPlayer(video:)`（drop-in collapsible player）。
+
+**不變**：`api.livebuy.tv` 網域、wire 行為、`LB*` model/event 型別（`LBError` / `LBProduct` / … 未改）。
 
 ---
 
@@ -15,20 +37,20 @@ _Nothing yet — next features accrue here toward the version after v3.2.2._
 
 > PATCH release，無 breaking，源碼相容。版號與 Android SDK `3.2.2` **收斂同號**（兩端一起切 3.2.2，
 > 延續 3.2.0 / 3.2.1 模式）——**同號、diff 各異**：兩端**共有** presenter 依相位驅動 widget-cover
-> （iOS `5fcbc391` / Android `87702dcf`，實作互為 parity）＋ `LiveBuyWidgetVisibility` KDoc 對齊
+> （iOS `5fcbc391` / Android `87702dcf`，實作互為 parity）＋ `LivebuyWidgetVisibility` KDoc 對齊
 > （`a992bcfa`，四端同步）；**iOS 額外**多一筆 PiP 內暫停回前景續播（`e06cb761`），對 Android 為
 > **N/A**（Android 無 PiP 暫停控制項 / 同 player 無縫延續，AVKit-restore 缺陷 iOS 特有）。同號 = 同
 > parity 水位（如 3.2.1），各自獨立走各自通道（iOS SPM dist / Android Maven）。內容鎖點 `a992bcfa`
 > （最後碰 `ios/Sources/` 的 commit）。自 v3.2.1（iOS 出貨鎖點內容 `8ebd9004`）以來碰 `ios/Sources/`
-> 共 **3 commit**（3 reference-ui fix）；**`ios/Sources/LiveBuySDK/`（binary target）零變更 → 不重
+> 共 **3 commit**（3 reference-ui fix）；**`ios/Sources/LivebuySDK/`（binary target）零變更 → 不重
 > build，checksum 沿用 v3.2.0/3.2.1 `a58952dd…`（同一顆 XCFramework 原封重傳）**。詳見
 > [`docs/release/v3.2.2-readiness.md`](../docs/release/v3.2.2-readiness.md)。
 
 ### Fixed
 
 - **首頁 widget 輪播預覽在被覆蓋 / 縮小後恢復（presenter 依相位驅動，drop-in collapsible player）** —
-  用收合播放器（`.liveBuyPlayer(video:)` presenter）時，影片開全螢幕覆蓋首頁 `LiveBuyWidget` 輪播、或
-  縮小成右下浮卡後，首頁輪播預覽先前會因硬體解碼器爭用卡住不播。本版讓 `LiveBuyPlayerPresenter` 成為
+  用收合播放器（`.livebuyPlayer(video:)` presenter）時，影片開全螢幕覆蓋首頁 `LivebuyWidget` 輪播、或
+  縮小成右下浮卡後，首頁輪播預覽先前會因硬體解碼器爭用卡住不播。本版讓 `LivebuyPlayerPresenter` 成為
   `setWidgetsCovered` 單一 owner（契約 `covered ⟺ 相位 .full`）：全螢幕 → 讓首頁預覽讓出解碼器；縮小 /
   關閉 / 移除 → 恢復。補齊 host-visibility-pause 的「host 從未呼叫」缺口。對齊 Android `87702dcf`。
   **host 不需改任何呼叫碼。**
@@ -37,7 +59,7 @@ _Nothing yet — next features accrue here toward the version after v3.2.2._
   串流）。本版把回前景續播**延後到 PiP 結束**（`ForegroundResumeController` 新增 `resumeOnPiPExit`
   意圖 latch，待 `PIP_STATE_CHANGE` active→false 由 aux listener 觸發一次 `play()`）；fallback pause
   情境維持立即續播；背景前已暫停 / 背景關 PiP 皆不誤 resume。此筆對 Android 為 N/A。
-- **`LiveBuyWidgetVisibility` KDoc 對齊 presenter-owned 兩路徑** — 文件更新為「主路徑＝presenter 依相位
+- **`LivebuyWidgetVisibility` KDoc 對齊 presenter-owned 兩路徑** — 文件更新為「主路徑＝presenter 依相位
   自動驅動（host 免呼叫）；手動路徑＝僅裸 / 自管 host，且自製 floating 勿用 `presentedVideo != null`」，
   移除過時範例與 accepted over-pause 框架，使文件與 presenter 分流一致（四端同步、doc-comment only、
   無行為變更）。
@@ -45,11 +67,11 @@ _Nothing yet — next features accrue here toward the version after v3.2.2._
 ### Notes
 
 - **未新增 / 移除 / 改名任何 host-facing public 符號**（修復以容器內部邏輯 / presenter wiring 完成）；
-  無欄位型別變更、無行為預設值翻轉、無新增 bundled 資源。三筆修復皆 drop-in `LiveBuyPlayer` /
+  無欄位型別變更、無行為預設值翻轉、無新增 bundled 資源。三筆修復皆 drop-in `LivebuyPlayer` /
   collapsible presenter 使用者自動生效。
 - **binary 沿用 v3.2.0/3.2.1**：本版無任何 core 變更，XCFramework 與 v3.2.0/3.2.1 逐 byte 相同——未重
-  build、checksum 維持 `a58952dd…`，同一顆 `LiveBuySDK.xcframework.zip` 原封重傳至 `v3.2.2` release。
-  `LiveBuyUI`（view-model）本版亦未動；三處變更都在 `LiveBuyReferenceUI`（source 出貨）。
+  build、checksum 維持 `a58952dd…`，同一顆 `LivebuySDK.xcframework.zip` 原封重傳至 `v3.2.2` release。
+  `LivebuyUI`（view-model）本版亦未動；三處變更都在 `LivebuyReferenceUI`（source 出貨）。
 
 ---
 
@@ -58,12 +80,12 @@ _Nothing yet — next features accrue here toward the version after v3.2.2._
 > PATCH release，無 breaking，源碼相容，**iOS-only**（Android 留 `3.2.0`；本版是 iOS 追平 Android 既有
 > lifecycle 行為，非兩端功能分歧）。鎖點 `8ebd9004`（本版唯一碰 `ios/Sources/` 的 commit）。自 v3.2.0
 > （iOS 出貨鎖點內容 `7600fcd5`）以來碰 `ios/Sources/` 僅 **1 commit**（1 reference-ui fix）；
-> **`ios/Sources/LiveBuySDK/`（binary target）零變更 → 不重 build，checksum 沿用 v3.2.0 `a58952dd…`
+> **`ios/Sources/LivebuySDK/`（binary target）零變更 → 不重 build，checksum 沿用 v3.2.0 `a58952dd…`
 > （同一顆 XCFramework 原封重傳）**。詳見 [`docs/release/v3.2.1-readiness.md`](../docs/release/v3.2.1-readiness.md)。
 
 ### Fixed
 
-- **直播背景回前景「定格幀」修復（drop-in `LiveBuyPlayer`）** — App 退背景後回前景時，直播（IVS 引擎）
+- **直播背景回前景「定格幀」修復（drop-in `LivebuyPlayer`）** — App 退背景後回前景時，直播（IVS 引擎）
   畫面先前會定格在暫停幀不續播：core 在系統 PiP 進不去時 fallback 暫停播放引擎，但 iOS 容器缺回前景
   續播的另一半。本版 reference-ui 容器補回與「進背景」成對的「回前景自動續播」，並在真正進入系統 PiP
   時交還 AVKit PiP restore（不雙重 resume）；回放 / VOD 情境同樣回前景可續播。對齊 Android
@@ -133,7 +155,7 @@ opt-in / 預設關）。ATT / GDPR 同意仍是 host 責任。
 - **EndScreen「換一批」誤開播放** — 直播結束畫面點「換一批」改在本地推薦視窗內輪播，不再意外
   開始播放某支影片。
 - **合流聊天歷史上限 50→500** — 跳頁重進同一場直播，歷史聊天訊息不因舊的偏低上限而提前消失。
-- **collapsible 播放器資源洩漏** — `LiveBuyPlayer` 新增 `dismantleUIViewController` 保證性釋放，
+- **collapsible 播放器資源洩漏** — `LivebuyPlayer` 新增 `dismantleUIViewController` 保證性釋放，
   修復縮小浮卡播放器關閉時未 `unload()` 的資源洩漏。
 - **Player `unload()` 冪等化（core）** — 多條關閉路徑不再疊加成重複結束事件。
 - **系統 PiP 直播鎖定拖動（core）** — 進行中直播的 PiP 視窗停用拖動進度／快轉／快退（對齊
@@ -174,15 +196,15 @@ opt-in / 預設關）。ATT / GDPR 同意仍是 host 責任。
   修復「跳頁後重進同一場直播看不到歷史留言」的破口。
 
 **Added（新公開符號，皆 additive、屬內部接線 seam、無 breaking）**
-- `LiveBuyPlayerViewController.onDidAutoAdvance: ((LBNavItem) -> Void)?` — core 於 VOD 自動接播
-  時 fire 的 instance seam（與 Android `LiveBuyPlayerView` 同名 parity），供 reference-ui 浮卡
+- `LivebuyPlayerViewController.onDidAutoAdvance: ((LBNavItem) -> Void)?` — core 於 VOD 自動接播
+  時 fire 的 instance seam（與 Android `LivebuyPlayerView` 同名 parity），供 reference-ui 浮卡
   同步縮圖；drop-in 容器自動接線，既有 host 呼叫碼零改動。
 - `DefaultPlayerTemplate` / `DefaultWidgetTemplate` 的 `addObserver(_:) -> LBTemplateObserverToken`
   / `removeObserver(_:)` 與 `LBTemplateObserverToken` — view-model 層多觀察者註冊地基，
   reference-ui 內部消費（治本 onChange 串鏈脆弱）。
 
 **功能亮點（純視覺，reference-ui 層）**
-- **浮卡縮圖同步 VOD 自動接播** — VOD 自動接播下一支後，縮小的 `CollapsibleLiveBuyPlayer`
+- **浮卡縮圖同步 VOD 自動接播** — VOD 自動接播下一支後，縮小的 `CollapsibleLivebuyPlayer`
   浮卡縮圖同步更新為新片、不再 stale（補上換片同步的第四條路徑）。
 - **變體 chips flex-wrap** — 商品 sheet 規格 chips 選項多/字長時自然換行、看得到全文
   （iOS 16+ 自刻 `ChipFlowLayout`；iOS 14/15 fallback 每行三個）。
@@ -211,7 +233,7 @@ opt-in / 預設關）。ATT / GDPR 同意仍是 host 責任。
 - **push id 去重** — 歷史訊息改依穩定 `id` 去重，避免 backlog 與 trickle 重疊重複顯示。
 - **跨實例快取還原** — 歷史訊息快取升級為跨實例存活，關閉播放器重進同一場直播立即還原。
 - **in-place 換片還原快取** — 切回已造訪影片時還原快取歷史，避免不必要重抓。
-- **`LiveBuyLiveEntry` 輪詢死鎖** — onAppear 掛在 EmptyView 分支導致輪詢無法啟動，已修復。
+- **`LivebuyLiveEntry` 輪詢死鎖** — onAppear 掛在 EmptyView 分支導致輪詢無法啟動，已修復。
 
 **功能亮點（純視覺，reference-ui 層）**
 - **跑馬燈標題** — 直播標題實作真正的捲動動畫（LBPMarqueeText parity），不擠壓主播名稱版面。
@@ -274,13 +296,13 @@ opt-in / 預設關）。ATT / GDPR 同意仍是 host 責任。
 **⚠ BREAKING — v2.0.0 累積（從未發正式版，併入 v3.0.0）**
 - **Headless 化（`decouple-ui-from-logic`）** — 移除 Player / Widget / 9 sub-component 的所有像素渲染；class 簽章保留故能編譯但 view tree 空，UI callback 不攔為 no-op。改用 reference-ui drop-in 或自組 UI（**必聽 `dismissRequest`**）。
 - **Token 模型（`session-token-migration`）** — per-video token 移除；`POST /sdk/video` 不回 token；改用 login session token。
-- **裸 widget / player 改名 → `…Core`（`rename-bare-widget-to-core`）** — 黃金名 `LiveBuyWidget` / `LiveBuyPlayer` 讓給 reference-ui drop-in 容器；**iOS 因 module 分割不留 alias**。
+- **裸 widget / player 改名 → `…Core`（`rename-bare-widget-to-core`）** — 黃金名 `LivebuyWidget` / `LivebuyPlayer` 讓給 reference-ui drop-in 容器；**iOS 因 module 分割不留 alias**。
 - **音訊預設有聲** — 主播放 + 開場 intro 預設不靜音。
 - （下方 widget-decode 區的 `LBVideoItem.goods?` / `LBWidgetResponse.widgetBgcolor?` BREAKING 一併入。）
 
 **Added**
-- **AWS IVS Player 直播低延遲引擎** — live `.m3u8` glass-to-glass ~15s → ~5s（iPhone 13 真機驗）；回放 `.m3u8` / intro MP4 / 非 `.m3u8` VOD 仍走 AVPlayer，引擎依 `selectPlaybackEngineKind(url, isLive)` 選。**散佈改變：SDK 含 binary（IVS XCFramework v1.52.0、checksum 鎖定）；改以三 product 出貨（binary `LiveBuySDK` + source `LiveBuyUI` / `LiveBuyReferenceUI`）。**
-- **reference-ui（新 product）** — drop-in 容器 `LiveBuyPlayer` / `LiveBuyWidget` + 可客製像素 source 層（對齊 `design/templates/minimal/*`）。
+- **AWS IVS Player 直播低延遲引擎** — live `.m3u8` glass-to-glass ~15s → ~5s（iPhone 13 真機驗）；回放 `.m3u8` / intro MP4 / 非 `.m3u8` VOD 仍走 AVPlayer，引擎依 `selectPlaybackEngineKind(url, isLive)` 選。**散佈改變：SDK 含 binary（IVS XCFramework v1.52.0、checksum 鎖定）；改以三 product 出貨（binary `LivebuySDK` + source `LivebuyUI` / `LivebuyReferenceUI`）。**
+- **reference-ui（新 product）** — drop-in 容器 `LivebuyPlayer` / `LivebuyWidget` + 可客製像素 source 層（對齊 `design/templates/minimal/*`）。
 - **api-version-resilience**（原 `[1.3.0]`，100% 向後相容）、**sdk-widget API 串接**、widget / channel / video 解碼韌性硬化。
 
 **Removed**
@@ -323,7 +345,7 @@ opt-in / 預設關）。ATT / GDPR 同意仍是 host 責任。
 
 ### Added — API version resilience (`api-version-resilience`)
 
-- **`LiveBuySDK.configure(apiVersion:)`** — optional `Int` parameter, default `1`. Drives the
+- **`LivebuySDK.configure(apiVersion:)`** — optional `Int` parameter, default `1`. Drives the
   `X-API-Version` request header and the internal mapper version dispatch. Invalid values
   (`0` / negative) fall back to `1` with a debug log.
 - **3 automatic request headers on every API call** (附加於既有 `Authorization` header 之外,**不**影響 HMAC 簽名計算):
@@ -371,13 +393,13 @@ Hotfix on top of `1.2.0-rc.1`.
 
 ### Fixed
 
-- **iOS Release build**: `LiveBuySDK.swiftinterface` verification failed under
+- **iOS Release build**: `LivebuySDK.swiftinterface` verification failed under
   `BUILD_LIBRARY_FOR_DISTRIBUTION=YES` because the public Swift interface
-  referenced `import LiveBuySDKObjC`, which is an internal SwiftPM target not
+  referenced `import LivebuySDKObjC`, which is an internal SwiftPM target not
   listed in the package's public product list. Downstream consumers (Swift
-  Package Index, XCFramework distribution) hit "no such module 'LiveBuySDKObjC'".
+  Package Index, XCFramework distribution) hit "no such module 'LivebuySDKObjC'".
   Switched the internal `EventDispatcher` import to
-  `@_implementationOnly import LiveBuySDKObjC` so the symbol no longer leaks
+  `@_implementationOnly import LivebuySDKObjC` so the symbol no longer leaks
   into the public swiftinterface. No public API surface change.
 
 ## [1.2.0-rc.1] - 2026-05-22
@@ -409,7 +431,7 @@ Subsequent rc.X tags will be cut for any partner-found regression.
 
 ### Added — Unified event interceptor (`add-generic-event-interceptor`)
 
-- `LiveBuyEventListener` protocol — single entry point for every SDK event. Install with `LiveBuy.setEventListener(_:)`.
+- `LivebuyEventListener` protocol — single entry point for every SDK event. Install with `Livebuy.setEventListener(_:)`.
 - `LBEvent` constants — 16 event names (`VIDEO_OPEN`, `CART_ADD_REQUEST`, `AUTH_REQUIRED`, `PRODUCT_CLICK`, etc.). See the [Events chapter](README.md#events).
 - Three dispatch semantics (notification / request-response / sync interceptor) with a 5-second hard timeout on `CART_ADD_REQUEST` and `try-catch` crash sandboxing around every listener invocation.
 - Offline event queue + exponential backoff retry (2 s → 5 min, ≤ 5 attempts) + dynamic `/sdk/log_config` heartbeat sampling.
@@ -419,34 +441,34 @@ Subsequent rc.X tags will be cut for any partner-found regression.
 
 ### Added — Reverse-notification APIs
 
-- `LiveBuy.setUser(_:)` / `LiveBuy.clearUser()` — host-app identity hand-over with 30-second auto-replay of actions blocked by `AUTH_REQUIRED`. Dispatches `AUTH_STATE_CHANGED`.
-- `LiveBuy.setLanguage(_:)` — mid-session language switch; overrides `configure(lang:)` and the API-returned lang. Dispatches `LANGUAGE_CHANGED`. **Visible Widget / Player UI text reloads immediately** (no view-reopen needed) via the `lbLocalizationChanged` notification path — see `fix-setlanguage-live-reload` in this release.
-- `LiveBuy.notifyCheckoutCompleted(orderId:sdkTrackCodes:items:)` — closes the SDK-assisted purchase funnel with `sdk_track_code` attribution. Dedupes same `orderId` within 24 h. Dispatches `CHECKOUT_COMPLETED`.
-- `LiveBuy.flushPendingEvents()` — async force-flush of the offline queue (5 s budget, returns `LBFlushResult`). Use before logout / app termination.
+- `Livebuy.setUser(_:)` / `Livebuy.clearUser()` — host-app identity hand-over with 30-second auto-replay of actions blocked by `AUTH_REQUIRED`. Dispatches `AUTH_STATE_CHANGED`.
+- `Livebuy.setLanguage(_:)` — mid-session language switch; overrides `configure(lang:)` and the API-returned lang. Dispatches `LANGUAGE_CHANGED`. **Visible Widget / Player UI text reloads immediately** (no view-reopen needed) via the `lbLocalizationChanged` notification path — see `fix-setlanguage-live-reload` in this release.
+- `Livebuy.notifyCheckoutCompleted(orderId:sdkTrackCodes:items:)` — closes the SDK-assisted purchase funnel with `sdk_track_code` attribution. Dedupes same `orderId` within 24 h. Dispatches `CHECKOUT_COMPLETED`.
+- `Livebuy.flushPendingEvents()` — async force-flush of the offline queue (5 s budget, returns `LBFlushResult`). Use before logout / app termination.
 - New models: `LBCheckoutItem`, `LBFlushResult`, `LBSDKError.notConfigured`.
 
 ### Changed
 
-- `LiveBuy.configure(...)` gains an `autoPipOnIntercept: Bool = true` parameter. Existing call sites continue to work.
+- `Livebuy.configure(...)` gains an `autoPipOnIntercept: Bool = true` parameter. Existing call sites continue to work.
 
 ### Deprecated
 
-- `LiveBuyPlayerDelegate.didTapProduct(_:)` and the other per-event callbacks on `LiveBuyPlayerDelegate` / `LiveBuyWidgetDelegate`. The old callbacks still fire alongside the new event flow; they will be removed in **v2.0**. See [Migration Guide](../docs/migration/v1-event-interceptor.md).
+- `LivebuyPlayerDelegate.didTapProduct(_:)` and the other per-event callbacks on `LivebuyPlayerDelegate` / `LivebuyWidgetDelegate`. The old callbacks still fire alongside the new event flow; they will be removed in **v2.0**. See [Migration Guide](../docs/migration/v1-event-interceptor.md).
 
 ### Migration
 
 Existing integrations using delegate callbacks continue to work without code changes. To migrate:
 
-1. Implement `LiveBuyEventListener` (one object — not per Widget).
-2. Call `LiveBuy.setEventListener(myListener)` after `configure(...)`.
+1. Implement `LivebuyEventListener` (one object — not per Widget).
+2. Call `Livebuy.setEventListener(myListener)` after `configure(...)`.
 3. Dispatch by `eventName` (see the [Event catalogue](README.md#event-catalogue)).
-4. Wire `LiveBuy.setUser(...)` into your login completion callback so SDK-blocked actions auto-replay.
+4. Wire `Livebuy.setUser(...)` into your login completion callback so SDK-blocked actions auto-replay.
 
 ## [1.0.0] - TBD
 
 ### Added
 - Initial public release
-- `LiveBuySDK.configure(apiKey:secret:lang:user:)` — SDK initialization
-- `LiveBuyPlayerViewController` — full-screen live / replay / VOD player with PiP and background audio
-- `LiveBuyWidget` — embeddable carousel, grid, and floating video list
+- `LivebuySDK.configure(apiKey:secret:lang:user:)` — SDK initialization
+- `LivebuyPlayerViewController` — full-screen live / replay / VOD player with PiP and background audio
+- `LivebuyWidget` — embeddable carousel, grid, and floating video list
 - Localization support: `zh-TW`, `zh-CN`, `en`, `ms-MY`, `id-ID`

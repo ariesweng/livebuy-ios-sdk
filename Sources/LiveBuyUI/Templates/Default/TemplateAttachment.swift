@@ -1,9 +1,9 @@
 import ObjectiveC.runtime
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - livebuy-ui-event-wiring-template — iOS attach wiring
 //
-// This file turns `LiveBuyUI.install()` into a live wiring: when the core
+// This file turns `LivebuyUI.install()` into a live wiring: when the core
 // fires its template-agnostic `onInstantiate` hook for a Player / Widget, we
 // instantiate the matching Default template handler and connect the SDK's
 // events to it via **two routes** (design D1):
@@ -34,13 +34,13 @@ import LiveBuySDK
 
 // MARK: - Aux listener adapter (路 B)
 
-/// Bridges the core's unified `LiveBuyEventListener` protocol to the Default
+/// Bridges the core's unified `LivebuyEventListener` protocol to the Default
 /// Player template's handlers for the unified-listener-only events
 /// (`DISMISS_REQUEST` / `WIN_RECEIVED` / `AWARD_CLAIM_RESULT` / `AUTH_REQUIRED` /
 /// `AUTH_STATE_CHANGED` / `AWAIT_GOODS_CHANGED` / `NOTICE_GOODS_CHANGED` /
 /// `VIDEO_LIKE`). Held strongly by `TemplateAttachment`;
 /// references the template weakly so it never extends the template's lifetime.
-final class TemplateAuxListener: NSObject, LiveBuyEventListener {
+final class TemplateAuxListener: NSObject, LivebuyEventListener {
 
     private weak var template: DefaultPlayerTemplate?
 
@@ -130,7 +130,7 @@ final class TemplateAuxListener: NSObject, LiveBuyEventListener {
             // template instance already visited this session, in which case its history
             // is restored from a bounded per-instance cache instead of being cleared
             // (chat-history-video-switch-cache-template). `from_video_id` / `to_video_id`
-            // are already provided by `LiveBuyPlayerViewController.load(videoId:)`'s
+            // are already provided by `LivebuyPlayerViewController.load(videoId:)`'s
             // dispatch — pass them through so the template can save/restore by videoId.
             // VIDEO_SWITCH is a NOTIFICATION event, so the dispatcher fires it to the
             // primary listener AND every aux listener — the reset/restore is guaranteed
@@ -189,12 +189,12 @@ final class TemplateAttachment {
     let widgetTemplate: DefaultWidgetTemplate?
     let auxListener: TemplateAuxListener?
     private let token: LBListenerToken?
-    private weak var dispatcherOwnerPlayer: LiveBuyPlayerViewController?
+    private weak var dispatcherOwnerPlayer: LivebuyPlayerViewController?
 
     init(playerTemplate: DefaultPlayerTemplate,
          auxListener: TemplateAuxListener,
          token: LBListenerToken,
-         player: LiveBuyPlayerViewController) {
+         player: LivebuyPlayerViewController) {
         self.playerTemplate = playerTemplate
         self.widgetTemplate = nil
         self.auxListener = auxListener
@@ -243,7 +243,7 @@ extension TemplateAttachment {
     }
 }
 
-// MARK: - Attach entry points (called from LiveBuyUI.install's hook)
+// MARK: - Attach entry points (called from LivebuyUI.install's hook)
 
 enum TemplateWiring {
 
@@ -251,18 +251,18 @@ enum TemplateWiring {
     /// Falls back to an all-nil `SDKConfig()` when the SDK is not yet configured
     /// (e.g. unit tests that create a bare instance) so attach never crashes.
     private static func effectiveSDKConfig() -> SDKConfig {
-        (try? LiveBuy.sdkConfig()) ?? SDKConfig()
+        (try? Livebuy.sdkConfig()) ?? SDKConfig()
     }
 
     /// Attach a Default Player template to `vc` and wire both routes.
-    static func attachPlayer(_ vc: LiveBuyPlayerViewController) {
+    static func attachPlayer(_ vc: LivebuyPlayerViewController) {
         // guestNameEditRequester forwards the template's `requestGuestNameEdit()`
         // to the core public `Player.requestGuestNameEdit()` exit (emit
         // `GUEST_NAME_EDIT_REQUEST`, passthrough / non-navigation / no auto-PiP).
         let template = DefaultPlayerTemplate(
             player: vc,
             sdkConfig: effectiveSDKConfig(),
-            hostOptions: LiveBuyUI.hostOptions,
+            hostOptions: LivebuyUI.hostOptions,
             // Forward to the core public guest-name-edit exit (weak-capture vc,
             // parity with onProductTap/onError below — no retain cycle).
             guestNameEditRequester: { [weak vc] in vc?.requestGuestNameEdit() },
@@ -275,13 +275,13 @@ enum TemplateWiring {
             // authoritative `AWAIT/NOTICE_GOODS_CHANGED` broadcasts correct the
             // optimistic flags via the aux listener above.
             setAwaitGoods: { gpn, enabled in
-                Task { try? await LiveBuy.setAwaitGoods(goodsGpn: gpn, enabled: enabled) }
+                Task { try? await Livebuy.setAwaitGoods(goodsGpn: gpn, enabled: enabled) }
             },
             setNoticeGoods: { gpn, enabled in
-                Task { try? await LiveBuy.setNoticeGoods(goodsGpn: gpn, enabled: enabled) }
+                Task { try? await Livebuy.setNoticeGoods(goodsGpn: gpn, enabled: enabled) }
             },
             // add-to-cart (product-sheet-stack-template, route-B) delegates to the
-            // core public async `LiveBuy.addToCart(...)` — the template never builds
+            // core public async `Livebuy.addToCart(...)` — the template never builds
             // an HTTP request itself (headless write contract, same pattern as the
             // goods-tracking toggles above). `shop_id` / `guest_id` / login token /
             // `lang` are injected by core; `source` is overridden server-side. The
@@ -290,7 +290,7 @@ enum TemplateWiring {
             // A) is excluded upstream — this requester is only invoked from the
             // not-intercepted `productTap` → detail-sheet path.
             addToCartRequester: { request in
-                try await LiveBuy.addToCart(
+                try await Livebuy.addToCart(
                     shopId: request.shopId,
                     goodsId: Int(request.goodsId),
                     num: request.num,
@@ -403,17 +403,17 @@ enum TemplateWiring {
     /// unified-listener-only events are out of scope for this pilot).
     ///
     /// widget-content-template: the template's `content` view-model MIRRORS core
-    /// `LiveBuyWidgetCore`'s existing public read-only state. core load completion has
+    /// `LivebuyWidgetCore`'s existing public read-only state. core load completion has
     /// no callback, but `onLoadMore` / `onError` fire after a fetch settles and
     /// `onClose` after a floating close, so each core callback re-reads core into
     /// the snapshot (`refreshContent`). The first `refresh` happens inside the
     /// template's init (seed). All closures weak-capture the template (no retain
     /// cycle, parity with `vcOnVideoTap`).
-    static func attachWidget(_ widget: LiveBuyWidgetCore) {
+    static func attachWidget(_ widget: LivebuyWidgetCore) {
         let template = DefaultWidgetTemplate(
             widget: widget,
             sdkConfig: effectiveSDKConfig(),
-            hostOptions: LiveBuyUI.hostOptions
+            hostOptions: LivebuyUI.hostOptions
         )
         vcOnVideoTap(widget, template)
         wireWidgetContentRefresh(widget, template)
@@ -421,7 +421,7 @@ enum TemplateWiring {
         TemplateAttachment.bind(attachment, to: widget)
     }
 
-    private static func vcOnVideoTap(_ widget: LiveBuyWidgetCore,
+    private static func vcOnVideoTap(_ widget: LivebuyWidgetCore,
                                      _ template: DefaultWidgetTemplate) {
         widget.onVideoTap = { [weak template] video in
             template?.handleVideoTap(video: video)
@@ -435,7 +435,7 @@ enum TemplateWiring {
     /// fires after a successful grid loadMore (page advance + videos appended);
     /// `onError` after a failed fetch (state may be unchanged → diff no-ops);
     /// `onClose` after a floating close (`isClosed == true` → `minimized`).
-    private static func wireWidgetContentRefresh(_ widget: LiveBuyWidgetCore,
+    private static func wireWidgetContentRefresh(_ widget: LivebuyWidgetCore,
                                                  _ template: DefaultWidgetTemplate) {
         let priorLoadMore = widget.onLoadMore
         widget.onLoadMore = { [weak template] page in

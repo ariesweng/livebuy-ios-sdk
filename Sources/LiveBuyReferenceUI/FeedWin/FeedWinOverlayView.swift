@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - FeedWinOverlayView — family-2 feed + win container (SKELETON)
 //

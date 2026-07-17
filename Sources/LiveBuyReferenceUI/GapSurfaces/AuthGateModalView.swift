@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - AuthGateModalView — family-6 gap-surfaces surface 1 (「請先登入」alert modal)
 //
@@ -73,7 +73,7 @@ public struct AuthGateModalView: View {
     public let triggerAction: LBAuthTriggerAction
 
     /// Host-wired「登入」CTA. Performing the login is the HOST's job (it wires its own
-    /// login flow + calls `LiveBuySDK.setUser`); reference-ui NEVER logs in itself.
+    /// login flow + calls `LivebuySDK.setUser`); reference-ui NEVER logs in itself.
     /// nil for demo / snapshot instances.
     private let onLogin: (() -> Void)?
     /// Host-wired「返回」/ dismiss → `model.dismissAuthGate()` (clears the template's

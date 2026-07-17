@@ -1,6 +1,6 @@
-import LiveBuySDK
+import LivebuySDK
 
-/// Three-layer config merge for the LiveBuyUI template system.
+/// Three-layer config merge for the LivebuyUI template system.
 ///
 /// Priority (low → high):
 ///   Layer 1: Template defaults  (written in template source)

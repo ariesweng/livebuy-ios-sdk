@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - PlayerShellModel — family-1 player-shell observable snapshot bridge
 //
@@ -10,13 +10,13 @@ import LiveBuyUI
 //
 // This is the SKELETON for rb-ios-player-shell. It bridges the headless template
 // view-models exposed by `DefaultPlayerTemplate` (obtained via
-// `LiveBuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
+// `LivebuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
 // four family-1 surface sub-views read. It is a read-only mirror:
 //
 //   - It does NOT own a second copy of authoritative state — it republishes
 //     SNAPSHOT VALUES taken from the template's own `private(set) public` reads
 //     each time the template fires its single coalesced `onChange` (D-1).
-//   - It does NOT add pixels and it does NOT add any accessor to `LiveBuyUI`
+//   - It does NOT add pixels and it does NOT add any accessor to `LivebuyUI`
 //     (that would be a template-layer concern, out of scope here — D-4).
 //   - Interactions stay in core's existing `simulate*` exits; this layer only
 //     reads. Optional action closures the surface sub-views accept are wired by
@@ -57,7 +57,7 @@ public final class PlayerShellModel: ObservableObject {
     /// memberwise construction byte-identical.
     @Published public private(set) var viewerCountVisible: Bool
     /// Host-config viewer-count visibility gate (rb-ios-hide-viewer-count-config). NOT a
-    /// template-derived value — a per-shell constant sourced from `LiveBuyPlayerConfig.show
+    /// template-derived value — a per-shell constant sourced from `LivebuyPlayerConfig.show
     /// ViewerCount` (default `true`), so it is a plain stored property (not `@Published`):
     /// it is set once at build time and never mutates at runtime. `PlayerShellView` feeds it
     /// to `PlayerHeaderBarView`; `false` hides the viewer count even while live / replay.
@@ -213,7 +213,7 @@ public final class PlayerShellModel: ObservableObject {
     /// Whether the user currently has a set identity / display name
     /// (`template.identityLabel.current?.isLoggedIn`). A guest who has NOT set a
     /// 留言暱稱 reads `false`; a guest who sets one via the nickname modal (→
-    /// `LiveBuy.setUser`) and a genuinely logged-in user both read `true`. The
+    /// `Livebuy.setUser`) and a genuinely logged-in user both read `true`. The
     /// drop-in container uses this to gate the 留言 pill (未設定 → 先引導設定暱稱).
     @Published public private(set) var isLoggedIn: Bool
     /// Current resolved display name (`template.identityLabel.current?.displayName`)
@@ -249,7 +249,7 @@ public final class PlayerShellModel: ObservableObject {
     /// register an observer on its single coalesced change notification so every
     /// state change re-snapshots and republishes to the surface sub-views.
     ///
-    /// The host obtains the template via `LiveBuyUI.playerTemplate(for:)` and
+    /// The host obtains the template via `LivebuyUI.playerTemplate(for:)` and
     /// passes it here. Returns a model whose published values mirror the template
     /// (read-only). This registers an INDEPENDENT observer via `addObserver`; it
     /// does NOT chain or replace the template's legacy `onChange`.
@@ -528,7 +528,7 @@ public final class PlayerShellModel: ObservableObject {
 
     /// Fired AFTER a vertical-swipe in-place switch resolves a NON-nil adjacent target id and
     /// forwards the core `load` to the template, carrying that new video id. The reference-ui
-    /// container (`LiveBuyPlayer`) wires this to keep its cover/current identity in sync and
+    /// container (`LivebuyPlayer`) wires this to keep its cover/current identity in sync and
     /// report `config.onVideoSwitched?(id)` — parity with the watch-next / hot-pick switch
     /// paths — so a host-bound video mirror (e.g. the minimized floating preview card's
     /// `video`) tracks the shown video after a swipe (swipe-video-switched-notify). The
@@ -543,7 +543,7 @@ public final class PlayerShellModel: ObservableObject {
     /// This is the single, ALWAYS-CURRENT live-status signal for "is the video currently shown
     /// by this model live" — unlike a switch-time `LBVideoItem.liveStatus` GUESS baked in
     /// synchronously at switch-initiation from PRE-switch adjacency data (see
-    /// `LiveBuyPlayer.switchedVideoItem`), this closure re-fires with the CORRECTED value once
+    /// `LivebuyPlayer.switchedVideoItem`), this closure re-fires with the CORRECTED value once
     /// the real post-switch channel data loads. A host-bound mirror of "is the currently shown
     /// video live" (e.g. the collapsible presenter's floating preview card) SHOULD consume this
     /// instead of a one-shot switch-time guess, so it never drifts permanently stale — fixing
@@ -606,7 +606,7 @@ public final class PlayerShellModel: ObservableObject {
 // MARK: - GAP NOTES (reachability of family-1 surfaces from the public template)
 //
 // Per design D-4, this layer ONLY reads what `DefaultPlayerTemplate` already
-// exposes publicly. It MUST NOT add pixels or add accessors to `LiveBuyUI`.
+// exposes publicly. It MUST NOT add pixels or add accessors to `LivebuyUI`.
 // The following family-1 surface inputs are NOT directly reachable from the
 // template's public read surface today; the surface agents must treat them as
 // host-supplied (or omit them until a future template change exposes them):

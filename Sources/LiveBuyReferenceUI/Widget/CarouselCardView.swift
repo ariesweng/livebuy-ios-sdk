@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 import AVFoundation
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - CarouselCardView — family-5 shared 9:16 widget card primitive (LBPCarouselCard)
 //
@@ -456,7 +456,7 @@ public struct CarouselCardView: View {
 // Shared deterministic `LBVideoItem` fixtures so the family-5 surfaces' previews
 // and snapshot tests render identical, stable cards without a live widget. All use
 // the VERIFIED public `LBVideoItem` (18 params) + `LBFeaturedGood` (7 params) inits
-// reachable from `LiveBuyReferenceUI`. The surface agents (carousel / grid /
+// reachable from `LivebuyReferenceUI`. The surface agents (carousel / grid /
 // floating / minimized) MUST reuse these so fixtures stay consistent.
 
 public extension LBVideoItem {
@@ -542,8 +542,8 @@ public extension LBFeaturedGood {
 //   (A) app background — a `UIApplication.didEnterBackgroundNotification` /
 //       `willEnterForegroundNotification` observer (imperative, UIKit-level — NOT SwiftUI-rebuild
 //       driven) sets the gate's `foreground` flag. `didEnterBackground` fires only on a REAL
-//       background (not transient inactive), matching the existing codebase convention (LiveBuyPlayer
-//       auto-PiP, `LiveBuyPlayer.swift`) and Android `ON_STOP`. iOS also tends to suspend
+//       background (not transient inactive), matching the existing codebase convention (LivebuyPlayer
+//       auto-PiP, `LivebuyPlayer.swift`) and Android `ON_STOP`. iOS also tends to suspend
 //       `AVPlayerLayer` render in the background on its own, so this axis is defensive parity.
 //   (B) off-screen — a SwiftUI `GeometryReader` + `PreferenceKey` visibility probe (parity with
 //       Android `onGloballyPositioned` / `boundsInWindow` and Flutter `VisibilityDetector`): a card
@@ -562,7 +562,7 @@ public extension LBFeaturedGood {
 // stays laid-out, its global frame still overlaps the screen, the app stays active) is NOT detectable
 // from the widget layer alone (z-order coverage is invisible to `GeometryReader`, and coverage does not
 // background the app) — the same platform limit Android / Flutter recorded. It is closed by a THIRD gate
-// axis `notCovered`, fed by the opt-in host bridge `LiveBuyWidgetVisibility.setWidgetsCovered(_:)`
+// axis `notCovered`, fed by the opt-in host bridge `LivebuyWidgetVisibility.setWidgetsCovered(_:)`
 // (ios-refui-widget-host-visibility-pause, iOS parity of Android `android-refui-widget-host-visibility-pause`):
 // the host declares when the widget-hosting screen is covered, and each mounted preview pauses. A host
 // that does NOT opt in leaves `notCovered == true`, so the gate degrades to `foreground && onScreen`
@@ -657,7 +657,7 @@ final class LoopingPlayerUIView: UIView {
     /// `teardown` (dismantle) and `deinit`.
     private var lifecycleObservers: [NSObjectProtocol] = []
 
-    /// The `LiveBuyWidgetVisibility` subscription token (covered axis, ios-refui-widget-host-visibility-pause).
+    /// The `LivebuyWidgetVisibility` subscription token (covered axis, ios-refui-widget-host-visibility-pause).
     /// Registered once in `init` (register replays the current covered level → seeds `notCovered` before
     /// the first `configure` reapply), unregistered on `teardown` (dismantle) and `deinit` alongside the
     /// lifecycle observers.
@@ -676,7 +676,7 @@ final class LoopingPlayerUIView: UIView {
         // covered level, so a card mounting DURING a covered period seeds `notCovered = false` (pauses)
         // before `configure`'s `reapply()`. Host that never opts in → covered stays false → notCovered
         // stays true → byte-identical prior behaviour.
-        visibilityToken = LiveBuyWidgetVisibility.shared.register { [weak self] covered in
+        visibilityToken = LivebuyWidgetVisibility.shared.register { [weak self] covered in
             self?.gate.setNotCovered(!covered)
         }
         configure(url: url)
@@ -739,10 +739,10 @@ final class LoopingPlayerUIView: UIView {
     }
 
     private func removeLifecycleObservers() {
-        // Covered axis: drop the `LiveBuyWidgetVisibility` subscription (independent of the lifecycle
+        // Covered axis: drop the `LivebuyWidgetVisibility` subscription (independent of the lifecycle
         // observers below, and idempotent — a nil token is a no-op).
         if let token = visibilityToken {
-            LiveBuyWidgetVisibility.shared.unregister(token)
+            LivebuyWidgetVisibility.shared.unregister(token)
             visibilityToken = nil
         }
         guard !lifecycleObservers.isEmpty else { return }
@@ -764,7 +764,7 @@ final class LoopingPlayerUIView: UIView {
 // The three axes fold into one `foreground && onScreen && notCovered` gate, applied edge-triggered so
 // play / pause are not churned. Keeping ONE gate (rather than independent observers) means returning to
 // the foreground / scrolling back never wakes a card that is still off-screen OR still covered
-// (ios-refui-widget-host-visibility-pause: the `notCovered` axis is fed by the `LiveBuyWidgetVisibility`
+// (ios-refui-widget-host-visibility-pause: the `notCovered` axis is fed by the `LivebuyWidgetVisibility`
 // opt-in host bridge and defaults to `true` = the prior two-axis behaviour). `reapply()` force-applies
 // the current desired state once the underlying player is (re)configured (its earlier `onPlay` /
 // `onPause` calls were meaningful only against a live player).
@@ -779,8 +779,8 @@ final class PreviewPlaybackController {
     private var onScreen: Bool = true
     /// Third axis (ios-refui-widget-host-visibility-pause): whether the widget-hosting screen is NOT
     /// covered by another destination. `true` (the default) = not covered = the prior behaviour, so a
-    /// host that never opts into `LiveBuyWidgetVisibility` keeps a byte-identical `foreground && onScreen`
-    /// gate. Fed by `LiveBuyWidgetVisibility` (the host declares coverage the SDK cannot detect from the
+    /// host that never opts into `LivebuyWidgetVisibility` keeps a byte-identical `foreground && onScreen`
+    /// gate. Fed by `LivebuyWidgetVisibility` (the host declares coverage the SDK cannot detect from the
     /// widget layer — z-order coverage is invisible to `GeometryReader`, and coverage does not background
     /// the app). Kept in the SAME single controller (not a separate observer) so returning to foreground /
     /// scrolling back never wakes a card that is still covered.
@@ -809,7 +809,7 @@ final class PreviewPlaybackController {
         apply()
     }
 
-    /// Covered axis: forwarded from the `LiveBuyWidgetVisibility` opt-in host bridge (a listener passes
+    /// Covered axis: forwarded from the `LivebuyWidgetVisibility` opt-in host bridge (a listener passes
     /// `!covered` here). Edge-triggered inside the gate (redundant same-value sets are no-ops).
     func setNotCovered(_ value: Bool) {
         guard notCovered != value else { return }
@@ -898,7 +898,7 @@ struct RemoteStillImageView: UIViewRepresentable {
         func load(url rawURL: URL, into imageView: UIImageView) {
             // Single http→https upgrade point for ALL remote images (every call site routes
             // through RemoteStillImageView). A cleartext `http` pic would be blocked by iOS
-            // ATS and never load → placeholder; the LiveBuy host serves the same path over
+            // ATS and never load → placeholder; the Livebuy host serves the same path over
             // TLS. https / non-http schemes pass through unchanged (ReferenceUIImageURL).
             let url = rawURL.lbHTTPSUpgraded
             guard url != loadedURL else { return }

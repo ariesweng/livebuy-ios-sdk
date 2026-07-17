@@ -1,5 +1,5 @@
 import Foundation
-import LiveBuySDK
+import LivebuySDK
 
 /// 商品狀態標籤的**單一優先序**解析（rb-ios-goods-label-unified ③）。
 ///

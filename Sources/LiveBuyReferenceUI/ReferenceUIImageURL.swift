@@ -6,7 +6,7 @@ import Foundation
 /// Why: some backend product `pic` URLs are cleartext `http://` (e.g. shop `P1MUv99J`'s
 /// 測試零食). iOS App Transport Security blocks cleartext loads BEFORE the request is even
 /// sent, so `URLSession` (via `RemoteStillImageView`) returns no data → the real product
-/// image never appears and the placeholder (gradient / monogram chip) stays. The LiveBuy
+/// image never appears and the placeholder (gradient / monogram chip) stays. The Livebuy
 /// image host serves the very same path over TLS — it even 301-redirects `http`→`https` —
 /// so upgrading the scheme client-side makes the image load. Loading product imagery over
 /// cleartext is never desirable anyway.

@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultMomentStates — five player "moment" host-bindable view-models
 //

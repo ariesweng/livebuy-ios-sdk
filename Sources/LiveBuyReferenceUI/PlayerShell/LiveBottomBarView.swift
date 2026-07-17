@@ -1,11 +1,11 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - LiveBottomBarView — family-1 player-shell LIVE bottom bar
 //
 // Spec: `reference-ui-rendering/spec.md`
-//   § "LiveBuyReferenceUI 渲染 LIVE 底部 bar（LiveBottomBarView），綁 bagCount / shareUrl / isReplay"
+//   § "LivebuyReferenceUI 渲染 LIVE 底部 bar（LiveBottomBarView），綁 bagCount / shareUrl / isReplay"
 // Change: rb-align-ios-live-bottom-bar (D-1 + D-3).
 //   Design source: `design/templates/minimal/live-chrome.jsx` → `LBLiveBottomBar` (lines 161-237).
 //

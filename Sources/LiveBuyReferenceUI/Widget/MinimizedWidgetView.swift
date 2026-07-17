@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - MinimizedWidgetView — family-5 widget surface 4 (LBPMinimizedWidget)
 //

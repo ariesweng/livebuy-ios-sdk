@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultGoodsTracking — per-product await + notice dual-switch state
 //
@@ -40,7 +40,7 @@ public final class DefaultGoodsTracking {
     var onMutation: (() -> Void)?
 
     /// Injected core delegates (default no-op for headless unit tests). The wiring
-    /// fills them with `Task { try? await LiveBuy.setAwaitGoods/… }` so the
+    /// fills them with `Task { try? await Livebuy.setAwaitGoods/… }` so the
     /// model never builds an HTTP request itself (headless: writes go via core).
     private let setAwait: (String, Bool) -> Void
     private let setNotice: (String, Bool) -> Void

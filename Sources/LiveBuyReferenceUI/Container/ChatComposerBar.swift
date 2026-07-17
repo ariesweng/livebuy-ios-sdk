@@ -22,7 +22,7 @@ import SwiftUI
 /// Presentation + focus state for the on-demand chat composer. `open()` shows the bar
 /// and bumps `focusToken` (→ the field becomes first responder); `close()` hides it.
 ///
-/// Public because it is the parameter type of the public `LiveBuyPlayerConfig.onComment`
+/// Public because it is the parameter type of the public `LivebuyPlayerConfig.onComment`
 /// override: a host that customizes「留言...」still receives this controller so it can
 /// drive (or defer to) the same composer presentation.
 public final class ChatComposerController: ObservableObject {

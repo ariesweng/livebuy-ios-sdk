@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - StartScreenView — family-1 player-shell START-LIFECYCLE surface
 //
@@ -41,7 +41,7 @@ import LiveBuyUI
 // `LBPLoadingOverlay` / `LBPBufferingSpinner` / `LBPSkipIntroButton`):
 //   • `.loading`   → full-bleed brand background + centered brand PNG-sequence
 //                    animation ONLY. Design re-sync `c3c98733` REMOVED the wordmark
-//                    (accent dot + "LiveBuy") and the「載入中…」caption that used to
+//                    (accent dot + "Livebuy") and the「載入中…」caption that used to
 //                    sit below the spinner — `LBPLoadingOverlay` now renders just the
 //                    mark (`rb-ios-loading-announce-restyle`).
 //   • `.buffering` → renders NOTHING (`EmptyView`). The former central over-content
@@ -260,7 +260,7 @@ private extension StartScreenView {
     // `.loading` cover backdrop dark mask (rgba(0,0,0,0.35)) — design provenance
     // `UpcomingCountdownView` cover+mask. Only drawn on the `live == true` cover path.
     static let loadingCoverMaskOpacity: Double = 0.35
-    // The wordmark (accent dot + "LiveBuy") + 「載入中…」caption tokens that used to
+    // The wordmark (accent dot + "Livebuy") + 「載入中…」caption tokens that used to
     // live here were REMOVED (design re-sync `c3c98733`, `rb-ios-loading-announce-
     // restyle`) — `.loading` now renders only `LoadingMarkAnimationView()`.
 

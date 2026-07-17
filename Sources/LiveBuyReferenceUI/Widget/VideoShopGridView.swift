@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - VideoShopGridView — family-5 widget surface 2 (影音商城 / LBPVideoShop)
 //

@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - FeedWinModel — family-2 feed + win observable snapshot bridge
 //
@@ -10,7 +10,7 @@ import LiveBuyUI
 //
 // This is the SKELETON for rb-ios-feed-win. It bridges the headless template
 // view-models exposed by `DefaultPlayerTemplate` (obtained via
-// `LiveBuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
+// `LivebuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
 // three family-2 surface sub-views read. It is a read-only mirror — IDENTICAL
 // pattern to `PlayerShellModel` (family-1):
 //
@@ -19,7 +19,7 @@ import LiveBuyUI
 //     (`activityFeed.items` / `winClaim.unclaimedCount` /
 //     `winClaim.unclaimedWinners` / `winClaim.resultState`) each time the
 //     template fires its single coalesced `onChange` (D-1).
-//   - It does NOT add pixels and it does NOT add any accessor to `LiveBuyUI`
+//   - It does NOT add pixels and it does NOT add any accessor to `LivebuyUI`
 //     (that would be a template-layer concern, out of scope here).
 //   - It does NOT subscribe to the feed / winClaim internal `onMutation`
 //     (that is a template-internal hook); it observes ONLY the template's single
@@ -108,7 +108,7 @@ public final class FeedWinModel: ObservableObject {
     /// feed append / win record / claim result re-snapshots and republishes to the
     /// surface sub-views.
     ///
-    /// The host obtains the template via `LiveBuyUI.playerTemplate(for:)` and
+    /// The host obtains the template via `LivebuyUI.playerTemplate(for:)` and
     /// passes it here. Returns a model whose published values mirror the template
     /// (read-only). This registers an INDEPENDENT observer via `addObserver`; it
     /// does NOT chain or replace the template's legacy `onChange`.

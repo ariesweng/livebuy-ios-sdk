@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ProductSheetsOverlayView — family-3 product sheet-stack container (SKELETON)
 //
@@ -121,7 +121,7 @@ import LiveBuyUI
 //     `TopRoundedRectangle` (it already lives in `VideoInfoPanelView.swift`).
 //   • `ProductListView` row tap funnels to `onOpenProduct(product)` — NOT to a
 //     model intent. The container forwards it to the host-wired `onProductTap`,
-//     which the host wires to core `LiveBuyPlayerViewController.simulateProductTap`
+//     which the host wires to core `LivebuyPlayerViewController.simulateProductTap`
 //     (reference-ui 永不自行開明細, D-2 — mirrors family-2 ChatFeedView's eventJoin).
 //   • `ProductDetailSheetView` add-to-cart funnels to `onAddToCart` →
 //     `model.addToCart()` → `template.addToCart()`. reference-ui NEVER calls core
@@ -165,7 +165,7 @@ public struct ProductSheetsOverlayView: View {
     public let live: Bool
 
     /// Host-wired product-row tap → core product-tap exit. The host wires this to
-    /// `LiveBuyPlayerViewController.simulateProductTap(product)`; the container
+    /// `LivebuyPlayerViewController.simulateProductTap(product)`; the container
     /// NEVER opens a detail itself (D-2). nil for demo / snapshot instances.
     private let onProductTap: ((LBProduct) -> Void)?
 
@@ -749,7 +749,7 @@ extension LBProductDetailState: Identifiable {
 // `LBSpecOption` is `public struct LBSpecOption: Decodable { public let name; public
 // let child }` with NO explicitly-declared `public init`. Its memberwise init is
 // SYNTHESIZED as `internal`, so `LBSpecOption(name:child:)` is NOT callable from
-// `LiveBuyReferenceUI` (it lives in `LiveBuySDK`). DO NOT try to construct an
+// `LivebuyReferenceUI` (it lives in `LivebuySDK`). DO NOT try to construct an
 // `LBSpecOption` here — it will fail to compile.
 //
 // CONSEQUENCE: to get variant chip GROUPS into a snapshot you CANNOT build an

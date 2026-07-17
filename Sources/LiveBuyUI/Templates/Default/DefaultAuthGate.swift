@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultAuthGate / DefaultIdentityLabel — auth host-bindable exposure
 //

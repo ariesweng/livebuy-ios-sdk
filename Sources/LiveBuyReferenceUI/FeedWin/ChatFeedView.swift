@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ChatFeedView — family-2 surface 1 (merged chat-feed stream)
 //
@@ -397,14 +397,14 @@ public struct ChatFeedView: View {
             // `.activity` items out of the rendered rows before reaching this dispatcher
             // (`visibleItems`), so this branch is UNREACHABLE by construction; it exists only
             // to satisfy Swift's exhaustive switch over `LBFeedItem.Kind` (defined in
-            // `LiveBuyUI`, not modifiable here). `EmptyView()` keeps a misuse silent rather
+            // `LivebuyUI`, not modifiable here). `EmptyView()` keeps a misuse silent rather
             // than crashing.
             EmptyView()
         case .productSale:
             // onsale 商品開賣推播已改走 host 主播聊天氣泡（template `DefaultPlayerTemplate` 對
             // `.onsale` 走 `appendChat(...isHost:true)`），已無 production 路徑產生 `.productSale`
             // feed item — 原「商品開賣卡」渲染（`LBProductSaleCardRow`）為死碼、已移除。保留此 no-op
-            // case 以維持 Swift 對 `LBFeedItem.Kind`（定義於 `LiveBuyUI`，此處不可改）的窮盡 switch；
+            // case 以維持 Swift 對 `LBFeedItem.Kind`（定義於 `LivebuyUI`，此處不可改）的窮盡 switch；
             // 型別完整移除需跨層 change。比照上方 `.activity` 的 `EmptyView()` no-op。
             EmptyView()
         }

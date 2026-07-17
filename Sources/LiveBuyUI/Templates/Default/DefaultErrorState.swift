@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultErrorState — Player error-state host-bindable exposure
 //

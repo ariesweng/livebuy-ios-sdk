@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - WinClaimModalView — family-2 feed-win surface 3 (EMAIL-LESS claim sheet)
 //

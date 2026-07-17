@@ -1,23 +1,23 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
-// MARK: - LiveBuyPlayerPresenter — collapsible player presentation convenience
+// MARK: - LivebuyPlayerPresenter — collapsible player presentation convenience
 //
 // Spec: `reference-ui-rendering/spec.md`
-//   § "LiveBuyReferenceUI 提供 collapsible 播放器 presenter（一行 sheet + minimize→懸浮預覽）".
+//   § "LivebuyReferenceUI 提供 collapsible 播放器 presenter（一行 sheet + minimize→懸浮預覽）".
 //
-// `LiveBuyPlayer` is a `UIViewControllerRepresentable` — the host decides HOW it is
+// `LivebuyPlayer` is a `UIViewControllerRepresentable` — the host decides HOW it is
 // presented, so the container cannot own the minimize→floating-preview collapse (it can
 // neither dismiss its presenter nor raise a sibling overlay in the host's tree). That is
-// why `LiveBuyPlayer.onMinimize` defaults to the core `player.minimize()` seam and each
+// why `LivebuyPlayer.onMinimize` defaults to the core `player.minimize()` seam and each
 // host re-implements the in-app floating preview itself.
 //
-// This modifier PROMOTES that wiring into the package: `someHostView.liveBuyPlayer(video:
+// This modifier PROMOTES that wiring into the package: `someHostView.livebuyPlayer(video:
 // $presented)` gives a host a full-screen turnkey player that collapses to a bottom-right
 // `FloatingWidgetView` on minimize — in ONE line. It composes ONLY existing pieces
-// (`LiveBuyPlayer` + the family-5 `FloatingWidgetView`); it adds NO view-model, NO pixels,
-// and does NOT change `LiveBuyPlayer`. Dependency direction stays one-way
+// (`LivebuyPlayer` + the family-5 `FloatingWidgetView`); it adds NO view-model, NO pixels,
+// and does NOT change `LivebuyPlayer`. Dependency direction stays one-way
 // `reference-ui → template → core`.
 
 /// The presentation phase of a collapsible player, derived purely from the host binding +
@@ -38,8 +38,8 @@ public func collapsiblePhase(hasVideo: Bool, isMinimized: Bool) -> CollapsiblePl
     return isMinimized ? .floating : .full
 }
 
-/// Whether the presenter, at the given phase, SHALL declare the home `LiveBuyWidget` previews
-/// COVERED via the opt-in `LiveBuyWidgetVisibility.setWidgetsCovered` bridge — driving the
+/// Whether the presenter, at the given phase, SHALL declare the home `LivebuyWidget` previews
+/// COVERED via the opt-in `LivebuyWidgetVisibility.setWidgetsCovered` bridge — driving the
 /// preview play-gate's third axis (`ios-refui-presenter-widget-cover-by-phase`).
 ///
 /// `covered ⟺ phase == .full` (i.e. `hasVideo && !isMinimized`). The full-screen player is a
@@ -123,11 +123,11 @@ public func clampFloatingOffset(
 }
 
 /// Rebuilds a DISPLAY-ONLY copy of `video` with `liveStatus` (and the paired `type`, using the
-/// SAME `type: isLive ? 2 : 1` convention `LiveBuyPlayer.switchedVideoItem` already establishes)
+/// SAME `type: isLive ? 2 : 1` convention `LivebuyPlayer.switchedVideoItem` already establishes)
 /// overridden to match `isLive` — the CURRENT authoritative live-status signal
 /// (`PlayerShellModel.onLiveStatusChange`, channel-load-driven) — instead of `video.liveStatus`'s
 /// switch-time GUESS (baked in synchronously at switch-initiation from PRE-switch adjacency
-/// data; see `LiveBuyPlayer.switchedVideoItem`). Every OTHER field (`cover` / `title` / `preview`
+/// data; see `LivebuyPlayer.switchedVideoItem`). Every OTHER field (`cover` / `title` / `preview`
 /// / `goods` / …) passes through UNCHANGED — `PlayerShellModel` doesn't carry those, so `video`
 /// stays their only source. Returns `video` unchanged when its `liveStatus` already matches
 /// `isLive` (no unnecessary copy). This is what fixes the live→VOD-in-place-switch-then-minimize-
@@ -147,9 +147,9 @@ func floatingCardDisplayItem(_ video: LBVideoItem, isLive: Bool) -> LBVideoItem 
         showStock: video.showStock, goods: video.goods)
 }
 
-/// Presents the turnkey `LiveBuyPlayer` full-screen for the bound `video`, with a built-in
-/// minimize→bottom-right floating preview. Attach with `View.liveBuyPlayer(video:…)`.
-public struct LiveBuyPlayerPresenter: ViewModifier {
+/// Presents the turnkey `LivebuyPlayer` full-screen for the bound `video`, with a built-in
+/// minimize→bottom-right floating preview. Attach with `View.livebuyPlayer(video:…)`.
+public struct LivebuyPlayerPresenter: ViewModifier {
 
     /// The host's session source of truth: non-nil → present; nil → fully closed. The
     /// `LBVideoItem` provides `id` (for `load`) AND `cover`/`preview` (for the floating
@@ -159,10 +159,10 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
     /// The host's player config. The presenter OWNS `onMinimize` / `onDismiss` (the
     /// collapse / clear); every other seam (`eventListener` / `onProductTap` / `onShare` /
     /// `onOpenProductList` / `onComment` …) passes through unchanged.
-    let config: LiveBuyPlayerConfig
+    let config: LivebuyPlayerConfig
 
     /// Optional theme override for the floating card. nil → resolve via the same
-    /// `sdkConfig.theme > host options > minimal palette` order `LiveBuyPlayer` uses.
+    /// `sdkConfig.theme > host options > minimal palette` order `LivebuyPlayer` uses.
     let themeOverride: ReferenceUITheme?
 
     /// Full vs floating. `video == nil` is fully closed (this flag is only meaningful while
@@ -203,7 +203,7 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
             // KEEP-ALIVE full player overlay (issue 5): the player is composed as a PERSISTENT
             // full-bleed overlay (NOT a `fullScreenCover`). It stays MOUNTED the whole time a
             // session exists (`video != nil`); minimize only HIDES it (opacity 0 + no hit-testing)
-            // behind the floating preview card. Because the mounted `LiveBuyPlayer.videoId` does
+            // behind the floating preview card. Because the mounted `LivebuyPlayer.videoId` does
             // not change across minimize/restore, SwiftUI never rebuilds the player VC — so
             // playback CONTINUES while minimized and tapping the card to restore is an instant
             // RESUME, not a fresh `load`. (The prior `fullScreenCover` dismissed on minimize,
@@ -254,10 +254,10 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
             .onAppear { syncWidgetCover() }
             // Presenter removed while covered (`.full`): release the cover so the home previews are
             // NOT left permanently paused (important edge case — the bridge is a stateful level).
-            .onDisappear { LiveBuyWidgetVisibility.setWidgetsCovered(false) }
+            .onDisappear { LivebuyWidgetVisibility.setWidgetsCovered(false) }
     }
 
-    /// Drive the opt-in `LiveBuyWidgetVisibility` cover bridge from the CURRENT presentation phase:
+    /// Drive the opt-in `LivebuyWidgetVisibility` cover bridge from the CURRENT presentation phase:
     /// `covered ⟺ .full` (`presenterWidgetCovered`). Called from every phase-affecting hook
     /// (`onAppear` / `onChange(of: isMinimized)` / the tail of `onChange(of: video?.id)`). The
     /// presenter is the SINGLE owner of this call — it is the only place that knows the
@@ -266,7 +266,7 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
     /// called from several hooks (and re-entrantly via `withAnimation` state writes) is safe and
     /// never churns; the settled invariant is `covered == (video != nil && !isMinimized)`.
     private func syncWidgetCover() {
-        LiveBuyWidgetVisibility.setWidgetsCovered(
+        LivebuyWidgetVisibility.setWidgetsCovered(
             presenterWidgetCovered(hasVideo: video != nil, isMinimized: isMinimized))
     }
 
@@ -274,13 +274,13 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
     /// (`video != nil`) — it is NOT torn down on minimize (that was the `fullScreenCover`
     /// teardown that restarted playback). Minimize only hides it: `opacity 0` (invisible behind
     /// the floating card) + `allowsHitTesting(false)` (so the host content behind stays
-    /// interactive). Because the mounted `LiveBuyPlayer.videoId` is unchanged across
+    /// interactive). Because the mounted `LivebuyPlayer.videoId` is unchanged across
     /// minimize/restore, SwiftUI keeps the SAME player VC alive → playback continues and restore
     /// is a resume. A new bound video id (auto-restore) still drives an in-place `load`.
     @ViewBuilder
     private var playerLayer: some View {
         if let v = video {
-            LiveBuyPlayer(videoId: v.id, config: composedConfig)
+            LivebuyPlayer(videoId: v.id, config: composedConfig)
                 .ignoresSafeArea()
                 .opacity(isMinimized ? 0 : 1)
                 .allowsHitTesting(!isMinimized)
@@ -289,7 +289,7 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
 
     /// The host config with `onMinimize` / `onDismiss` taken over by the presenter; all
     /// other seams pass through.
-    private var composedConfig: LiveBuyPlayerConfig {
+    private var composedConfig: LivebuyPlayerConfig {
         var c = config
         // Minimize → collapse to the floating preview (dismiss full, keep the session).
         c.onMinimize = {
@@ -314,7 +314,7 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
         // Latch `isInternalSwitch` so `onChange(of: video?.id)` keeps the current minimize/full
         // phase instead of treating it as a host-driven swap (D-2). Guard `item.id != current` so a
         // same-id no-op neither re-binds nor leaks the latch (onChange wouldn't fire to clear it).
-        // Keep-alive does NOT double-load: `LiveBuyPlayer`'s coordinator already set its cover/
+        // Keep-alive does NOT double-load: `LivebuyPlayer`'s coordinator already set its cover/
         // current id to the new id before firing this, so the new `videoId` prop makes
         // `updateUIViewController`'s cover-guard a no-op (D-4).
         c.onVideoSwitchedItem = { item in
@@ -420,11 +420,11 @@ public struct LiveBuyPlayerPresenter: ViewModifier {
     }
 
     /// The floating card's theme: the explicit override, else the resolved
-    /// `sdkConfig.theme > host options > minimal palette` (same resolver `LiveBuyPlayer` uses).
+    /// `sdkConfig.theme > host options > minimal palette` (same resolver `LivebuyPlayer` uses).
     private var resolvedTheme: ReferenceUITheme {
         themeOverride
             ?? ReferenceUIThemeResolver.resolve(
-                coreTheme: (try? LiveBuy.sdkConfig())?.theme,
+                coreTheme: (try? Livebuy.sdkConfig())?.theme,
                 hostOptions: nil)
     }
 }
@@ -439,17 +439,17 @@ private struct FloatingCardSizeKey: PreferenceKey {
 }
 
 public extension View {
-    /// Present the turnkey `LiveBuyPlayer` full-screen for the bound `video`, with a
+    /// Present the turnkey `LivebuyPlayer` full-screen for the bound `video`, with a
     /// built-in minimize→bottom-right floating preview (`FloatingWidgetView`). ONE line:
     ///
-    ///     someHostView.liveBuyPlayer(video: $presentedVideo, config: cfg)
+    ///     someHostView.livebuyPlayer(video: $presentedVideo, config: cfg)
     ///
     /// `video` non-nil → present full-screen; minimize collapses to the floating card;
     /// tapping it restores; closing it (or a fatal moment dismiss) clears `video`.
     ///
     /// The presenter OWNS `config.onMinimize` / `config.onDismiss` (the collapse / clear);
-    /// every other `LiveBuyPlayerConfig` seam passes through. A host that needs custom
-    /// minimize / dismiss should use the raw `LiveBuyPlayer` view instead.
+    /// every other `LivebuyPlayerConfig` seam passes through. A host that needs custom
+    /// minimize / dismiss should use the raw `LivebuyPlayer` view instead.
     ///
     /// `video` carries the `LBVideoItem` so the floating card can show its thumbnail; a host
     /// with only a video id passes `LBVideoItem.demo(id: theId, live: true)`.
@@ -458,11 +458,11 @@ public extension View {
     /// player VC stays alive across minimize/restore, so playback continues uninterrupted; it is
     /// NOT a fresh `load` / re-present. The floating card is a minimized card representation,
     /// not OS PiP.
-    func liveBuyPlayer(
+    func livebuyPlayer(
         video: Binding<LBVideoItem?>,
-        config: LiveBuyPlayerConfig = LiveBuyPlayerConfig(),
+        config: LivebuyPlayerConfig = LivebuyPlayerConfig(),
         theme: ReferenceUITheme? = nil
     ) -> some View {
-        modifier(LiveBuyPlayerPresenter(video: video, config: config, themeOverride: theme))
+        modifier(LivebuyPlayerPresenter(video: video, config: config, themeOverride: theme))
     }
 }

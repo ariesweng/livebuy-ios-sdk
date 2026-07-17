@@ -1,15 +1,15 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
-// MARK: - LiveBuyReferenceUI — iOS reference-ui pixel layer namespace
+// MARK: - LivebuyReferenceUI — iOS reference-ui pixel layer namespace
 //
 // Spec: `reference-ui-rendering/spec.md`
 // Design: rb-ios-scaffold design.md D-B / D-C / D-H.
 //
 // This is the ONLY iOS product allowed to carry SwiftUI pixel-rendering code.
-// Dependency is strictly one-way: LiveBuyReferenceUI → LiveBuyUI → LiveBuySDK.
-// `LiveBuyUI` (template) stays headless / zero-pixel; `LiveBuySDK` (core) stays
+// Dependency is strictly one-way: LivebuyReferenceUI → LivebuyUI → LivebuySDK.
+// `LivebuyUI` (template) stays headless / zero-pixel; `LivebuySDK` (core) stays
 // headless. Pixels live ONLY here.
 //
 // SwiftUI is the rendering technology (D-B). The package `platforms` floor stays
@@ -19,7 +19,7 @@ import LiveBuyUI
 // must follow.
 
 /// Namespace marker for the iOS reference-ui pixel layer.
-public enum LiveBuyReferenceUI {
+public enum LivebuyReferenceUI {
     /// Human-readable layer identity (handy for diagnostics / smoke assertions).
     public static let layerName = "reference-ui"
 }
@@ -27,9 +27,9 @@ public enum LiveBuyReferenceUI {
 // MARK: - ReferenceUISmokeView — minimal chain-proof view (D-H)
 //
 // The scaffold's sole pixel artifact: it proves the chain
-// LiveBuyReferenceUI → LiveBuyUI → LiveBuySDK compiles and renders. It binds ONE
+// LivebuyReferenceUI → LivebuyUI → LivebuySDK compiles and renders. It binds ONE
 // existing, stable, host-readable `livebuy-ui` view-model type (`LBStartScreenPhase`,
-// a public moment-state enum from `LiveBuyUI`) to prove the template import is
+// a public moment-state enum from `LivebuyUI`) to prove the template import is
 // reachable, and paints a deterministic themed layout.
 //
 // It does NOT render any family's full pixels (player-shell / feed-win /
@@ -43,9 +43,9 @@ public struct ReferenceUISmokeView: View {
     /// The resolved reference-ui theme (from `ReferenceUIThemeResolver`).
     public let theme: ReferenceUITheme
 
-    /// A bound `livebuy-ui` view-model value — proves the `LiveBuyUI` (template)
+    /// A bound `livebuy-ui` view-model value — proves the `LivebuyUI` (template)
     /// type is reachable from this layer. `LBStartScreenPhase` is an existing,
-    /// stable, host-readable moment-state enum exported by `LiveBuyUI`; binding
+    /// stable, host-readable moment-state enum exported by `LivebuyUI`; binding
     /// it here carries NO family-pixel semantics — it only labels the smoke view.
     public let phase: LBStartScreenPhase
 
@@ -63,7 +63,7 @@ public struct ReferenceUISmokeView: View {
                 .frame(width: 120, height: 48)
 
             // A themed label that also references the bound view-model, proving
-            // the LiveBuyUI type is reachable and usable from reference-ui.
+            // the LivebuyUI type is reachable and usable from reference-ui.
             Text("reference-ui · \(Self.label(for: phase))")
                 .font(.system(size: 14 * theme.fontScale, weight: .semibold))
                 .foregroundColor(theme.text)

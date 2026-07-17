@@ -1,5 +1,5 @@
 import Foundation
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - Widget video visibility (rb-ios-widget-hide-urlless-live)
 //

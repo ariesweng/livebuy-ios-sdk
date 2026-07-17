@@ -1,5 +1,5 @@
 import SwiftUI
-import LiveBuyUI
+import LivebuyUI
 
 // MARK: - UpcomingCountdownView — moment surface 4 (直播預告等待開播)
 //

@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultActivityFeed — §1 merged activity + chat feed (behaviour layer)
 //

@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ProductDetailSheetView — family-3 product sheet-stack surface 2 (detail + variant + qty + add-to-cart)
 //

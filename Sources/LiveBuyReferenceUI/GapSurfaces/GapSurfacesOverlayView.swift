@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - GapSurfacesOverlayView — family-6 gap-surfaces container (SKELETON)
 //
@@ -17,7 +17,7 @@ import LiveBuyUI
 //   2. GuestNameEditModalView — guest 改名 modal (auth-gate-template-state,
 //                               `LiveNicknameModal`). Forwards the passthrough
 //                               「請求改名」intent; the actual rename is host-
-//                               fulfilled via `LiveBuySDK.setUser`.
+//                               fulfilled via `LivebuySDK.setUser`.
 //
 // REMOVED in the reconcile (design 2026-06-06): the goods-tracking dual-switch sheet
 // (到貨追蹤 → family-3 商品明細 收藏 toggle; 補貨通知 → family-3 售完補貨通知 sheet)
@@ -127,12 +127,12 @@ public struct GapSurfacesOverlayView: View {
     public let theme: ReferenceUITheme
 
     /// Host-wired auth-gate「登入」CTA. Performing the login is the host's job (it
-    /// wires its own login flow + calls `LiveBuySDK.setUser`); the container NEVER
+    /// wires its own login flow + calls `LivebuySDK.setUser`); the container NEVER
     /// logs in itself. nil for demo / snapshot instances.
     private let onRequestLogin: (() -> Void)?
 
     /// Host-wired guest-name SUBMIT. The actual new display name is host-fulfilled
-    /// via `LiveBuySDK.setUser`; the container NEVER renames itself. The passthrough
+    /// via `LivebuySDK.setUser`; the container NEVER renames itself. The passthrough
     /// 「請求改名」intent (separate) still routes through the template via
     /// `model.requestGuestNameEdit()`. nil for demo / snapshot instances.
     private let onSubmitGuestName: ((String) -> Void)?
@@ -187,7 +187,7 @@ public struct GapSurfacesOverlayView: View {
                     // Passthrough「請求改名」intent → template exit (emits
                     // GUEST_NAME_EDIT_REQUEST). Distinct from the actual rename.
                     onRequestEdit: { model.requestGuestNameEdit() },
-                    // The actual new name is host-fulfilled via LiveBuySDK.setUser —
+                    // The actual new name is host-fulfilled via LivebuySDK.setUser —
                     // the container forwards to the host-wired closure, never renames
                     // itself, then dismisses.
                     onSubmit: { newName in

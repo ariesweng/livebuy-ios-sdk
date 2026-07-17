@@ -1,6 +1,6 @@
 import Foundation
 import UIKit
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - External-platform live detection (rb-ios-external-live-watch)
 //

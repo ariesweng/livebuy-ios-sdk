@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - AddToCartSheetView — family-3 compact purchase sheet (design `AddToCartSheet`)
 //

@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultPlayerChrome — OperationPanel side-rail + VideoInfoPanel info-tab
 //

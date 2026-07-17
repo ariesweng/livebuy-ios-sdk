@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultNoticeTab — VideoInfoPanel 公告分頁 open-state
 //

@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultProductSheet — product sheet-stack host-bindable view-models
 //
@@ -8,7 +8,7 @@ import LiveBuySDK
 // Design: product-sheet-stack-template design.md D1–D7.
 //
 // Behaviour / view-model layer ONLY (no pixels). core stays headless: it owns the
-// `LiveBuy.addToCart(...)` route-B endpoint (`POST /sdk/video/addcart` → `LBCartResult`),
+// `Livebuy.addToCart(...)` route-B endpoint (`POST /sdk/video/addcart` → `LBCartResult`),
 // route A (`CART_ADD_REQUEST` + `LBCartResultCallback`), and `productTap`
 // (`PRODUCT_CLICK`). These models MAP the core `LBProduct` (specifications /
 // specOptions / stock / soldOut) into a host-bindable product sheet-stack —
@@ -27,7 +27,7 @@ import LiveBuySDK
 
 /// Thrown by the DEFAULT (un-injected) add-to-cart requester so a headless unit
 /// test that never wires a real requester sees `addToCart()` fail cleanly (no
-/// HTTP, no count change). The real wiring injects `LiveBuy.addToCart(...)`.
+/// HTTP, no count change). The real wiring injects `Livebuy.addToCart(...)`.
 enum LBProductSheetError: Error {
     case noRequester
 }
@@ -36,7 +36,7 @@ enum LBProductSheetError: Error {
 
 /// The minimal route-B add-to-cart request the template assembles from the
 /// current product-detail + variant selection + qty, and hands to the injected
-/// core requester (which calls `LiveBuy.addToCart(...)`). `shopId` is read from
+/// core requester (which calls `Livebuy.addToCart(...)`). `shopId` is read from
 /// the public `channel.shop.id`; `specificationId` is nil for a no-spec product.
 /// The template builds NO HTTP — this is just the parameter bundle.
 public struct LBCartRequest: Equatable {
@@ -44,7 +44,7 @@ public struct LBCartRequest: Equatable {
     public let goodsId: String
     public let num: Int
     public let specificationId: String?
-    /// 當前影片短碼（cart-add-tier2）。透傳給 `LiveBuySDK.addToCart(videoId:)`，使
+    /// 當前影片短碼（cart-add-tier2）。透傳給 `LivebuySDK.addToCart(videoId:)`，使
     /// 後續 `CART_ADD_REQUEST.video_id` 為當前影片。無 player / channel 時為 nil。
     public let videoId: String?
 

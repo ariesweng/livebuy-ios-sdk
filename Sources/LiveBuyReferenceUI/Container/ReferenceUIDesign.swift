@@ -1,10 +1,10 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ReferenceUIDesign — the design seam (granularity A)
 //
-// The three turnkey containers (`LiveBuyPlayer` / `LiveBuyWidget` / `View.liveBuyPlayer`
+// The three turnkey containers (`LivebuyPlayer` / `LivebuyWidget` / `View.livebuyPlayer`
 // presenter) used to hard-code the concrete `minimal` surfaces at the assembly point: the
 // player overlay's ZStack instantiated `PlayerShellView` + `FeedWinOverlayView` +
 // `ProductSheetsOverlayView` + `MomentsOverlayView` + `ChatComposerBar` +
@@ -79,7 +79,7 @@ public struct PlayerOverlayContext {
     public let onSubscribe: () -> Void
     /// LIVE 底部 bar 暱稱（person-edit）按鈕 → 本地呈現 設定暱稱 modal（不走被 gating 的 core 路徑）。
     public let onNickname: () -> Void
-    /// 設定暱稱 modal 送出 → 設定顯示名（容器預設 `LiveBuy.setUser`）。傳 trimmed 暱稱。
+    /// 設定暱稱 modal 送出 → 設定顯示名（容器預設 `Livebuy.setUser`）。傳 trimmed 暱稱。
     public let onNicknameSubmit: (String) -> Void
     public let onProductTap: (LBProduct) -> Void
     public let onShare: () -> Void
@@ -225,8 +225,8 @@ public struct FloatingCardContext {
 /// A `ReferenceUIDesign` composes a WHOLE container surface from the bound view-models +
 /// theme + host closures it is handed (granularity A). The turnkey containers delegate to it
 /// and know nothing about any concrete design (D2: protocol, not enum). `MinimalDesign` is
-/// the default conformer; a host overrides via `LiveBuyPlayerConfig.design` /
-/// `LiveBuyWidgetConfig.design`.
+/// the default conformer; a host overrides via `LivebuyPlayerConfig.design` /
+/// `LivebuyWidgetConfig.design`.
 public protocol ReferenceUIDesign {
     /// The whole player overlay (chrome + feed/win + product sheets + moments + start
     /// lifecycle + on-demand chat composer), composed however this design lays it out.

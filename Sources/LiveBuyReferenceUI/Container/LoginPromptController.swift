@@ -1,5 +1,5 @@
 import SwiftUI
-import LiveBuyUI
+import LivebuyUI
 
 // MARK: - LoginPromptController — on-demand「請先登入」modal presentation state (triggerAction-driven)
 //

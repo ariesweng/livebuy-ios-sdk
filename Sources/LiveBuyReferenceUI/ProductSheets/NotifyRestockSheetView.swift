@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - NotifyRestockSheetView — family-3 product sheet-stack surface 4 (restock-notify)
 //

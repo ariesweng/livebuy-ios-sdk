@@ -1,10 +1,10 @@
 import SwiftUI
-import LiveBuyUI
+import LivebuyUI
 
 // MARK: - GestureMuteToastView — family-1 center mute toast (0.7s tap feedback)
 //
 // Spec: `reference-ui-rendering/spec.md`
-//   § "LiveBuyReferenceUI PlayerShellView 提供點擊靜音手勢，轉發 onToggleMute"
+//   § "LivebuyReferenceUI PlayerShellView 提供點擊靜音手勢，轉發 onToggleMute"
 //     (0.7s 中央靜音 toast).
 // Design: `design/templates/minimal/sdk-components.jsx` `LBPGestureHint`「點擊靜音」.
 //

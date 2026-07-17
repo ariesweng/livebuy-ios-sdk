@@ -1,6 +1,6 @@
 import Foundation
 
-/// Central registry of E2E `accessibilityIdentifier` strings for `LiveBuyReferenceUI`.
+/// Central registry of E2E `accessibilityIdentifier` strings for `LivebuyReferenceUI`.
 ///
 /// This is the ONLY legal home for E2E id string literals. Production reference-ui
 /// components MUST reference `LBAccessibilityID.<name>` (or a per-item helper) and

@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - CarouselView — family-5 widget surface 1 (LBPCarousel, horizontal card row)
 //

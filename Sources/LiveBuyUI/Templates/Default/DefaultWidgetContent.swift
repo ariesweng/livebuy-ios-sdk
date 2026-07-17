@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultWidgetContent — Widget content host-bindable view-model
 //
@@ -9,14 +9,14 @@ import LiveBuySDK
 // Design: design.md D2 / D3 / D4 / D5 / D6.
 //
 // Behaviour / view-model layer ONLY (no pixels). core stays headless: it owns the
-// `LiveBuyWidgetCore` state (`videos` / `mode` / `currentPage` / `lastPage` /
+// `LivebuyWidgetCore` state (`videos` / `mode` / `currentPage` / `lastPage` /
 // `liveVideo` / `isClosed`), the `loadFirstPage` / `requestLoadMore` fetch, and
-// the `POST /sdk/widget` flow. This model MIRRORS core `LiveBuyWidgetCore`'s existing
+// the `POST /sdk/widget` flow. This model MIRRORS core `LivebuyWidgetCore`'s existing
 // read-only public state into a host-bindable snapshot so the host / reference-ui
 // can draw `widgets.jsx` (`LBPCarousel` / `LBPCarouselCard` / `LBPVideoShop` /
 // `LBPFloatingWidget` / `LBPMinimizedWidget`). The template renders NOTHING.
 //
-// D2 — single source of truth stays in core `LiveBuyWidgetCore` (and the
+// D2 — single source of truth stays in core `LivebuyWidgetCore` (and the
 //       `widget-bridge-color-core` snapshot for colors). This model does NOT hold
 //       a second copy of the data — it re-reads core on every `refresh`.
 
@@ -31,20 +31,20 @@ public enum LBWidgetContentMode: Equatable {
     case minimized
 }
 
-/// One host-bindable widget-content snapshot. Mirrors core `LiveBuyWidgetCore` plus
+/// One host-bindable widget-content snapshot. Mirrors core `LivebuyWidgetCore` plus
 /// the `widget-bridge-color-core` web-embed colors (raw passthrough — the
 /// template MUST NOT interpret the color semantics, D4).
 public struct LBWidgetContent: Equatable {
-    /// Card-row data — core `LiveBuyWidgetCore.videos` (read-only mirror).
+    /// Card-row data — core `LivebuyWidgetCore.videos` (read-only mirror).
     public let videos: [LBVideoItem]
     /// Layout mode — `carousel` / `grid` / `floating` from core `WidgetMode`;
     /// `minimized` derived from floating `isClosed == true` (D3).
     public let mode: LBWidgetContentMode
-    /// Pagination cursor — core `LiveBuyWidgetCore.currentPage`.
+    /// Pagination cursor — core `LivebuyWidgetCore.currentPage`.
     public let currentPage: Int
-    /// Pagination last page — core `LiveBuyWidgetCore.lastPage`.
+    /// Pagination last page — core `LivebuyWidgetCore.lastPage`.
     public let lastPage: Int
-    /// Floating live card — core `LiveBuyWidgetCore.liveVideo`.
+    /// Floating live card — core `LivebuyWidgetCore.liveVideo`.
     public let liveVideo: LBVideoItem?
     /// Web-embed text color (`widget_color`) — `widget-bridge-color-core` raw
     /// passthrough (1=black / 2=white per web embed; template does NOT interpret).
@@ -123,7 +123,7 @@ public struct LBWidgetContent: Equatable {
     }
 }
 
-/// Maps a core `LiveBuyWidgetCore` into a host-bindable widget-content snapshot. The
+/// Maps a core `LivebuyWidgetCore` into a host-bindable widget-content snapshot. The
 /// owning `DefaultWidgetTemplate` feeds it `refresh(from:)` (on attach + whenever
 /// core load / loadMore / floating-close changes state); the host reads `current`
 /// and observes the template's `onChange`.
@@ -146,7 +146,7 @@ public final class DefaultWidgetContent {
         self.current = LBWidgetContent.empty(mode: Self.mode(from: mode, isClosed: false))
     }
 
-    /// Re-read the core `LiveBuyWidgetCore`'s existing public read-only state into a
+    /// Re-read the core `LivebuyWidgetCore`'s existing public read-only state into a
     /// fresh snapshot (D2 — no second copy; the snapshot is rebuilt each time).
     /// Notifies ONLY when the snapshot actually changed (diff-then-notify), so a
     /// no-op core callback never fires a spurious onChange.
@@ -155,7 +155,7 @@ public final class DefaultWidgetContent {
     /// widget instance (`widget.widgetColor` / `widget.widgetBgcolor`); when that
     /// dependency is absent the widget instance still carries the core DTO
     /// defaults (`1` / `nil`), so this never throws (D4 / R5).
-    func refresh(from widget: LiveBuyWidgetCore) {
+    func refresh(from widget: LivebuyWidgetCore) {
         let next = LBWidgetContent(
             videos: widget.videos,
             mode: Self.mode(from: widget.mode, isClosed: widget.isClosed),

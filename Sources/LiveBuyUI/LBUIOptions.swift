@@ -1,10 +1,10 @@
-import LiveBuySDK
+import LivebuySDK
 
-/// Host-level UI preferences passed to `LiveBuyUI.install(options:)`.
+/// Host-level UI preferences passed to `LivebuyUI.install(options:)`.
 /// All fields are optional; nil means "defer to template default".
 /// sdkConfig values always win over these options (Layer 3 > Layer 2 in the merge).
 ///
-/// Spec: `ui-template-foundation/spec.md` § "LiveBuyUI 入口 API"
+/// Spec: `ui-template-foundation/spec.md` § "LivebuyUI 入口 API"
 public struct LBUIOptions {
 
     /// Per-element show/hide overrides.  nil per-field = defer to template default.

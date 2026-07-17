@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - CaptionOverlayView — family-1 VOD closed-caption line (rb-ios-vod-player-chrome)
 //

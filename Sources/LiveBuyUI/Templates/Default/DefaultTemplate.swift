@@ -1,7 +1,7 @@
-import LiveBuySDK
+import LivebuySDK
 
 /// Default built-in template.  Handles all SDK events with a standard live-shopping UI.
-/// Install via `LiveBuyUI.install(template: DefaultTemplate())`.
+/// Install via `LivebuyUI.install(template: DefaultTemplate())`.
 ///
 /// Spec: `ui-template-foundation/spec.md` § "Default Template 事件覆蓋範圍"
 public final class DefaultTemplate: AnyLBTemplate {

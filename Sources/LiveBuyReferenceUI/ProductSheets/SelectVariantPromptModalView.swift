@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - SelectVariantPromptModalView — family-3「請選規格」acknowledge modal (LBPAlertModal)
 //

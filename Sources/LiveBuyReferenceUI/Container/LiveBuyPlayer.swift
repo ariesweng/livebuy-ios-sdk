@@ -1,27 +1,27 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
-// MARK: - LiveBuyPlayer — turnkey drop-in player container
+// MARK: - LivebuyPlayer — turnkey drop-in player container
 //
-// The SDK `LiveBuyPlayerViewController` is HEADLESS: it paints a black background + a
-// video layer only, and `LiveBuyUI` attaches a zero-pixel view-model. To SEE player
+// The SDK `LivebuyPlayerViewController` is HEADLESS: it paints a black background + a
+// video layer only, and `LivebuyUI` attaches a zero-pixel view-model. To SEE player
 // chrome (header / rail / info panel / moments / product+feed overlays / chat composer)
 // a host must overlay the reference-ui pixel layer on top of the video surface and wire
 // every interaction back to the bound template. That assembly — proven in the Example's
-// `LiveBuyPlayerHost` — is what `LiveBuyPlayer` PROMOTES into the package so a host gets
+// `LivebuyPlayerHost` — is what `LivebuyPlayer` PROMOTES into the package so a host gets
 // it in ONE line:
 //
-//     LiveBuyPlayer(videoId: "123")               // turnkey: all 13 seams defaulted
-//     LiveBuyPlayer(videoId: "123", config: cfg)  // override only what differs
+//     LivebuyPlayer(videoId: "123")               // turnkey: all 13 seams defaulted
+//     LivebuyPlayer(videoId: "123", config: cfg)  // override only what differs
 //
 // It is a PURE ASSEMBLY layer (governance: reference-ui MUST NOT add/modify view-models
 // or pixels beyond composing existing surfaces): it only composes existing reference-ui
 // surfaces + existing template/core forwarders. Dependency direction stays one-way
-// `reference-ui → template (LiveBuyUI) → core (LiveBuySDK)`.
+// `reference-ui → template (LivebuyUI) → core (LivebuySDK)`.
 //
-// `LiveBuyPlayer` is the GOLDEN NAME (design D-0): most hosts want the assembled drop-in,
-// so it gets the most intuitive name; the bare headless VC stays `LiveBuyPlayerViewController`.
+// `LivebuyPlayer` is the GOLDEN NAME (design D-0): most hosts want the assembled drop-in,
+// so it gets the most intuitive name; the bare headless VC stays `LivebuyPlayerViewController`.
 //
 // OVERLAY COMPOSITION (R1, master `099a367`): ALL surfaces live in ONE `UIHostingController`
 // hosting ONE `PlayerOverlayRootView` (a single ZStack). They MUST NOT be stacked as
@@ -30,16 +30,16 @@ import LiveBuyUI
 // layers below. Inside one hierarchy, SwiftUI hit-testing is content-based (passthrough
 // where nothing is drawn), so the chrome below stays interactive.
 
-/// Per-instance wiring for `LiveBuyPlayer`. Every interaction closure is OPTIONAL with a
+/// Per-instance wiring for `LivebuyPlayer`. Every interaction closure is OPTIONAL with a
 /// documented sensible default — a host that passes nothing still gets a working player
 /// ("不 wire 也能跑"); passing a closure REPLACES that one default. Promoted from the
-/// Example's `LiveBuyPlayerHostConfig`.
-public struct LiveBuyPlayerConfig {
+/// Example's `LivebuyPlayerHostConfig`.
+public struct LivebuyPlayerConfig {
 
     /// The event listener attached to the player. The per-host divergence point (e.g.
     /// ExampleApp's QA stubs vs. ShopHost's commerce flows). Default: none (the SDK's own
     /// default flow only).
-    public var eventListener: LiveBuyEventListener?
+    public var eventListener: LivebuyEventListener?
 
     /// Top-right minimize tap. DEFAULT (R2): forwards to core `player.minimize()` — the
     /// architecturally-correct seam (today a safe no-op stub; activates when core ships the
@@ -57,7 +57,7 @@ public struct LiveBuyPlayerConfig {
     /// Rail「商品」open-intent. Default: present the reference-ui `ProductListView` sheet,
     /// a row tap forwarding to `performProductTap` → the product-detail sheet. Receives the
     /// player VC, the bound product model, and the resolved theme.
-    public var onOpenProductList: ((LiveBuyPlayerViewController, ProductSheetsModel, ReferenceUITheme) -> Void)?
+    public var onOpenProductList: ((LivebuyPlayerViewController, ProductSheetsModel, ReferenceUITheme) -> Void)?
 
     /// Rail「聊天」toggle. The merged chat feed is composed always-on; default is a no-op
     /// (the telemetry chat-toggle event already fired).
@@ -70,49 +70,49 @@ public struct LiveBuyPlayerConfig {
     public var onComment: ((ChatComposerController) -> Void)?
 
     ///「前往登入」CTA on the comment-gate「請先登入」modal → the HOST's own login flow (open a
-    /// login screen, then `LiveBuySDK.login(...)`). reference-ui NEVER logs in itself; nil → the
+    /// login screen, then `LivebuySDK.login(...)`). reference-ui NEVER logs in itself; nil → the
     /// CTA is inert (the modal still informs + dismisses). rb-ios-live-comment-login-gate.
     public var onLogin: (() -> Void)?
 
     /// Product-row / pinned-card tap. Default: the core product-tap flow (`performProductTap`).
-    public var onProductTap: ((LiveBuyPlayerViewController, LBProduct) -> Void)?
+    public var onProductTap: ((LivebuyPlayerViewController, LBProduct) -> Void)?
 
     /// 頻道 / detail-footer 分享. Default (dropin-player-default-share-sheet, B 案): 先派
     /// `VIDEO_SHARE_REQUEST`（`performShare()`）讓有接事件的 host 自畫分享——**未被攔截**時才
     /// 退回預設，以 `PlayerShellModel.shareUrl`（= `channel.share_url`，頻道級不加 `?t=`）present
     /// 系統 `UIActivityViewController`（`shareUrl` 空 → no-op，不開空 sheet）。已 intercept 事件的
     /// host 零變更；未接者新增可用的預設分享。host 設此 closure → 完全覆蓋預設。
-    public var onShare: ((LiveBuyPlayerViewController) -> Void)?
+    public var onShare: ((LivebuyPlayerViewController) -> Void)?
 
     /// 商品列表列**縮圖**點擊 → 影片跳轉到該商品介紹時間（issue 5）. Default: `player.seek(seconds:
     /// Double(product.beginTime))`（VOD / replay 有效；live 由 core 略過；`beginTime == nil` 不 seek）.
     /// 收到 player VC + 該 `LBProduct`，host override 可改走自家深連結 / 章節跳轉。
-    public var onSeekToProductIntro: ((LiveBuyPlayerViewController, LBProduct) -> Void)?
+    public var onSeekToProductIntro: ((LivebuyPlayerViewController, LBProduct) -> Void)?
 
     /// 商品列表列**分享鈕**點擊 → 系統分享，連結帶該商品介紹時間 `?t=beginTime`（issue 6）. Default:
     /// 以 `PlayerShellModel.shareUrl`（= `channel.share_url`）+ `?t=<beginTime>` present 系統
     /// `UIActivityViewController`；`shareUrl` 為空時退回 `performShare()`（channel-level 分享事件）.
     /// 收到 player VC + 該 `LBProduct`，host override 可改走自家分享流程。
-    public var onShareProduct: ((LiveBuyPlayerViewController, LBProduct) -> Void)?
+    public var onShareProduct: ((LivebuyPlayerViewController, LBProduct) -> Void)?
 
     /// End-screen 立即觀看. Default: advance in place to the auto-next target (`next.first`).
-    public var onWatchNext: ((LiveBuyPlayerViewController, MomentsModel) -> Void)?
+    public var onWatchNext: ((LivebuyPlayerViewController, MomentsModel) -> Void)?
 
     /// 熱門卡 tap. Default: switch in place to that video (`LBHotItem.id`).
-    public var onPickHot: ((LiveBuyPlayerViewController, LBHotItem) -> Void)?
+    public var onPickHot: ((LivebuyPlayerViewController, LBHotItem) -> Void)?
 
     /// Start-screen 跳過. Default: `skipStart()`.
-    public var onSkip: ((LiveBuyPlayerViewController) -> Void)?
+    public var onSkip: ((LivebuyPlayerViewController) -> Void)?
 
     /// End-screen 取消. Default: `cancelAutoNext()` (stop the countdown, NOT a dismiss).
-    public var onCancel: ((LiveBuyPlayerViewController) -> Void)?
+    public var onCancel: ((LivebuyPlayerViewController) -> Void)?
 
     /// Error 重試. Default: reload what the player is actually SHOWING (an in-place switch
     /// may have moved off the cover's id).
-    public var onRetry: ((LiveBuyPlayerViewController) -> Void)?
+    public var onRetry: ((LivebuyPlayerViewController) -> Void)?
 
     /// Moment dismiss. Default: `dismiss(animated:)`.
-    public var onDismiss: ((LiveBuyPlayerViewController) -> Void)?
+    public var onDismiss: ((LivebuyPlayerViewController) -> Void)?
 
     /// Whether `PlayerShellView` paints its opaque background placeholder. Default `false`
     /// (overlaying a real video surface — painting it would cover the video).
@@ -137,7 +137,7 @@ public struct LiveBuyPlayerConfig {
     /// Like `onVideoSwitched`, but carries the new video as a full `LBVideoItem` — the id PLUS
     /// the REAL `cover` / `title` resolved from the adjacency nav item (swipe) / hot item
     /// (hot-pick) / next item (watch-next) that drove the switch. A host-bound video mirror (the
-    /// `liveBuyPlayer(video:)` minimized floating preview card's `video`) consumes this so the
+    /// `livebuyPlayer(video:)` minimized floating preview card's `video`) consumes this so the
     /// card shows the SWITCHED video's REAL thumbnail — not a placeholder. Fired together with
     /// `onVideoSwitched(id)` on every in-place switch (with an empty `cover` only in the rare
     /// case the switch target is not an adjacency / hot / next item). Default `nil`.
@@ -148,7 +148,7 @@ public struct LiveBuyPlayerConfig {
     /// the new value. This is DISTINCT from `onVideoSwitchedItem`'s `LBVideoItem.liveStatus`,
     /// which is only a switch-time GUESS built from the PRE-switch channel (adjacency nav / hot
     /// / next items carry no per-item `liveStatus`) and never self-corrects once fired. A
-    /// host-bound "is the shown video live" mirror (e.g. the `liveBuyPlayer(video:)` minimized
+    /// host-bound "is the shown video live" mirror (e.g. the `livebuyPlayer(video:)` minimized
     /// floating preview card's LIVE/VOD badge) SHOULD consume THIS instead, so it never drifts
     /// permanently stale after an in-place switch whose real post-switch status differs from the
     /// guess (e.g. live→VOD) — rb-ios-floating-card-live-status-sync. Default `nil`.
@@ -204,16 +204,16 @@ func productShareURLString(base: String, beginTime: Int?) -> String {
     return "\(base)\(sep)t=\(t)"
 }
 
-/// Turnkey drop-in player. Builds a `LiveBuyPlayerViewController`, attaches the Default
+/// Turnkey drop-in player. Builds a `LivebuyPlayerViewController`, attaches the Default
 /// template, composes all reference-ui surfaces into ONE hosting controller, wires each
 /// seam to `config` (defaults where unset), `load`s, and wraps in a nav controller (bar
 /// hidden) so a host can push a PDP from a product-tap callback.
-public struct LiveBuyPlayer: UIViewControllerRepresentable {
+public struct LivebuyPlayer: UIViewControllerRepresentable {
 
     let videoId: String
-    var config: LiveBuyPlayerConfig
+    var config: LivebuyPlayerConfig
 
-    public init(videoId: String, config: LiveBuyPlayerConfig = LiveBuyPlayerConfig()) {
+    public init(videoId: String, config: LivebuyPlayerConfig = LivebuyPlayerConfig()) {
         self.videoId = videoId
         self.config = config
     }
@@ -224,7 +224,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         let coordinator = context.coordinator
         let player = makePlayer(coordinator: coordinator)
 
-        if let template = LiveBuyUI.playerTemplate(for: player) {
+        if let template = LivebuyUI.playerTemplate(for: player) {
             let theme = resolveTheme()
             buildModels(template: template, coordinator: coordinator)
             // Decouple seam (D-decouple): build the overlay inputs, then let the resolved
@@ -237,7 +237,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
             // long-title marquee) throttle with the device's thermal power profile + Reduce
             // Motion (ios-power-profile-animation-throttle-reference-ui). The wrapper owns a
             // `PowerProfileMotionGate` (`@StateObject`, one instance) that pulls
-            // `LiveBuySDK.currentPowerProfile` at attach and subscribes to `POWER_PROFILE_CHANGED`
+            // `LivebuySDK.currentPowerProfile` at attach and subscribes to `POWER_PROFILE_CHANGED`
             // via `player.addEventListener` (aux, coexists with the host's primary listener),
             // injecting the resolved gate into the SwiftUI environment. Purely additive: the
             // leaf views default to a neutral "animate" gate when unwrapped (snapshot fixtures).
@@ -268,14 +268,14 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// popped, etc.) — the ONE guaranteed-fire hook, unlike any individual `onCloseRequest` /
     /// `onDismiss` closure, which only runs for the SPECIFIC user gesture it is wired to and can be
     /// skipped entirely by a caller that forgot to forward it (this is exactly what happened with
-    /// `LiveBuyPlayerPresenter`'s collapsible-player dismiss paths — `composedConfig.onDismiss` /
+    /// `LivebuyPlayerPresenter`'s collapsible-player dismiss paths — `composedConfig.onDismiss` /
     /// the floating card's `onClose` — which only reset presenter-local state and never called
     /// `unload()` / `dismiss()`, leaking PollManager / VideoStatePollManager / the sold-out scanner
     /// / the EndScreen countdown / the active playback engine — ios-refui-player-teardown-release-fix).
     ///
-    /// Calls the bound player's `unload()` to release those resources. `LiveBuyPlayerPresenter`
+    /// Calls the bound player's `unload()` to release those resources. `LivebuyPlayerPresenter`
     /// needs NO changes for this fix to reach it: its `playerLayer` already conditionally renders
-    /// `LiveBuyPlayer` (`if let v = video { ... }`), so a dismiss (`video = nil`) removes this
+    /// `LivebuyPlayer` (`if let v = video { ... }`), so a dismiss (`video = nil`) removes this
     /// representable from the tree and SwiftUI calls this hook automatically.
     ///
     /// `unload()` is idempotent (ios-player-unload-idempotent-core), so this is safe even when a
@@ -294,10 +294,10 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     // MARK: - Compose helpers (D-6: each ≤ 40 lines; side effects injected via params)
 
     /// New core VC + optional listener + force `viewDidLoad` (so core's `onInstantiate`
-    /// fires → LiveBuyUI attaches the template). Also ensures PiP is armed (task 4.1) and
+    /// fires → LivebuyUI attaches the template). Also ensures PiP is armed (task 4.1) and
     /// connects core's auto-PiP entry to backgrounding (task 4.1; honest boundary in 4.2/4.3).
-    private func makePlayer(coordinator: Coordinator) -> LiveBuyPlayerViewController {
-        let player = LiveBuyPlayerViewController()
+    private func makePlayer(coordinator: Coordinator) -> LivebuyPlayerViewController {
+        let player = LivebuyPlayerViewController()
         if let listener = config.eventListener {
             player.setEventListener(listener)
         }
@@ -327,7 +327,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         // is core-internal and bypasses them. `applyAutoAdvanceSwitch` mirrors the swipe seam: it
         // PRE-SYNCs the cover-guard id to next BEFORE firing `config.onVideoSwitchedItem` (so
         // `updateUIViewController`'s cover-guard is a no-op → NO redundant reload; core already
-        // loaded next), and GATES on `onVideoSwitchedItem` being set (a direct `LiveBuyPlayer` host
+        // loaded next), and GATES on `onVideoSwitchedItem` being set (a direct `LivebuyPlayer` host
         // without it must not pre-sync/fire — see `applyAutoAdvanceSwitch`). The presenter's
         // `onVideoSwitchedItem` latches `isInternalSwitch` → the minimized floating card does NOT
         // reopen full-screen. `[weak coordinator]` breaks the retain cycle.
@@ -336,7 +336,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
                                    onVideoSwitchedItem: config.onVideoSwitchedItem)
         }
 
-        // Force loadView/viewDidLoad so the core fires `onInstantiate` → LiveBuyUI attaches
+        // Force loadView/viewDidLoad so the core fires `onInstantiate` → LivebuyUI attaches
         // the DefaultPlayerTemplate that `makeUIViewController` reads next.
         _ = player.view
         return player
@@ -346,7 +346,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// options surface yet → nil (sdkConfig / minimal).
     private func resolveTheme() -> ReferenceUITheme {
         ReferenceUIThemeResolver.resolve(
-            coreTheme: (try? LiveBuy.sdkConfig())?.theme,
+            coreTheme: (try? Livebuy.sdkConfig())?.theme,
             hostOptions: nil)
     }
 
@@ -401,7 +401,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// (`AnyView`) from `design.playerOverlay(...)` — the container does not know the concrete
     /// surface type.
     private func attachOverlay(_ root: AnyView,
-                               to player: LiveBuyPlayerViewController,
+                               to player: LivebuyPlayerViewController,
                                coordinator: Coordinator) {
         let host = UIHostingController(rootView: root)
         host.view.backgroundColor = .clear
@@ -419,7 +419,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     }
 
     /// Seed coordinator state, load the cover video, wrap in a nav controller (bar hidden).
-    private func startPlayback(player: LiveBuyPlayerViewController,
+    private func startPlayback(player: LivebuyPlayerViewController,
                                coordinator: Coordinator) -> UINavigationController {
         coordinator.player = player
         coordinator.coverVideoId = videoId
@@ -434,7 +434,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// 預設商品分享（issue 6）：以 `shareUrl` + `?t=beginTime` present 系統 `UIActivityViewController`。
     /// `shareUrl` 為空 → 退回 core `performShare()`（channel-level 分享事件，由 host listener 處理）。
     /// 從 player VC 最上層呈現（drawer 為 in-shell SheetKit overlay、非 presented VC，故不衝突）。
-    static func presentProductShare(from player: LiveBuyPlayerViewController,
+    static func presentProductShare(from player: LivebuyPlayerViewController,
                                     shareUrl: String,
                                     product: LBProduct) {
         let urlString = productShareURLString(base: shareUrl, beginTime: product.beginTime)
@@ -458,7 +458,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// （= `channel.share_url`，頻道級**不**加 `?t=`——那是商品介紹時間，僅商品分享有意義）present
     /// 系統 `UIActivityViewController`。`shareUrl` 空 → no-op（不開空 sheet；事件已派發、host 自決）。
     /// iPad popover anchor 在播放區底部中央（避免 crash），呈現樣板對齊 `presentProductShare`。
-    static func presentChannelShare(from player: LiveBuyPlayerViewController, shareUrl: String) {
+    static func presentChannelShare(from player: LivebuyPlayerViewController, shareUrl: String) {
         guard !shareUrl.isEmpty else { return }
 
         let items: [Any] = URL(string: shareUrl).map { [$0] } ?? [shareUrl]
@@ -480,11 +480,11 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
     /// NOTE (unit-test-discipline): this exceeds the ≤40-line guideline — it is a FLAT
     /// list of seam forwards (cyclomatic complexity ~1; each closure is `config.onX ??
     /// default`). It is kept as one cohesive helper deliberately: the seam forwards cannot
-    /// be fake-tested (R4: `LiveBuyPlayerViewController` / `DefaultPlayerTemplate` are
+    /// be fake-tested (R4: `LivebuyPlayerViewController` / `DefaultPlayerTemplate` are
     /// `public final` in layers this change MUST NOT modify), so byte-faithfulness to the
     /// proven Example wiring is the correctness guarantee. Splitting it would only scatter
     /// that faithfulness across more surfaces.
-    private func makeOverlayContext(player: LiveBuyPlayerViewController,
+    private func makeOverlayContext(player: LivebuyPlayerViewController,
                                     template: DefaultPlayerTemplate,
                                     theme: ReferenceUITheme,
                                     coordinator: Coordinator) -> PlayerOverlayContext {
@@ -600,12 +600,12 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
                     nicknameController.present(composeAfter: false)
                 }
             },
-            // 設定暱稱 modal 送出 → 以 `LiveBuy.setGuestNickname` 設訪客留言暱稱（**不**用
+            // 設定暱稱 modal 送出 → 以 `Livebuy.setGuestNickname` 設訪客留言暱稱（**不**用
             // `setUser`：設名 ≠ 登入，避免誤觸 logged_in 事件 / PendingAuth 重放 / isGuest 翻 false；
             // rb-ios-nickname-modal-use-guest-nickname / set-guest-nickname-core）、關閉 modal，
             // 並依進入意圖決定是否接著開 composer。
             onNicknameSubmit: { name in
-                LiveBuy.setGuestNickname(name)
+                Livebuy.setGuestNickname(name)
                 let compose = nicknameController.composeAfterSubmit
                 nicknameController.dismiss()
                 if compose { composerController.open() }
@@ -717,7 +717,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         var loginController: LoginPromptController?
         var overlayHost: UIViewController?   // type-erased (PlayerOverlayRootView host)
 
-        weak var player: LiveBuyPlayerViewController?
+        weak var player: LivebuyPlayerViewController?
         /// The last `videoId` prop the representable consumed (cover identity).
         var coverVideoId: String?
         /// What the player actually shows — cover loads AND default in-place switches.
@@ -760,7 +760,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         ///
         /// 1. `didEnterBackground` → core's existing `requestAutoPiP()`: enters OS PiP when the
         ///    host app target has the Background Modes capability + a ready PiP controller,
-        ///    else FALLS BACK to `activeEngine.pause()` (`LiveBuyPlayerViewController.swift:1309`)
+        ///    else FALLS BACK to `activeEngine.pause()` (`LivebuyPlayerViewController.swift:1309`)
         ///    — the drop-in's ONLY source of background pausing. `didEnterBackground` fires only on
         ///    a real background (not transient interruptions), so it never over-triggers; core
         ///    guards `enablePiP` + capability and falls back safely if PiP is impossible.
@@ -793,7 +793,7 @@ public struct LiveBuyPlayer: UIViewControllerRepresentable {
         ///   so it fires only on a real foreground; `didBecomeActive` also fires after a transient
         ///   interruption (Control Center / notification pull) that never backgrounded, which would
         ///   be a spurious resume (the latch also guards this, but the pairing is cleaner + earlier).
-        func armAutoPiP(for player: LiveBuyPlayerViewController) {
+        func armAutoPiP(for player: LivebuyPlayerViewController) {
             self.player = player
 
             // Pure resume state machine — closures capture WEAKLY (Coordinator strongly holds it).
@@ -904,7 +904,7 @@ func switchedVideoItem(id: String, cover: String, title: String,
 
 /// Build the `LBVideoItem` reported via `onVideoSwitchedItem` for the FOURTH in-place switch path —
 /// core's SELF-DRIVEN VOD auto-advance (`.ended` → `load(next)`, surfaced as
-/// `LiveBuyPlayerViewController.onDidAutoAdvance(LBNavItem)` by `ios-vod-autoadvance-switched-item-core`).
+/// `LivebuyPlayerViewController.onDidAutoAdvance(LBNavItem)` by `ios-vod-autoadvance-switched-item-core`).
 /// The other three paths (swipe / hot-pick / watch-next) fire `onVideoSwitchedItem` themselves; this
 /// fourth one is core-internal and bypasses them, so the container relays it here so the collapsible
 /// presenter's floating card tracks the auto-advanced-to video's REAL cover / title / preview.
@@ -925,11 +925,11 @@ func autoAdvanceSwitchedItem(_ nav: LBNavItem) -> LBVideoItem {
 /// The auto-advance switch-sync step (rb-ios-collapsible-autoadvance-switch-sync): the body of the
 /// `player.onDidAutoAdvance` closure wired in `makePlayer`, extracted as a pure function (with the
 /// side effects injected via `coordinator` + `onVideoSwitchedItem`) so the iOS-specific PRE-SYNC +
-/// GATE logic is unit-testable without a real `LiveBuyPlayerViewController` / SwiftUI context.
+/// GATE logic is unit-testable without a real `LivebuyPlayerViewController` / SwiftUI context.
 ///
 /// GATE (iOS-specific, differs from Android): fire ONLY when the host set `onVideoSwitchedItem` — for
 /// the collapsible presenter it always is (its `composedConfig` sets a latch+rebind closure), and only
-/// then does the switch reach the bound `video`. A DIRECT `LiveBuyPlayer` host that did NOT set
+/// then does the switch reach the bound `video`. A DIRECT `LivebuyPlayer` host that did NOT set
 /// `onVideoSwitchedItem` gets no id-only signal on auto-advance either, so PRE-SYNCing the cover id
 /// would make the next re-render's cover-guard reload BACK to the (stale) bound entry id — a
 /// regression. Gating preserves that host's current no-reload behavior.
@@ -942,7 +942,7 @@ func autoAdvanceSwitchedItem(_ nav: LBNavItem) -> LBVideoItem {
 /// does NOT reopen full-screen. This function never writes the host binding, never calls `player.load`,
 /// and never trips `shouldReopenOnVideoChange` directly.
 func applyAutoAdvanceSwitch(_ nav: LBNavItem,
-                           coordinator: LiveBuyPlayer.Coordinator?,
+                           coordinator: LivebuyPlayer.Coordinator?,
                            onVideoSwitchedItem: ((LBVideoItem) -> Void)?) {
     guard let onSwitchedItem = onVideoSwitchedItem else { return }
     coordinator?.currentVideoId = nav.id
@@ -955,7 +955,7 @@ func applyAutoAdvanceSwitch(_ nav: LBNavItem,
 /// Pure background→foreground resume state machine. iOS counterpart of Android
 /// `BackgroundPauseController`, but it owns ONLY the「resume half」: the background-PAUSE half is
 /// done INDIRECTLY by core `requestAutoPiP()`'s fallback `activeEngine.pause()`
-/// (`LiveBuyPlayerViewController.swift:1309`) when the host lacks the Background Modes capability /
+/// (`LivebuyPlayerViewController.swift:1309`) when the host lacks the Background Modes capability /
 /// a ready PiP controller. Before this controller existed, iOS had only that pause half → the
 /// video stayed frozen on the paused frame on foreground return.
 ///
@@ -1061,13 +1061,13 @@ final class ForegroundResumeController {
     }
 }
 
-/// Auxiliary (non-primary) `LiveBuyEventListener` that tracks the ACTUAL OS-PiP state by observing
+/// Auxiliary (non-primary) `LivebuyEventListener` that tracks the ACTUAL OS-PiP state by observing
 /// `PIP_STATE_CHANGE` (`LBEvent.pipStateChange`, params `["active": Bool]`, dispatched by core's
 /// `pipManager.onPiPStart/onPiPStop`). Mirrors `PowerProfileAuxListener`: it NEVER intercepts
 /// (returns `false`), so the host's primary listener still sees the event and core default
 /// semantics stay intact. Held STRONGLY by `Coordinator` (core holds aux listeners weakly — the
 /// caller must retain).
-final class PiPStateAuxListener: NSObject, LiveBuyEventListener {
+final class PiPStateAuxListener: NSObject, LivebuyEventListener {
 
     /// Invoked with the new PiP-active value on every `PIP_STATE_CHANGE`.
     var onActiveChange: ((Bool) -> Void)?

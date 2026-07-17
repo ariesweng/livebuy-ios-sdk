@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ContactMerchantModalView — family-1「聯絡商家」confirm modal (LBPAlertModal)
 //

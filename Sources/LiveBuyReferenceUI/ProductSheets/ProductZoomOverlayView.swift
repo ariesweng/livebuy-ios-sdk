@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ProductZoomOverlayView — family-3 product-image lightbox (rb-ios-product-image-zoom-lightbox)
 //

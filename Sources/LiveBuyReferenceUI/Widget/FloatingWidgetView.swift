@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - FloatingWidgetView — family-5 widget surface 3 (LBPFloatingWidget)
 //

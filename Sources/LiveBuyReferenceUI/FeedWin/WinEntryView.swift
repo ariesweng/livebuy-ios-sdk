@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - WinEntryView — family-2 feed-win surface 2 (unclaimed-win entry)
 //

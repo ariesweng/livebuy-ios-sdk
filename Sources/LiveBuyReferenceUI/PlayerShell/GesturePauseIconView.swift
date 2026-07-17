@@ -1,10 +1,10 @@
 import SwiftUI
-import LiveBuyUI
+import LivebuyUI
 
 // MARK: - GesturePauseIconView — family-1 center pause icon (hold-to-pause feedback)
 //
 // Spec: `reference-ui-rendering/spec.md`
-//   § "LiveBuyReferenceUI PlayerShellView 提供長按暫停手勢 + 中央 pause icon".
+//   § "LivebuyReferenceUI PlayerShellView 提供長按暫停手勢 + 中央 pause icon".
 // Design: `design/templates/minimal/sdk-components.jsx` `LBPGestureHint`「長按畫面 = 暫停 / 繼續」.
 //
 // The centred pause glyph shown WHILE the viewer holds the video area (hold-to-pause).

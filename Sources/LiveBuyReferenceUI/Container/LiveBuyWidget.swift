@@ -1,39 +1,39 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
-// MARK: - LiveBuyWidget — turnkey drop-in 直播列表容器（黃金名）
+// MARK: - LivebuyWidget — turnkey drop-in 直播列表容器（黃金名）
 //
-// The SDK `LiveBuyWidgetCore` is a HEADLESS data source (zero pixels): it owns the
-// videos / pagination / preview-pool and `LiveBuyUI` attaches a zero-pixel view-model.
-// To SEE a widget list a host must (1) own a `LiveBuyWidgetCore`, (2) attach the Default
+// The SDK `LivebuyWidgetCore` is a HEADLESS data source (zero pixels): it owns the
+// videos / pagination / preview-pool and `LivebuyUI` attaches a zero-pixel view-model.
+// To SEE a widget list a host must (1) own a `LivebuyWidgetCore`, (2) attach the Default
 // template, (3) bridge it through `WidgetModel`, (4) render a reference-ui surface, and
 // (5) drive the load lifecycle (configure-wait → reload → demo fallback → grid paging →
 // periodic refresh). That assembly was proven TWICE in the Example (ExampleApp's
 // `WidgetEntryController/WidgetEntryView` + ShopHost's `ShopWidgetController/
-// LiveBuyWidgetModule`, near-identical). `LiveBuyWidget` PROMOTES it into the package so a
+// LivebuyWidgetModule`, near-identical). `LivebuyWidget` PROMOTES it into the package so a
 // host gets a working list in ONE line:
 //
-//     LiveBuyWidget(shopId: "Pw8PJ99J")                  // turnkey carousel
-//     LiveBuyWidget(shopId: "Pw8PJ99J", mode: .grid, config: cfg)
+//     LivebuyWidget(shopId: "Pw8PJ99J")                  // turnkey carousel
+//     LivebuyWidget(shopId: "Pw8PJ99J", mode: .grid, config: cfg)
 //
-// `LiveBuyWidget` is the GOLDEN NAME (design D-0), freed for this container by the
-// prerequisite core change `rename-bare-widget-to-core` (bare data source → `LiveBuyWidgetCore`).
+// `LivebuyWidget` is the GOLDEN NAME (design D-0), freed for this container by the
+// prerequisite core change `rename-bare-widget-to-core` (bare data source → `LivebuyWidgetCore`).
 //
 // PURE ASSEMBLY (governance): it only composes existing reference-ui surfaces
 // (`ScrollableCarouselView` / `ScrollableVideoShopView`) + the existing `WidgetModel`
 // bridge + existing template forwarders (`reload` / `requestLoadMore`). It adds NO
 // view-model and NO pixels. Dependency stays one-way `reference-ui → template → core`.
 
-/// Per-instance wiring for `LiveBuyWidget`. Every interaction closure is OPTIONAL with a
+/// Per-instance wiring for `LivebuyWidget`. Every interaction closure is OPTIONAL with a
 /// documented default; the behavior flags carry production-safe defaults. Promoted from the
 /// two Example controllers' parameters.
-public struct LiveBuyWidgetConfig {
+public struct LivebuyWidgetConfig {
 
-    /// The event listener attached to the underlying `LiveBuyWidgetCore` (per-instance). The
+    /// The event listener attached to the underlying `LivebuyWidgetCore` (per-instance). The
     /// per-host divergence point (ExampleApp's QA stub vs. ShopHost's commerce listener).
     /// Default: none (the SDK's own default flow only).
-    public var eventListener: LiveBuyEventListener?
+    public var eventListener: LivebuyEventListener?
 
     /// Card tap. DEFAULT: `nil` → the tap is inert. This is the most common wire point — a
     /// host that wants tapping a card to open the player wires this (the container does not
@@ -88,19 +88,19 @@ func lbWidgetShouldAutoRefreshTick(usingDemo: Bool, currentPage: Int) -> Bool {
 
 // MARK: - Controller (promoted + deduped from WidgetEntryController / ShopWidgetController)
 
-/// Owns the headless `LiveBuyWidgetCore` + its reference-ui `WidgetModel` for the view's
+/// Owns the headless `LivebuyWidgetCore` + its reference-ui `WidgetModel` for the view's
 /// lifetime, and drives the first-page load, grid pagination, and the host-policy list
-/// refresh. Held by `LiveBuyWidget` as a `@StateObject`.
-final class LiveBuyWidgetController: ObservableObject {
+/// refresh. Held by `LivebuyWidget` as a `@StateObject`.
+final class LivebuyWidgetController: ObservableObject {
 
     /// The headless data source. Retained for the view's lifetime so its attached
     /// `DefaultWidgetTemplate` (which `model` observes) stays alive.
-    private let widget: LiveBuyWidgetCore
-    /// The attached Default template (nil only if `LiveBuyUI.install()` never ran).
+    private let widget: LivebuyWidgetCore
+    /// The attached Default template (nil only if `LivebuyUI.install()` never ran).
     private let template: DefaultWidgetTemplate?
     /// Carousel or grid — drives the demo-fallback shape and the surface choice.
     private let mode: WidgetMode
-    private let config: LiveBuyWidgetConfig
+    private let config: LivebuyWidgetConfig
 
     /// The reference-ui content snapshot the surface binds to. Swapped to demo fixtures only
     /// when the live fetch yields nothing AND `config.showsDemoFallbackWhenEmpty`.
@@ -113,23 +113,23 @@ final class LiveBuyWidgetController: ObservableObject {
 
     private var didLoad = false
 
-    init(shopId: String, mode: WidgetMode, config: LiveBuyWidgetConfig) {
+    init(shopId: String, mode: WidgetMode, config: LivebuyWidgetConfig) {
         self.mode = mode
         self.config = config
 
-        let widget = LiveBuyWidgetCore(shopId: shopId, mode: mode)
+        let widget = LivebuyWidgetCore(shopId: shopId, mode: mode)
         if let listener = config.eventListener { widget.setEventListener(listener) }
         self.widget = widget
 
-        let template = LiveBuyUI.widgetTemplate(for: widget)
+        let template = LivebuyUI.widgetTemplate(for: widget)
         self.template = template
         self.model = template.map { WidgetModel(template: $0) } ?? WidgetModel()
 
         self.theme = ReferenceUIThemeResolver.resolve(
-            coreTheme: (try? LiveBuy.sdkConfig())?.theme, hostOptions: nil)
+            coreTheme: (try? Livebuy.sdkConfig())?.theme, hostOptions: nil)
     }
 
-    /// Load the first page once. Waits for `LiveBuy.configure()` (kicked off at launch) to
+    /// Load the first page once. Waits for `Livebuy.configure()` (kicked off at launch) to
     /// finish first — otherwise `loadFirstPage()` would hit `requireAPIClient()` and `fatalError`.
     /// With a valid shop + credentials this shows REAL `/sdk/widget` videos; it only falls back
     /// to demo fixtures when the live fetch is empty AND the host opted in.
@@ -139,12 +139,12 @@ final class LiveBuyWidgetController: ObservableObject {
         didLoad = true
 
         var waited = 0
-        while LiveBuy.shared == nil && waited < 50 {
+        while Livebuy.shared == nil && waited < 50 {
             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
             waited += 1
         }
 
-        if LiveBuy.shared != nil { await template?.reload() }
+        if Livebuy.shared != nil { await template?.reload() }
 
         if lbWidgetShouldUseDemoFallback(
             videosEmpty: model.videos.isEmpty, enabled: config.showsDemoFallbackWhenEmpty) {
@@ -236,25 +236,25 @@ final class LiveBuyWidgetController: ObservableObject {
     }
 }
 
-// MARK: - LiveBuyWidget (public turnkey container)
+// MARK: - LivebuyWidget (public turnkey container)
 
-/// Turnkey drop-in 直播列表容器. Owns a headless `LiveBuyWidgetCore` (via an internal
+/// Turnkey drop-in 直播列表容器. Owns a headless `LivebuyWidgetCore` (via an internal
 /// `@StateObject` controller), attaches the Default template, bridges through `WidgetModel`,
 /// and renders the drop-in scrollable surface for the host-chosen `mode`. Self-manages the
 /// load lifecycle: configure-wait → `reload()` → optional demo fallback → grid pagination →
 /// host-policy list refresh. Card taps / see-more / feed publication forward via `config`.
-public struct LiveBuyWidget: View {
+public struct LivebuyWidget: View {
 
-    @StateObject private var controller: LiveBuyWidgetController
+    @StateObject private var controller: LivebuyWidgetController
     /// Fixed at init by the host — drives which surface renders (NOT `model.mode`, which can
     /// lag during the demo-fixture fallback).
     private let mode: WidgetMode
-    private let config: LiveBuyWidgetConfig
+    private let config: LivebuyWidgetConfig
 
     /// Default-open player presentation (dropin-widget-default-open-player): a tap on a
     /// NON-external card sets this ONLY when the host did NOT wire `config.onTapVideo`; the
-    /// `.fullScreenCover` in `body` then presents a full-screen `LiveBuyPlayer`. `fullScreenCover`
-    /// (not a self-attached persistent `.liveBuyPlayer` overlay) so the player is full-screen
+    /// `.fullScreenCover` in `body` then presents a full-screen `LivebuyPlayer`. `fullScreenCover`
+    /// (not a self-attached persistent `.livebuyPlayer` overlay) so the player is full-screen
     /// regardless of how small the widget is embedded (design D1). Stays `nil` when the host set
     /// `onTapVideo` (override) → the cover never arms. Wrapped because `LBVideoItem` is not
     /// `Identifiable`.
@@ -268,9 +268,9 @@ public struct LiveBuyWidget: View {
 
     public init(shopId: String,
                 mode: WidgetMode = .carousel,
-                config: LiveBuyWidgetConfig = LiveBuyWidgetConfig()) {
+                config: LivebuyWidgetConfig = LivebuyWidgetConfig()) {
         _controller = StateObject(
-            wrappedValue: LiveBuyWidgetController(shopId: shopId, mode: mode, config: config))
+            wrappedValue: LivebuyWidgetController(shopId: shopId, mode: mode, config: config))
         self.mode = mode
         self.config = config
     }
@@ -297,7 +297,7 @@ public struct LiveBuyWidget: View {
             // `defaultPresented == nil` (host wired `onTapVideo`, or no tap yet) → at rest this
             // adds nothing visible, so existing widget snapshots stay byte-identical.
             .fullScreenCover(item: $defaultPresented) { p in
-                LiveBuyPlayer(videoId: p.id, config: defaultPlayerConfig)
+                LivebuyPlayer(videoId: p.id, config: defaultPlayerConfig)
                     .ignoresSafeArea()
             }
     }
@@ -327,7 +327,7 @@ public struct LiveBuyWidget: View {
         }
     }
 
-    /// The design composing the widget surface (mirrors `LiveBuyPlayer.resolveDesign()`):
+    /// The design composing the widget surface (mirrors `LivebuyPlayer.resolveDesign()`):
     /// host-set `config.design`, default `MinimalDesign`. Backend `sdkConfig.design` is a
     /// follow-up change.
     private func resolveDesign() -> ReferenceUIDesign {
@@ -347,10 +347,10 @@ public struct LiveBuyWidget: View {
     /// Config for the default-open player. Inherits the widget's `design` so the player matches
     /// the widget visually (D4). `onDismiss` / `onMinimize` clear `defaultPresented` to dismiss the
     /// `fullScreenCover` — the default cover has no floating-preview target (the minimize→floating
-    /// collapse needs the root-level `.liveBuyPlayer` presenter; design D1 tradeoff), so minimize
+    /// collapse needs the root-level `.livebuyPlayer` presenter; design D1 tradeoff), so minimize
     /// closes. The player's own `dismiss(animated:)` default would not dismiss a SwiftUI cover.
-    private var defaultPlayerConfig: LiveBuyPlayerConfig {
-        var c = LiveBuyPlayerConfig()
+    private var defaultPlayerConfig: LivebuyPlayerConfig {
+        var c = LivebuyPlayerConfig()
         c.design = config.design
         c.onDismiss = { _ in defaultPresented = nil }
         c.onMinimize = { defaultPresented = nil }

@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - GuestNameEditModalView — family-6 gap-surface 4 (guest nickname-edit modal)
 //
@@ -27,7 +27,7 @@ import LiveBuyUI
 //      emits `GUEST_NAME_EDIT_REQUEST`; the CONTAINER wires the ENTRY — e.g.
 //      tapping the current name elsewhere — so this stored closure is kept even
 //      though it is not visually triggered INSIDE the modal), `onSubmit` (送出 →
-//      host-wired new-name fulfilment via `LiveBuySDK.setUser`), `onDismiss`
+//      host-wired new-name fulfilment via `LivebuySDK.setUser`), `onDismiss`
 //      (scrim tap / close → clears the container's presentation binding).
 //
 // This sub-view reads ONLY its passed-in values; it never reaches back into
@@ -36,7 +36,7 @@ import LiveBuyUI
 // action-free).
 //
 // reference-ui NEVER calls core directly: the 送出 CTA funnels to `onSubmit`, which
-// the container fulfils via `LiveBuySDK.setUser`; the「請求改名」passthrough intent
+// the container fulfils via `LivebuySDK.setUser`; the「請求改名」passthrough intent
 // funnels to `onRequestEdit`, which the container wires to
 // `model.requestGuestNameEdit()`.
 //
@@ -84,7 +84,7 @@ public struct GuestNameEditModalView: View {
     /// stored even though the modal does not visually trigger it from INSIDE, so the
     /// surface keeps the full interaction contract. nil for demo / snapshot instances.
     private let onRequestEdit: (() -> Void)?
-    /// Host-wired 送出 → the container fulfils the new name via `LiveBuySDK.setUser`.
+    /// Host-wired 送出 → the container fulfils the new name via `LivebuySDK.setUser`.
     /// reference-ui NEVER calls core directly (one-way data flow). Passes the trimmed
     /// nickname. nil for demo / snapshot instances.
     private let onSubmit: ((String) -> Void)?
@@ -305,7 +305,7 @@ public struct GuestNameEditModalView: View {
     //
     // Enabled (1...10 trimmed) → accent fill / #fff fg. Disabled → strokeStrong fill /
     // textFaint fg. Tap guards `canSubmit`, then forwards the trimmed name to
-    // `onSubmit` (host fulfils via `LiveBuySDK.setUser`). `.buttonStyle(PlainButtonStyle())`.
+    // `onSubmit` (host fulfils via `LivebuySDK.setUser`). `.buttonStyle(PlainButtonStyle())`.
 
     private var submitButton: some View {
         Button(action: { guard canSubmit else { return }; onSubmit?(trimmed) }) {

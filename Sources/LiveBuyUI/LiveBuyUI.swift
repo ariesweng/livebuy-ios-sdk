@@ -1,12 +1,12 @@
-import LiveBuySDK
+import LivebuySDK
 
 /// Entry point for the optional UI template layer.
-/// Call `install(template:options:)` once (before or after `LiveBuySDK.configure()`)
+/// Call `install(template:options:)` once (before or after `LivebuySDK.configure()`)
 /// to enable a built-in UI template.  The merge of template defaults, host options,
 /// and sdkConfig is deferred to Widget / Player instantiate time.
 ///
-/// Spec: `ui-template-foundation/spec.md` § "LiveBuyUI 入口 API"
-public final class LiveBuyUI {
+/// Spec: `ui-template-foundation/spec.md` § "LivebuyUI 入口 API"
+public final class LivebuyUI {
 
     private static var _installedTemplate: AnyLBTemplate?
     private static var _hostOptions: LBUIOptions?
@@ -18,7 +18,7 @@ public final class LiveBuyUI {
     /// Install a template.  Idempotent — repeated calls replace the previous registration.
     ///
     /// Registers the core's template-agnostic `onInstantiate` hooks
-    /// (`LiveBuyPlayerViewController` / `LiveBuyWidgetCore`) so that every Player /
+    /// (`LivebuyPlayerViewController` / `LivebuyWidgetCore`) so that every Player /
     /// Widget instantiated after this call gets the matching Default template
     /// handler attached and its SDK events wired (two routes — see
     /// `TemplateAttachment.swift`).  The hook closures hold only install-level
@@ -33,10 +33,10 @@ public final class LiveBuyUI {
         _installedTemplate = template
         _hostOptions = options
         // Wire the core instantiation hooks → attach at instantiate time.
-        LiveBuyPlayerViewController.onInstantiate = { vc in
+        LivebuyPlayerViewController.onInstantiate = { vc in
             TemplateWiring.attachPlayer(vc)
         }
-        LiveBuyWidgetCore.onInstantiate = { widget in
+        LivebuyWidgetCore.onInstantiate = { widget in
             TemplateWiring.attachWidget(widget)
         }
     }
@@ -48,8 +48,8 @@ public final class LiveBuyUI {
     public static func uninstall() {
         _installedTemplate = nil
         _hostOptions = nil
-        LiveBuyPlayerViewController.onInstantiate = nil
-        LiveBuyWidgetCore.onInstantiate = nil
+        LivebuyPlayerViewController.onInstantiate = nil
+        LivebuyWidgetCore.onInstantiate = nil
     }
 
     /// Whether a template is currently installed.
@@ -73,7 +73,7 @@ public final class LiveBuyUI {
     ///
     /// - Parameter player: the Player to look up the attached template for.
     /// - Returns: the attached `DefaultPlayerTemplate`, or `nil`.
-    public static func playerTemplate(for player: LiveBuyPlayerViewController) -> DefaultPlayerTemplate? {
+    public static func playerTemplate(for player: LivebuyPlayerViewController) -> DefaultPlayerTemplate? {
         TemplateAttachment.bound(to: player)?.playerTemplate
     }
 
@@ -97,7 +97,7 @@ public final class LiveBuyUI {
     ///
     /// - Parameter widget: the Widget to look up the attached template for.
     /// - Returns: the attached `DefaultWidgetTemplate`, or `nil`.
-    public static func widgetTemplate(for widget: LiveBuyWidgetCore) -> DefaultWidgetTemplate? {
+    public static func widgetTemplate(for widget: LivebuyWidgetCore) -> DefaultWidgetTemplate? {
         TemplateAttachment.bound(to: widget)?.widgetTemplate
     }
 

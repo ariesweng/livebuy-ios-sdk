@@ -1,4 +1,4 @@
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - DefaultWinClaim — §2/§3/§4 win unclaimed + claim submit + result state
 //
@@ -16,13 +16,13 @@ import LiveBuySDK
 
 /// Abstraction over the core's 領獎 entry point so the win-claim view-model is
 /// unit-testable with a `Capturing` requester (no UIKit / live SDK needed).
-/// `LiveBuyPlayerViewController` already exposes this exact signature; it
+/// `LivebuyPlayerViewController` already exposes this exact signature; it
 /// conforms via a source-compatible extension (no behaviour change).
 public protocol AwardClaimRequesting: AnyObject {
     func requestAwardClaim(winner: LBWinner, contact: LBAwardClaimInput?)
 }
 
-extension LiveBuyPlayerViewController: AwardClaimRequesting {}
+extension LivebuyPlayerViewController: AwardClaimRequesting {}
 
 /// Host-facing CTA classification for a win award (design D2 / spec table).
 /// Default flow has NO email step — these only drive CTA wording.

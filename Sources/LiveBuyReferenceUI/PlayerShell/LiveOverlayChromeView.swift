@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - LiveOverlayChromeView — family-1 surface 4 (LIVE overlay chrome)
 //
@@ -515,7 +515,7 @@ public struct LiveOverlayChromeView: View {
     static let hintSwipe = "上下滑動 = 切換影片"
 
     /// The pinned product is "narrating" when `narrateStatus == 2`
-    /// (core convention — see `LiveBuyPlayerViewController.narrating`).
+    /// (core convention — see `LivebuyPlayerViewController.narrating`).
     static func isNarrating(_ product: LBProduct) -> Bool {
         product.narrateStatus == 2
     }

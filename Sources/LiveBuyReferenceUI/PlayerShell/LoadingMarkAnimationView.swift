@@ -28,7 +28,7 @@ import Foundation
 // `AsyncImage` (also iOS 15+) for the identical reason. `xcodebuild test` caught
 // the `TimelineView` availability error at apply time. Fixed by driving the frame
 // clock with `Timer.scheduledTimer` + `@State`, scoped to `.onAppear`/`.onDisappear`
-// (mirrors the existing `refreshTimer` precedent in `LiveBuyWidget.swift`) and added
+// (mirrors the existing `refreshTimer` precedent in `LivebuyWidget.swift`) and added
 // to the run loop's `.common` mode so it keeps ticking during scroll/gesture
 // tracking. This is exactly the alternative design.md's decision 1 had (incorrectly)
 // rejected — the rejection's premise (no compatibility cost either way) didn't hold.
@@ -67,7 +67,7 @@ struct LoadingMarkAnimationView: View {
 
     /// The active frame-clock timer, owned for the lifetime this view is on-screen.
     /// `nil` while off-screen — started in `.onAppear`, invalidated in `.onDisappear`
-    /// (mirrors `LiveBuyWidget.swift`'s `refreshTimer` start/stop lifecycle).
+    /// (mirrors `LivebuyWidget.swift`'s `refreshTimer` start/stop lifecycle).
     @State private var timer: Timer?
 
     var body: some View {

@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ErrorScreenView — family-4 player moment surface 3 (terminal error)
 //
@@ -327,7 +327,7 @@ public struct ErrorScreenView: View {
 // Deterministic error snapshots for each `kind` so previews / the snapshot test
 // render the three error variants without a live player. `phase` is always
 // `.failed` (the only core-exposed phase). All inits were verified against the
-// public `LiveBuyUI` source (`DefaultErrorState.swift`).
+// public `LivebuyUI` source (`DefaultErrorState.swift`).
 
 public extension ErrorScreenView {
 

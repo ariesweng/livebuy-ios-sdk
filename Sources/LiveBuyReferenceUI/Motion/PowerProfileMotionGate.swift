@@ -1,13 +1,13 @@
 import SwiftUI
 import UIKit
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - PowerProfileMotionGate — reference-ui consumption of the power-profile signal
 //   (ios-power-profile-animation-throttle-reference-ui — Phase 2 C, reference-ui, iOS)
 //
 // Depends On: ios-power-profile-thermal-core (committed `616fb0ef`). This subscribes to the
 // EXISTING core signal — it adds NO core / view-model code:
-//   - pulls `LiveBuySDK.currentPowerProfile` at attach (late-subscriber seed),
+//   - pulls `LivebuySDK.currentPowerProfile` at attach (late-subscriber seed),
 //   - subscribes to the notification-type `POWER_PROFILE_CHANGED` unified event via the
 //     core `Player`'s existing public `addEventListener(_:)` (an AUXILIARY listener that
 //     coexists with the host's primary `setEventListener`),
@@ -25,12 +25,12 @@ struct SystemReduceMotionProvider: ReduceMotionProviding {
     var isReduceMotionEnabled: Bool { UIAccessibility.isReduceMotionEnabled }
 }
 
-/// Auxiliary `LiveBuyEventListener` that maps `POWER_PROFILE_CHANGED`'s `profile` wire name
+/// Auxiliary `LivebuyEventListener` that maps `POWER_PROFILE_CHANGED`'s `profile` wire name
 /// back to `LBPowerProfile`. Mirrors the `livebuy-ui` `TemplateAuxListener` precedent: it is
 /// a NON-primary listener, so it returns `false` (the host's primary listener still sees the
 /// event and core default semantics stay intact). Held STRONGLY by `PowerProfileMotionGate`
 /// (the core holds aux listeners weakly — the caller must retain).
-final class PowerProfileAuxListener: NSObject, LiveBuyEventListener {
+final class PowerProfileAuxListener: NSObject, LivebuyEventListener {
 
     /// Invoked (on the dispatcher's thread — possibly off-main) with the new committed tier.
     var onProfile: ((LBPowerProfile) -> Void)?
@@ -62,13 +62,13 @@ final class PowerProfileMotionGate: ObservableObject {
     private let reduceMotion: ReduceMotionProviding
     private let notificationCenter: NotificationCenter
     /// Weak — used only to `removeEventListener` on teardown (never to extend VC lifetime).
-    private weak var player: LiveBuyPlayerViewController?
+    private weak var player: LivebuyPlayerViewController?
     private let auxListener = PowerProfileAuxListener()
     private var listenerToken: LBListenerToken?
     private var reduceMotionObserver: NSObjectProtocol?
 
     init(
-        player: LiveBuyPlayerViewController?,
+        player: LivebuyPlayerViewController?,
         reduceMotion: ReduceMotionProviding = SystemReduceMotionProvider(),
         notificationCenter: NotificationCenter = .default
     ) {
@@ -76,10 +76,10 @@ final class PowerProfileMotionGate: ObservableObject {
         self.reduceMotion = reduceMotion
         self.notificationCenter = notificationCenter
         // Late-subscriber pull: seed from the current committed tier + live Reduce Motion.
-        // NB: the public SDK entry type is `LiveBuy` (the `LiveBuySDK` name is the MODULE);
-        // reference-ui references every core static through `LiveBuy.` (e.g. `LiveBuy.sdkConfig`).
+        // NB: the public SDK entry type is `Livebuy` (the `LivebuySDK` name is the MODULE);
+        // reference-ui references every core static through `Livebuy.` (e.g. `Livebuy.sdkConfig`).
         self.gate = ContinuousAnimationGate(
-            powerProfile: LiveBuy.currentPowerProfile,
+            powerProfile: Livebuy.currentPowerProfile,
             reduceMotionEnabled: reduceMotion.isReduceMotionEnabled
         )
         // Aux (non-primary) subscription to POWER_PROFILE_CHANGED — coexists with the host's
@@ -129,7 +129,7 @@ struct PowerProfileMotionEnvironment<Content: View>: View {
     @StateObject private var motionGate: PowerProfileMotionGate
     private let content: Content
 
-    init(player: LiveBuyPlayerViewController?, @ViewBuilder content: () -> Content) {
+    init(player: LivebuyPlayerViewController?, @ViewBuilder content: () -> Content) {
         _motionGate = StateObject(wrappedValue: PowerProfileMotionGate(player: player))
         self.content = content()
     }

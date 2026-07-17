@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - MiniCartView — family-3 product sheet-stack surface 2 (mini-cart peek)
 //

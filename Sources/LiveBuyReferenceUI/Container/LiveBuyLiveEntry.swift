@@ -1,30 +1,30 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
-// MARK: - LiveBuyLiveEntry — turnkey drop-in「現正直播」浮窗入口容器（Tier B）
+// MARK: - LivebuyLiveEntry — turnkey drop-in「現正直播」浮窗入口容器（Tier B）
 //
 // 「全店現正有直播時，畫面角落浮一張入口卡，點了開播放器」是直播導流的主入口。SDK 從
 // 未把它做成 drop-in：`quickstart §8.1` 要 host「自組」——自己 30s 輪詢
-// `LiveBuy.fetchLatestLive`、自己 gate `liveStatus == 1`、自己組裸 `FloatingWidgetView`、
+// `Livebuy.fetchLatestLive`、自己 gate `liveStatus == 1`、自己組裸 `FloatingWidgetView`、
 // 自己接 dismiss / live_end 即時隱藏 / 拖曳 clamp。這段邏輯已在四端 Example 各自重抄一遍
 // （`ContentView.FloatingLiveModel` ＋拖曳手勢＋`.lbLiveEnded` 監聽＋`dismissed` 狀態）。
 //
-// `LiveBuyLiveEntry` 把它 PROMOTE 進套件，比照既有 `LiveBuyWidget` / `LiveBuyPlayer`
+// `LivebuyLiveEntry` 把它 PROMOTE 進套件，比照既有 `LivebuyWidget` / `LivebuyPlayer`
 // （archive `introduce-dropin-widget-container`）的「Example 控制器 → 一行 drop-in」模式，
 // 讓 host 一行接好：
 //
 //     YourHomeView()
 //         .overlay(alignment: .bottomTrailing) {
-//             LiveBuyLiveEntry(shopId: "Pw8PJ99J")               // 全預設
+//             LivebuyLiveEntry(shopId: "Pw8PJ99J")               // 全預設
 //         }
 //
 //     // 或帶 config：
-//     LiveBuyLiveEntry(shopId: "Pw8PJ99J", config: cfg)
+//     LivebuyLiveEntry(shopId: "Pw8PJ99J", config: cfg)
 //
-// 與 `LiveBuyWidget(mode: .floating)` 的差異（避免混淆）：
-//   • `LiveBuyWidget(mode: .floating)` ＝「指定**單一 videoId** 的迷你播放器浮窗」。
-//   • `LiveBuyLiveEntry` ＝「**自動偵測全店現正直播**的入口卡」——host 不指定 video，
+// 與 `LivebuyWidget(mode: .floating)` 的差異（避免混淆）：
+//   • `LivebuyWidget(mode: .floating)` ＝「指定**單一 videoId** 的迷你播放器浮窗」。
+//   • `LivebuyLiveEntry` ＝「**自動偵測全店現正直播**的入口卡」——host 不指定 video，
 //     容器自己輪詢 `fetchLatestLive` 找出當前 `liveStatus == 1` 的那一場。
 //
 // PURE ASSEMBLY（governance）：像素層 100% reuse 既有 `FloatingWidgetView`
@@ -47,7 +47,7 @@ func lbLiveEntryShouldResetDismiss(currentId: String?, newId: String?) -> Bool {
     currentId != newId
 }
 
-/// 把拖曳後的 offset clamp 在容器邊界內——與 reference-ui `LiveBuyPlayerPresenter`
+/// 把拖曳後的 offset clamp 在容器邊界內——與 reference-ui `LivebuyPlayerPresenter`
 /// 的 `clampFloatingOffset` 同語義（bottom-trailing 錨點：x/y ≤ 0；下界讓卡片的左/上緣
 /// 留在容器內、扣掉靜止 inset）。純函式（無狀態），幾何易於推理。
 func lbLiveEntryClampOffset(
@@ -74,14 +74,14 @@ extension Notification.Name {
     static let lbLiveEnded = Notification.Name("lb_live_ended")
 }
 
-// MARK: - Controller（生命週期：輪詢 / gate / dismissed / live-end，對稱 LiveBuyWidgetController）
+// MARK: - Controller（生命週期：輪詢 / gate / dismissed / live-end，對稱 LivebuyWidgetController）
 
-/// 擁有「現正直播」入口的生命週期：輪詢 `LiveBuy.fetchLatestLive` → 經 `lbLiveEntryGate`
+/// 擁有「現正直播」入口的生命週期：輪詢 `Livebuy.fetchLatestLive` → 經 `lbLiveEntryGate`
 /// 只認 `liveStatus == 1` → 換場重置 `dismissed` → 監聽 `.lbLiveEnded` 即時隱藏。所有副作用
 /// （輪詢 Task、通知訂閱、dismissed 狀態）收在這裡，view 透過 `@Published` 綁定（對稱
-/// `LiveBuyWidgetController`）。`fetch` 由 ctor 注入（internal-testability：副作用注入），
-/// 預設綁 `LiveBuy.fetchLatestLive(id:)`，單測可換 `Fake*`。
-final class LiveBuyLiveEntryController: ObservableObject {
+/// `LivebuyWidgetController`）。`fetch` 由 ctor 注入（internal-testability：副作用注入），
+/// 預設綁 `Livebuy.fetchLatestLive(id:)`，單測可換 `Fake*`。
+final class LivebuyLiveEntryController: ObservableObject {
 
     /// 目前要預覽的現正直播，或 nil（無直播 / 被 gate 吸收 / 已結束）。驅動入口的存在與否。
     @Published private(set) var live: LBVideoItem?
@@ -89,12 +89,12 @@ final class LiveBuyLiveEntryController: ObservableObject {
     @Published private(set) var dismissed: Bool = false
 
     /// 解析後的 reference-ui theme（`sdkConfig.theme` → minimal palette），與
-    /// `LiveBuyPlayer` / 最小化播放器卡同一 resolver，讓入口卡與播放器品牌一致。
+    /// `LivebuyPlayer` / 最小化播放器卡同一 resolver，讓入口卡與播放器品牌一致。
     let theme: ReferenceUITheme
 
     private let shopId: String
     private let pollInterval: TimeInterval
-    /// 注入的 fetch 副作用（預設 `LiveBuy.fetchLatestLive(id:)`）。
+    /// 注入的 fetch 副作用（預設 `Livebuy.fetchLatestLive(id:)`）。
     private let fetch: (String) async throws -> LBVideoItem?
 
     /// 最後套用的直播 id——偵測「新一場」以重置 `dismissed`。
@@ -108,12 +108,12 @@ final class LiveBuyLiveEntryController: ObservableObject {
 
     init(shopId: String,
          pollInterval: TimeInterval = 30,
-         fetch: @escaping (String) async throws -> LBVideoItem? = { try await LiveBuy.fetchLatestLive(id: $0) }) {
+         fetch: @escaping (String) async throws -> LBVideoItem? = { try await Livebuy.fetchLatestLive(id: $0) }) {
         self.shopId = shopId
         self.pollInterval = pollInterval
         self.fetch = fetch
         self.theme = ReferenceUIThemeResolver.resolve(
-            coreTheme: (try? LiveBuy.sdkConfig())?.theme, hostOptions: nil)
+            coreTheme: (try? Livebuy.sdkConfig())?.theme, hostOptions: nil)
         observeLiveEnd()
     }
 
@@ -187,7 +187,7 @@ final class LiveBuyLiveEntryController: ObservableObject {
             }
     }
 
-    // 對稱 `LiveBuyWidgetController.deinit`：invalidate 輪詢、移除通知觀察者，避免洩漏。
+    // 對稱 `LivebuyWidgetController.deinit`：invalidate 輪詢、移除通知觀察者，避免洩漏。
     deinit {
         pollTask?.cancel()
         if let obs = liveEndObserver { NotificationCenter.default.removeObserver(obs) }
@@ -196,12 +196,12 @@ final class LiveBuyLiveEntryController: ObservableObject {
 
 // MARK: - Config（全選填、production-safe 預設）
 
-/// `LiveBuyLiveEntry` 的逐實例接線。每個互動 closure 皆 OPTIONAL 且有文件化預設；
+/// `LivebuyLiveEntry` 的逐實例接線。每個互動 closure 皆 OPTIONAL 且有文件化預設；
 /// 行為旗標帶 production-safe 預設。Promote 自 Example 的 floating-live 樣板參數。
-public struct LiveBuyLiveEntryConfig {
+public struct LivebuyLiveEntryConfig {
 
-    /// 點整張浮窗。DEFAULT `nil` → 容器**預設以 `fullScreenCover` 開全螢幕 in-app `LiveBuyPlayer`**
-    /// （載入該浮窗影片；對齊 `LiveBuyWidget.onTapVideo` 的預設開播放器，dropin-live-entry-default-open-player）。
+    /// 點整張浮窗。DEFAULT `nil` → 容器**預設以 `fullScreenCover` 開全螢幕 in-app `LivebuyPlayer`**
+    /// （載入該浮窗影片；對齊 `LivebuyWidget.onTapVideo` 的預設開播放器，dropin-live-entry-default-open-player）。
     /// host 設了 → 完全覆蓋預設導頁；`{ _ in }` = 真 no-op。外部平台直播（`externalLiveWatchURL` 非 nil）
     /// → **預設開平台 URL**（優先序最高，與 widget 一致）；host 想自管外部直播設 `onTap` 即覆蓋整條。
     public var onTap: ((LBVideoItem) -> Void)?
@@ -233,21 +233,21 @@ public struct LiveBuyLiveEntryConfig {
 // MARK: - 量測卡片尺寸（拖曳 clamp 用）
 
 /// 量測浮窗卡的尺寸，讓拖曳 clamp 知道卡片範圍（把左/上緣留在容器內）。
-/// 對應 Example `FloatingLiveCardSizeKey` / reference-ui `LiveBuyPlayerPresenter.FloatingCardSizeKey`。
+/// 對應 Example `FloatingLiveCardSizeKey` / reference-ui `LivebuyPlayerPresenter.FloatingCardSizeKey`。
 private struct LiveEntryCardSizeKey: PreferenceKey {
     static var defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
 }
 
-// MARK: - LiveBuyLiveEntry（public turnkey 容器）
+// MARK: - LivebuyLiveEntry（public turnkey 容器）
 
 /// Turnkey drop-in「現正直播」浮窗入口。內含 `@StateObject` controller 持有輪詢 / gate /
 /// dismissed / live-end 生命週期；`onAppear` 起輪詢、`onDisappear` 停。無直播 / 已關閉 /
 /// 尚未偵測到直播時渲染 `EmptyView`（不佔可見表面）。像素 reuse `FloatingWidgetView`。
-public struct LiveBuyLiveEntry: View {
+public struct LivebuyLiveEntry: View {
 
-    @StateObject private var controller: LiveBuyLiveEntryController
-    private let config: LiveBuyLiveEntryConfig
+    @StateObject private var controller: LivebuyLiveEntryController
+    private let config: LivebuyLiveEntryConfig
 
     // 拖曳狀態（比照 Example floating-live：committed offset + 進行中位移 + 量測卡片尺寸）。
     @State private var offset: CGSize = .zero
@@ -255,8 +255,8 @@ public struct LiveBuyLiveEntry: View {
     @State private var cardSize: CGSize = .zero
 
     /// Default-open player presentation (dropin-live-entry-default-open-player)：點非外部浮窗
-    /// 只在 host **未接** `config.onTap` 時設此 → body 的 `.fullScreenCover` 開全螢幕 `LiveBuyPlayer`。
-    /// 用 `fullScreenCover`（而非 self-attach 持久 `.liveBuyPlayer` overlay）讓 player 不被浮窗的小尺寸
+    /// 只在 host **未接** `config.onTap` 時設此 → body 的 `.fullScreenCover` 開全螢幕 `LivebuyPlayer`。
+    /// 用 `fullScreenCover`（而非 self-attach 持久 `.livebuyPlayer` overlay）讓 player 不被浮窗的小尺寸
     /// 框限、全螢幕呈現（design D1，同 widget change）。host 設了 `onTap` → 永不設此（cover 不 arm）。
     /// `LBVideoItem` 非 `Identifiable` → 私有 wrapper。
     @State private var defaultPresented: PresentedVideo?
@@ -277,8 +277,8 @@ public struct LiveBuyLiveEntry: View {
         NotificationCenter.default.post(name: .lbLiveEnded, object: nil)
     }
 
-    public init(shopId: String, config: LiveBuyLiveEntryConfig = LiveBuyLiveEntryConfig()) {
-        _controller = StateObject(wrappedValue: LiveBuyLiveEntryController(
+    public init(shopId: String, config: LivebuyLiveEntryConfig = LivebuyLiveEntryConfig()) {
+        _controller = StateObject(wrappedValue: LivebuyLiveEntryController(
             shopId: shopId, pollInterval: config.pollInterval))
         self.config = config
     }
@@ -289,9 +289,9 @@ public struct LiveBuyLiveEntry: View {
     /// controller 方法——這是唯一能證明 `.onAppear` 真的被 SwiftUI 觸發的方式
     /// （live-entry-onappear-poll-start-fix regression coverage）。
     init(shopId: String,
-         config: LiveBuyLiveEntryConfig = LiveBuyLiveEntryConfig(),
+         config: LivebuyLiveEntryConfig = LivebuyLiveEntryConfig(),
          fetchForTesting: @escaping (String) async throws -> LBVideoItem?) {
-        _controller = StateObject(wrappedValue: LiveBuyLiveEntryController(
+        _controller = StateObject(wrappedValue: LivebuyLiveEntryController(
             shopId: shopId, pollInterval: config.pollInterval, fetch: fetchForTesting))
         self.config = config
     }
@@ -316,7 +316,7 @@ public struct LiveBuyLiveEntry: View {
         // 時 inert（host 接了 onTap，或尚未點）→ 靜止時不加任何可見像素，既有 live-entry /
         // FloatingWidgetView baseline byte-identical。
         .fullScreenCover(item: $defaultPresented) { p in
-            LiveBuyPlayer(videoId: p.id, config: defaultPlayerConfig)
+            LivebuyPlayer(videoId: p.id, config: defaultPlayerConfig)
                 .ignoresSafeArea()
         }
     }
@@ -385,10 +385,10 @@ public struct LiveBuyLiveEntry: View {
     /// 預設開播放器的 config。entry 無 `design` 欄位（用 sdkConfig theme 同源 resolver 解析），故
     /// player 沿用預設 `MinimalDesign`，品牌與入口卡一致。`onDismiss` / `onMinimize` 清
     /// `defaultPresented` 以關 `fullScreenCover`——cover 無 floating-preview target（minimize→floating
-    /// 收合需 root 級 `.liveBuyPlayer` presenter，design D1 取捨），故 minimize 即關；player 自身的
+    /// 收合需 root 級 `.livebuyPlayer` presenter，design D1 取捨），故 minimize 即關；player 自身的
     /// `dismiss(animated:)` 預設無法關 SwiftUI cover。
-    private var defaultPlayerConfig: LiveBuyPlayerConfig {
-        var c = LiveBuyPlayerConfig()
+    private var defaultPlayerConfig: LivebuyPlayerConfig {
+        var c = LivebuyPlayerConfig()
         c.onDismiss = { _ in defaultPresented = nil }
         c.onMinimize = { defaultPresented = nil }
         return c

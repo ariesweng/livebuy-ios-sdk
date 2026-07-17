@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - MinimalDesign — the default ReferenceUIDesign conformer
 //
@@ -180,7 +180,7 @@ struct PlayerOverlayRootView: View {
     let onSubscribe: () -> Void
     /// LIVE 底部 bar 暱稱按鈕 → 本地呈現 設定暱稱 modal（不走被 gating 的 core 路徑）。
     let onNickname: () -> Void
-    /// 設定暱稱 modal 送出 → 設定顯示名（容器預設 `LiveBuy.setUser`）。
+    /// 設定暱稱 modal 送出 → 設定顯示名（容器預設 `Livebuy.setUser`）。
     let onNicknameSubmit: (String) -> Void
     let onProductTap: (LBProduct) -> Void
     let onShare: () -> Void
@@ -297,7 +297,7 @@ struct PlayerOverlayRootView: View {
             // `nicknameController.isPresented` (default false → snapshot-neutral): the LIVE
             // bottom-bar 暱稱 button and the 留言 pill's未設定-暱稱 branch present it; the modal
             // owns its own scrim. `displayName` / `isLoggedIn` bind from the shell snapshot;
-            // 送出 → `onNicknameSubmit` (container fulfils via `LiveBuy.setUser`).
+            // 送出 → `onNicknameSubmit` (container fulfils via `Livebuy.setUser`).
             if nicknameController.isPresented {
                 GuestNameEditModalView(
                     theme: theme,

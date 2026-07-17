@@ -1,5 +1,5 @@
 import SwiftUI
-import LiveBuyUI
+import LivebuyUI
 
 // MARK: - CartToastView — family-3 add-to-cart success toast (~1.8s confirmation)
 //

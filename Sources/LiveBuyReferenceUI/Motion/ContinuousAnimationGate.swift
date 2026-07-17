@@ -1,5 +1,5 @@
 import SwiftUI
-import LiveBuySDK
+import LivebuySDK
 
 // MARK: - Continuous decorative-animation throttling
 //   (ios-power-profile-animation-throttle-reference-ui — Phase 2 C, reference-ui, iOS)

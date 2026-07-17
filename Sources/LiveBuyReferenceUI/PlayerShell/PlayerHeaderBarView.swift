@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - PlayerHeaderBarView — family-1 surface 1 (top-bar chrome)
 //
@@ -82,7 +82,7 @@ public struct PlayerHeaderBarView: View {
 
     /// Host-controllable viewer-count visibility gate (rb-ios-hide-viewer-count-config).
     /// A by-value presentation flag fed from `PlayerShellModel` (sourced from
-    /// `LiveBuyPlayerConfig.showViewerCount`; default `true`, NOT a header view-model field).
+    /// `LivebuyPlayerConfig.showViewerCount`; default `true`, NOT a header view-model field).
     /// The viewer count shows ⟺ `isLive && viewerCountVisible && showViewerCount`; `false`
     /// HIDES the viewer count even while `isLive` (incl. replay), WITHOUT affecting the LIVE
     /// pill or the core / view-model `viewerCount` data pipeline.
@@ -455,7 +455,7 @@ public struct PlayerHeaderBarView: View {
     ///   - `viewerCountVisible` — backend `channel.show_pv_num == 1` (mirrored from the
     ///     view-model `DefaultPlayerHeaderState.viewerCountVisible`). Replay reuses the LIVE
     ///     chrome so it honours the original live-time setting.
-    ///   - `hostShowViewerCount` — host config `LiveBuyPlayerConfig.showViewerCount` (default
+    ///   - `hostShowViewerCount` — host config `LivebuyPlayerConfig.showViewerCount` (default
     ///     true); a host may force-hide regardless of the backend flag.
     /// Any one being `false` hides the badge; the LIVE pill is unaffected (separate gate).
     static func showsViewerBadge(isLive: Bool,

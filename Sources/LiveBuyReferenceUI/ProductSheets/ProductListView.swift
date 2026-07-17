@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ProductListView — family-3 product sheet-stack surface 1 (product list drawer)
 //
@@ -24,7 +24,7 @@ import LiveBuyUI
 //      • `onOpenProduct: ((LBProduct) -> Void)?` — a product-row tap funnels HERE,
 //        NOT to a template intent. The container forwards it to the host-wired
 //        `onProductTap`, which the host wires to core
-//        `LiveBuyPlayerViewController.simulateProductTap(product)`. reference-ui
+//        `LivebuyPlayerViewController.simulateProductTap(product)`. reference-ui
 //        NEVER opens the detail itself (D-2 — mirrors family-2 ChatFeedView's
 //        eventJoin forwarder).
 //      • `onOpenCart: (() -> Void)?` — the bottom-pinned cart CTA tap forwards to
@@ -93,7 +93,7 @@ public struct ProductListView: View {
 
     /// Host-wired product-row tap → core product-tap exit. The container forwards
     /// this to its host-wired `onProductTap`, which the host wires to core
-    /// `LiveBuyPlayerViewController.simulateProductTap(product)`. nil for demo /
+    /// `LivebuyPlayerViewController.simulateProductTap(product)`. nil for demo /
     /// snapshot instances — the drawer renders correctly action-free (D-2).
     private let onOpenProduct: ((LBProduct) -> Void)?
 
@@ -112,7 +112,7 @@ public struct ProductListView: View {
 
     /// Host-wired 縮圖點擊 → 影片跳轉到該商品介紹時間（`LBProduct.beginTime`，秒）。對齊設計
     /// `LBPProductRow` 的 `onSeek`（縮圖 `onClick`）。容器轉發到 host-wired `onSeekToProductIntro`，
-    /// 預設呼 core `LiveBuyPlayerViewController.seek(seconds:)`（VOD / replay；live 由 core 略過）。
+    /// 預設呼 core `LivebuyPlayerViewController.seek(seconds:)`（VOD / replay；live 由 core 略過）。
     /// nil → 縮圖點擊 no-op（demo / snapshot）。issue 5（rb-ios-product-row-deeplink）。
     private let onSeekToIntro: ((LBProduct) -> Void)?
 

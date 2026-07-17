@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - GapSurfacesModel — family-6 gap-surfaces observable snapshot bridge
 //
@@ -11,7 +11,7 @@ import LiveBuyUI
 //
 // This is the SKELETON for rb-ios-gap-surfaces. It bridges the headless template
 // view-models exposed by `DefaultPlayerTemplate` (obtained via
-// `LiveBuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
+// `LivebuyUI.playerTemplate(for:)`) into a SwiftUI-observable snapshot that the
 // four family-6 gap-surface sub-views read. It is a read-only mirror — IDENTICAL
 // pattern to `PlayerShellModel` (family-1) / `FeedWinModel` (family-2) /
 // `ProductSheetsModel` (family-3) / `MomentsModel` (family-4):
@@ -23,7 +23,7 @@ import LiveBuyUI
 //     the getters re-read fresh values). This keeps the auth-gate / identity-label /
 //     goods-tracking / notice-tab state's SINGLE SOURCE OF TRUTH inside the template
 //     (design §"守住的不變式": 只讀呈現, 不持第二份 state).
-//   - It does NOT add pixels and it does NOT add any accessor to `LiveBuyUI`
+//   - It does NOT add pixels and it does NOT add any accessor to `LivebuyUI`
 //     (that would be a template-layer concern, out of scope here).
 //   - It does NOT subscribe to each model's internal `onMutation` (that is a
 //     template-internal hook); it observes ONLY the template's single public
@@ -69,7 +69,7 @@ public final class GapSurfacesModel: ObservableObject {
     /// re-reads the computed getters (which read the template directly). No snapshot
     /// is stored.
     ///
-    /// The host obtains the template via `LiveBuyUI.playerTemplate(for:)` and
+    /// The host obtains the template via `LivebuyUI.playerTemplate(for:)` and
     /// passes it here. This registers an INDEPENDENT observer via `addObserver`; it
     /// does NOT chain or replace the template's legacy `onChange`.
     public init(template: DefaultPlayerTemplate) {
@@ -123,7 +123,7 @@ public final class GapSurfacesModel: ObservableObject {
     // The guest-name-edit surface reads the identity label to show the current
     // display name + whether the user is logged in (a logged-in user does not need
     // the guest rename affordance). The actual rename happens via the host /
-    // `LiveBuySDK.setUser`; this layer only forwards the「請求改名」intent through
+    // `LivebuySDK.setUser`; this layer only forwards the「請求改名」intent through
     // the template's `requestGuestNameEdit()` exit.
 
     /// Current display name (`template.identityLabel.current?.displayName`),
@@ -206,11 +206,11 @@ public final class GapSurfacesModel: ObservableObject {
     //
     // NOTE — the auth-gate「登入」CTA is NOT a template forwarder. Performing the
     // login is the HOST's job (host wires its own login flow + calls
-    // `LiveBuySDK.setUser`); the surface funnels「登入」to a host-wired closure on the
+    // `LivebuySDK.setUser`); the surface funnels「登入」to a host-wired closure on the
     // CONTAINER (`GapSurfacesOverlayView.onRequestLogin`), never through this model
     // (mirrors family-3 `ProductListView`'s host-wired product-tap exit). Likewise
     // the guest-name SUBMIT (the actual new name) is host-fulfilled via
-    // `LiveBuySDK.setUser` on a CONTAINER closure; this model only forwards the
+    // `LivebuySDK.setUser` on a CONTAINER closure; this model only forwards the
     // passthrough「請求改名」intent.
 
     /// Forward an auth-gate dismiss → `DefaultAuthGate.clear()`. No-op for demo.
@@ -245,7 +245,7 @@ public final class GapSurfacesModel: ObservableObject {
 
     /// Forward the「請求改名」intent (guest 態) → `DefaultPlayerTemplate.requestGuestNameEdit()`
     /// (emits `GUEST_NAME_EDIT_REQUEST` — passthrough, non-navigation, no auto-PiP).
-    /// The actual rename is host-fulfilled via `LiveBuySDK.setUser`; this only
+    /// The actual rename is host-fulfilled via `LivebuySDK.setUser`; this only
     /// forwards the intent. No-op for demo instances.
     public func requestGuestNameEdit() {
         template?.requestGuestNameEdit()

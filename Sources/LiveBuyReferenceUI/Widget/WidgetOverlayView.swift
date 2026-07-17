@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - WidgetOverlayView — family-5 widget container (SKELETON)
 //
@@ -52,7 +52,7 @@ import LiveBuyUI
 //
 // Until all four widget surface sub-views exist, this file will not compile on its
 // own — that is expected (the surface agents land the types). The whole
-// LiveBuyReferenceUI target compiles together (SPM globs the directory), so the
+// LivebuyReferenceUI target compiles together (SPM globs the directory), so the
 // container referencing not-yet-written surface views is fine — they are created in
 // the next phase before any build.
 //

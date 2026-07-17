@@ -1,6 +1,6 @@
 import SafariServices
 import UIKit
-import LiveBuySDK
+import LivebuySDK
 
 /// In-app browser opener (Task 2.1 / 2.5). Injectable so unit tests can verify
 /// the diversion path with a fake opener without a live UIKit hierarchy.
@@ -33,13 +33,13 @@ public final class LBTemplateObserverToken {
 ///
 /// The TYPE and its READ surface (`activityFeed` / `winClaim` host-bindable
 /// state + the `onChange` notification) are `public` so a host can obtain this
-/// instance via `LiveBuyUI.playerTemplate(for:)` and bind/observe its state.
+/// instance via `LivebuyUI.playerTemplate(for:)` and bind/observe its state.
 /// The INTERNAL wiring — `init` and the `handle*` event methods — stays
 /// `internal` (the host consumes state; it does NOT construct the instance or
 /// feed events directly).
 public final class DefaultPlayerTemplate {
 
-    private weak var player: LiveBuyPlayerViewController?
+    private weak var player: LivebuyPlayerViewController?
     private let effectiveConfig: EffectiveConfig
     private let openInAppBrowser: InAppBrowserOpener
 
@@ -266,7 +266,7 @@ public final class DefaultPlayerTemplate {
 
     /// Injected route-B add-to-cart requester (default throwing stub for headless
     /// unit tests, mirroring `DefaultGoodsTracking`'s `setAwait`/`setNotice`
-    /// closures). The wiring fills it with `LiveBuy.addToCart(...)`. The template
+    /// closures). The wiring fills it with `Livebuy.addToCart(...)`. The template
     /// NEVER builds an HTTP request itself. Returns the `LBCartResult` on success.
     private let addToCartRequester: (LBCartRequest) async throws -> LBCartResult
 
@@ -320,7 +320,7 @@ public final class DefaultPlayerTemplate {
     }
 
     init(
-        player: LiveBuyPlayerViewController,
+        player: LivebuyPlayerViewController,
         sdkConfig: SDKConfig,
         hostOptions: LBUIOptions?,
         openInAppBrowser: InAppBrowserOpener? = nil,
@@ -942,7 +942,7 @@ public final class DefaultPlayerTemplate {
     /// (`Player.guestNameEditRequest()`-equivalent, emit `GUEST_NAME_EDIT_REQUEST`,
     /// passthrough / non-navigation / no auto-PiP). Inert no-op when no requester
     /// was injected. The template draws NO rename UI and changes NO event semantics
-    /// — host fulfils the rename via `LiveBuySDK.setUser`.
+    /// — host fulfils the rename via `LivebuySDK.setUser`.
     public func requestGuestNameEdit() {
         guestNameEditRequester?()
     }
@@ -1028,7 +1028,7 @@ public final class DefaultPlayerTemplate {
     ///   - product HAS spec groups but selection incomplete (`selectedSpec == nil`)
     ///     → MUST NOT delegate; set `needsVariantSelection` for the host prompt.
     /// On a valid request: assemble `LBCartRequest` and delegate to the injected
-    /// core requester (route-B `LiveBuy.addToCart`). Success → mini-cart peek +
+    /// core requester (route-B `Livebuy.addToCart`). Success → mini-cart peek +
     /// cart CTA count++ in ONE coalesced onChange; failure → `addToCartFailed`,
     /// count unchanged. The template builds NO HTTP. Host-takeover (route A) is
     /// excluded upstream (this handler is only reached on the not-intercepted
@@ -1442,7 +1442,7 @@ public final class DefaultPlayerTemplate {
     /// bug: unclaimed award entries, VOD/replay reveal cursor).
     ///
     /// `from` / `to` are the core-supplied `VIDEO_SWITCH` params (`from_video_id` / `to_video_id`,
-    /// already sent by `LiveBuyPlayerViewController.load(videoId:)`, now threaded through by
+    /// already sent by `LivebuyPlayerViewController.load(videoId:)`, now threaded through by
     /// `TemplateAttachment`). Both default to `nil` so existing no-arg call sites (tests exercising
     /// OTHER, orthogonal behaviors) keep compiling and exercise exactly today's clear+reset path —
     /// a missing `from` just means "nothing to save", a missing/uncached `to` means "no snapshot to
@@ -1541,9 +1541,9 @@ public final class DefaultPlayerTemplate {
     /// chat-history-video-switch-cache-template design.md D1）。
     private var seenPushIds: Set<String> = []
 
-    /// 純函式：template 層 push id 身分去重（port 自 core 的 `LiveBuyPlayerViewController
+    /// 純函式：template 層 push id 身分去重（port 自 core 的 `LivebuyPlayerViewController
     /// .shouldAppendPush(id:seen:)`，`chat-push-id-dedupe-core`——同構、非共用，因
-    /// `LiveBuyUI` 不得依賴 `LiveBuySDK` internal 實作，只依賴其 public `LBPushMsg.id`）。
+    /// `LivebuyUI` 不得依賴 `LivebuySDK` internal 實作，只依賴其 public `LBPushMsg.id`）。
     ///
     /// 這是**身分（identity）判定**，只比對 `id` 本身，NEVER 讀取或比較 `text`／`name` 等內容欄
     /// 位——與 `DefaultActivityFeed.dedupeSignature(for:)`「MUST NOT 比對任何訊息內容」的
@@ -1606,20 +1606,20 @@ struct DefaultOperationPanel {
 ///
 /// The TYPE and its READ surface (`content` host-bindable widget-content state +
 /// the `onChange` notification) are `public` so a host can obtain this instance
-/// via `LiveBuyUI.widgetTemplate(for:)` and bind/observe its state. The INTERNAL
+/// via `LivebuyUI.widgetTemplate(for:)` and bind/observe its state. The INTERNAL
 /// wiring — `init`, `handleVideoTap`, and `refreshContent()` — stays `internal`
 /// (the host consumes state; it does NOT construct the instance or feed it data).
 /// Existing `handleVideoTap` + the three layout-key getters are UNCHANGED (purely
 /// additive, widget-content-template D5).
 public final class DefaultWidgetTemplate {
 
-    private weak var widget: LiveBuyWidgetCore?
+    private weak var widget: LivebuyWidgetCore?
     private let effectiveConfig: EffectiveConfig
 
     // MARK: - Host-bindable widget content view-model (widget-content-template)
 
     /// Widget content (videos / mode / pagination / liveVideo / colors) mirrored
-    /// from core `LiveBuyWidgetCore` (colors from `widget-bridge-color-core`). The
+    /// from core `LivebuyWidgetCore` (colors from `widget-bridge-color-core`). The
     /// host draws `widgets.jsx` from this; the template renders nothing (D1).
     public let content: DefaultWidgetContent
 
@@ -1677,7 +1677,7 @@ public final class DefaultWidgetTemplate {
         observers.removeAll { $0.token === token }
     }
 
-    init(widget: LiveBuyWidgetCore, sdkConfig: SDKConfig, hostOptions: LBUIOptions?) {
+    init(widget: LivebuyWidgetCore, sdkConfig: SDKConfig, hostOptions: LBUIOptions?) {
         self.widget = widget
         self.effectiveConfig = EffectiveConfig(sdkConfig: sdkConfig, hostOptions: hostOptions)
         self.content = DefaultWidgetContent(mode: widget.mode)
@@ -1694,15 +1694,15 @@ public final class DefaultWidgetTemplate {
     }
 
     /// VIDEO_TAP — open Player fullscreen (Task 3.6)
-    /// Creates a LiveBuyPlayerViewController and routes it through playerPresenter.
+    /// Creates a LivebuyPlayerViewController and routes it through playerPresenter.
     func handleVideoTap(video: LBVideoItem) {
         guard let widget = widget else { return }
-        let vc = LiveBuyPlayerViewController()
+        let vc = LivebuyPlayerViewController()
         vc.load(videoId: video.id)
         widget.playerPresenter?(vc)
     }
 
-    /// Re-read the core `LiveBuyWidgetCore`'s current public state into the
+    /// Re-read the core `LivebuyWidgetCore`'s current public state into the
     /// host-bindable content snapshot (INTERNAL data-feed — host does NOT call
     /// this; it stays internal per the spec's "內部接線不對 host 公開"). Driven by
     /// the attach wiring whenever core loadMore / floating-close / error settles
@@ -1714,7 +1714,7 @@ public final class DefaultWidgetTemplate {
     }
 
     /// Host intent: load the widget's first page (carousel / grid) through the
-    /// core `LiveBuyWidgetCore.loadFirstPage()`, then mirror the result into the
+    /// core `LivebuyWidgetCore.loadFirstPage()`, then mirror the result into the
     /// content snapshot. core `loadFirstPage` has NO completion callback, so this
     /// public intent is the host's hook to refresh `content` AFTER the first load
     /// completes (widget-content-template D2 / D7 — the template only consumes
@@ -1729,7 +1729,7 @@ public final class DefaultWidgetTemplate {
     }
 
     /// Host intent: request the next page (grid only) through the core
-    /// `LiveBuyWidgetCore.requestLoadMore()`, then mirror the result. core also fires
+    /// `LivebuyWidgetCore.requestLoadMore()`, then mirror the result. core also fires
     /// `onLoadMore` on success (chained to `refreshContent` in the attach wiring),
     /// so the snapshot is up to date either way; this public passthrough lets a
     /// host trigger pagination from the content view-model (OQ1). No-op past the

@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - EndScreenView — family-4 player moment sub-view 2 (END / auto-next)
 //
@@ -676,7 +676,7 @@ public struct EndScreenView: View {
 // render the moment's "happy path" without a live player. Built via the skeleton's
 // documented demo recipe (`MomentsModel.demoNavItem` / `demoHotItem` /
 // `demoHotSet` / `LBEndScreenCountdown(remain:total:)` — all VERIFIED public inits
-// reachable from `LiveBuyReferenceUI`).
+// reachable from `LivebuyReferenceUI`).
 
 public extension EndScreenView {
 

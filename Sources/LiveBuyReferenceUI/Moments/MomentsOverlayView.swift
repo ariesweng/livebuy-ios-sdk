@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - MomentsOverlayView — family-4 player moment container (SKELETON)
 //
@@ -276,8 +276,8 @@ public struct MomentsOverlayView: View {
 //     `.outdated`; `phase`: `.failed` (the only case). e.g.
 //     `LBPlayerErrorState(kind: .stream, phase: .failed)`.
 //
-// All five live in `LiveBuySDK` / `LiveBuyUI` with PUBLIC inits reachable from
-// `LiveBuyReferenceUI`, so the deterministic snapshot path needs NO live player —
+// All five live in `LivebuySDK` / `LivebuyUI` with PUBLIC inits reachable from
+// `LivebuyReferenceUI`, so the deterministic snapshot path needs NO live player —
 // the `MomentsModel` memberwise init stores these values directly.
 
 public extension MomentsModel {

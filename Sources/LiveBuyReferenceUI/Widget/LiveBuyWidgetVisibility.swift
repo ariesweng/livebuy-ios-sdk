@@ -1,8 +1,8 @@
 import Foundation
 
-// MARK: - LiveBuyWidgetVisibility — opt-in host→SDK cover bridge (ios-refui-widget-host-visibility-pause)
+// MARK: - LivebuyWidgetVisibility — opt-in host→SDK cover bridge (ios-refui-widget-host-visibility-pause)
 //
-// iOS parity of Android `tv.livebuy.referenceui.widget.LiveBuyWidgetVisibility`
+// iOS parity of Android `tv.livebuy.referenceui.widget.LivebuyWidgetVisibility`
 // (`android-refui-widget-host-visibility-pause`, commit e3fcfc39).
 //
 // WHY THIS EXISTS (the residual gap `ios-refui-widget-preview-lifecycle-pause` honestly left open).
@@ -26,21 +26,21 @@ import Foundation
 //
 // WHO CALLS `setWidgetsCovered` (two integration paths — pick by how you present the player):
 //
-//   • MAIN PATH (most hosts) — the drop-in collapsible presenter `LiveBuyPlayerPresenter`
-//     (`.liveBuyPlayer(video:)`) ALREADY drives this by phase, so the host does NOT and SHOULD NOT
+//   • MAIN PATH (most hosts) — the drop-in collapsible presenter `LivebuyPlayerPresenter`
+//     (`.livebuyPlayer(video:)`) ALREADY drives this by phase, so the host does NOT and SHOULD NOT
 //     call it. Contract `covered ⟺ full-screen phase .full` (`hasVideo && !isMinimized`): the
 //     presenter declares covered on full-screen (home previews yield the video decoders) and
 //     un-covered when minimized to the floating card / closed. Calling `setWidgetsCovered` yourself
-//     ON TOP of the presenter just fights it (both write the same level). See `LiveBuyPlayerPresenter`
+//     ON TOP of the presenter just fights it (both write the same level). See `LivebuyPlayerPresenter`
 //     + `ios-refui-presenter-widget-cover-by-phase` / `refui-widget-visibility-kdoc-presenter-owned`.
 //
 //   • MANUAL PATH (few hosts) — ONLY a host that presents the player with the BARE (non-collapsible)
-//     `LiveBuyPlayer`, or fully hand-rolls its own navigation / custom cover (never going through the
+//     `LivebuyPlayer`, or fully hand-rolls its own navigation / custom cover (never going through the
 //     collapsible presenter), calls this itself:
 //
 //       // Host: when a full-screen player overlay covers the home widgets, and when it is dismissed.
-//       LiveBuyWidgetVisibility.setWidgetsCovered(true)   // covered → underlying previews pause
-//       LiveBuyWidgetVisibility.setWidgetsCovered(false)  // uncovered → resume (still gated by fg / on-screen)
+//       LivebuyWidgetVisibility.setWidgetsCovered(true)   // covered → underlying previews pause
+//       LivebuyWidgetVisibility.setWidgetsCovered(false)  // uncovered → resume (still gated by fg / on-screen)
 //
 //     Map `true`/`false` to "is the home ACTUALLY covered full-screen". A bare non-collapsible player
 //     has NO floating phase, so mapping from `presentedVideo != nil` is exactly correct THERE. But if
@@ -79,14 +79,14 @@ import Foundation
 /// full-screen player overlay), so the underlying widget previews pause even though the SDK's two
 /// self-sufficient axes (app-foreground + on-screen) cannot detect the z-order coverage.
 ///
-/// Most hosts do NOT touch this directly: the drop-in collapsible presenter `LiveBuyPlayerPresenter`
-/// (`.liveBuyPlayer(video:)`) owns `setWidgetsCovered` and drives it by phase (`covered ⟺ full`). Only a
-/// host on the BARE (non-collapsible) `LiveBuyPlayer` or fully hand-rolled navigation calls it — see the
+/// Most hosts do NOT touch this directly: the drop-in collapsible presenter `LivebuyPlayerPresenter`
+/// (`.livebuyPlayer(video:)`) owns `setWidgetsCovered` and drives it by phase (`covered ⟺ full`). Only a
+/// host on the BARE (non-collapsible) `LivebuyPlayer` or fully hand-rolled navigation calls it — see the
 /// file header for both paths and the `presentedVideo != nil` caveat.
-public final class LiveBuyWidgetVisibility {
+public final class LivebuyWidgetVisibility {
 
     /// The process-wide shared bridge. Widget previews subscribe to it; the host feeds it.
-    public static let shared = LiveBuyWidgetVisibility()
+    public static let shared = LivebuyWidgetVisibility()
 
     private init() {}
 
@@ -99,9 +99,9 @@ public final class LiveBuyWidgetVisibility {
 
     // MARK: Host-facing API
 
-    /// Declares whether the screen hosting the LiveBuy widget previews is currently covered (`true` =
+    /// Declares whether the screen hosting the Livebuy widget previews is currently covered (`true` =
     /// covered by another destination / full-screen overlay, invisible to the user). Normally called by
-    /// the collapsible presenter `LiveBuyPlayerPresenter` (phase-driven); only a bare-`LiveBuyPlayer` /
+    /// the collapsible presenter `LivebuyPlayerPresenter` (phase-driven); only a bare-`LivebuyPlayer` /
     /// hand-rolled host calls it directly (see file header). Stateful + edge-triggered: the value is
     /// stored and fanned out to subscribers ONLY when it changes. Main-thread-only.
     public func setWidgetsCovered(_ covered: Bool) {
@@ -111,7 +111,7 @@ public final class LiveBuyWidgetVisibility {
         for listener in Array(listeners.values) { listener(covered) }
     }
 
-    /// Convenience static entry so host call sites read `LiveBuyWidgetVisibility.setWidgetsCovered(...)`,
+    /// Convenience static entry so host call sites read `LivebuyWidgetVisibility.setWidgetsCovered(...)`,
     /// mirroring Android's `object` static call.
     public static func setWidgetsCovered(_ covered: Bool) {
         shared.setWidgetsCovered(covered)

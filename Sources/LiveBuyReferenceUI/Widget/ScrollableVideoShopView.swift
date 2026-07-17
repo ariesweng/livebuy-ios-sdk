@@ -1,6 +1,6 @@
 import SwiftUI
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - ScrollableVideoShopView — family-5 wrapper tier (drop-in scrolling grid)
 //

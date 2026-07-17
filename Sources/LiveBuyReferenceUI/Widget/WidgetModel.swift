@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
-import LiveBuySDK
-import LiveBuyUI
+import LivebuySDK
+import LivebuyUI
 
 // MARK: - WidgetModel — family-5 widget content observable snapshot bridge
 //
@@ -13,7 +13,7 @@ import LiveBuyUI
 //
 // This is the SKELETON for rb-ios-widget. It bridges the headless widget-content
 // view-model exposed by `DefaultWidgetTemplate` (obtained via
-// `LiveBuyUI.widgetTemplate(for:)`) into a SwiftUI-observable snapshot that the
+// `LivebuyUI.widgetTemplate(for:)`) into a SwiftUI-observable snapshot that the
 // four family-5 widget sub-views read. It is a read-only mirror — IDENTICAL in
 // spirit to `MomentsModel` (family-4) / `PlayerShellModel` (family-1) /
 // `FeedWinModel` (family-2) / `ProductSheetsModel` (family-3):
@@ -23,7 +23,7 @@ import LiveBuyUI
 //     (`content.current`: `videos` / `mode` / `currentPage` / `lastPage` /
 //     `liveVideo` / `widgetColor` / `widgetBgcolor`) each time the template
 //     notifies its registered change observers (design §"容器與 view-model 橋接").
-//   - It does NOT add pixels and it does NOT add any accessor to `LiveBuyUI`
+//   - It does NOT add pixels and it does NOT add any accessor to `LivebuyUI`
 //     (that would be a template-layer concern, out of scope here).
 //   - It does NOT subscribe to the content view-model's internal `onMutation`
 //     (that is a template-internal hook) — it observes ONLY the template's public
@@ -53,7 +53,7 @@ public final class WidgetModel: ObservableObject {
     // SUB-VIEW INPUT PATTERN). All `private(set)` — the host / sub-views read; only
     // the live bridge (or the demo init) writes.
 
-    /// Card-row data — core `LiveBuyWidgetCore.videos` (read-only mirror). Drawn as a
+    /// Card-row data — core `LivebuyWidgetCore.videos` (read-only mirror). Drawn as a
     /// FIXED SMALL set in a PLAIN HStack / VStack by the carousel / grid surfaces
     /// (NEVER lazy / scroll — the `ImageRenderer` blank-render trap); the real
     /// scroll / pagination intent forwards to the container's host-wired closure.
@@ -64,15 +64,15 @@ public final class WidgetModel: ObservableObject {
     /// `isClosed == true` state. The container switches the active surface on this.
     @Published public private(set) var mode: LBWidgetContentMode
 
-    /// Pagination cursor — core `LiveBuyWidgetCore.currentPage`.
+    /// Pagination cursor — core `LivebuyWidgetCore.currentPage`.
     @Published public private(set) var currentPage: Int
 
-    /// Pagination last page — core `LiveBuyWidgetCore.lastPage`. The grid surface's
+    /// Pagination last page — core `LivebuyWidgetCore.lastPage`. The grid surface's
     /// load-more footer compares `currentPage` vs `lastPage` (inclusive — Key
     /// Invariant: `current_page == last_page`) to decide「載入更多」vs「已顯示全部」.
     @Published public private(set) var lastPage: Int
 
-    /// Floating live card — core `LiveBuyWidgetCore.liveVideo`. The floating surface
+    /// Floating live card — core `LivebuyWidgetCore.liveVideo`. The floating surface
     /// renders this single card; nil → render NOTHING (EmptyView).
     @Published public private(set) var liveVideo: LBVideoItem?
 
@@ -107,7 +107,7 @@ public final class WidgetModel: ObservableObject {
     /// update / mode change / page advance / liveVideo update / color update
     /// re-snapshots and republishes to the widget sub-views.
     ///
-    /// The host obtains the template via `LiveBuyUI.widgetTemplate(for:)` and passes
+    /// The host obtains the template via `LivebuyUI.widgetTemplate(for:)` and passes
     /// it here. Returns a model whose published values mirror the template
     /// (read-only). This model keeps its OWN `LBTemplateObserverToken` and removes
     /// only that token on deinit — it never chains / clobbers a single shared
