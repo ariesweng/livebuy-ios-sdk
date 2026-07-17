@@ -38,7 +38,7 @@ let package = Package(
             name: "LivebuySDK",
             // Updated automatically by CI on each release.
             url: "https://github.com/ariesweng/livebuy-ios-sdk/releases/download/v4.0.0/LivebuySDK.xcframework.zip",
-            checksum: "876537c559d8ec40d5231917bfb13a13d7ada5b1c9e2ce0cf2a5adfeb00ec224"
+            checksum: "3d09b2455b91c948930a92e2c87f8fe6e6c9e028305dc8f27df24d7fc2550ea4"
         ),
         // AWS IVS Player live engine (D2 option A — declared here pointing at AWS,
         // checksum-pinned at v1.52.0). The binary core links it; see the IVS link
@@ -56,10 +56,18 @@ let package = Package(
             path: "Sources/LivebuyUI"
         ),
         // reference-ui pixel layer (SOURCE; synced from monorepo ios/Sources/LivebuyReferenceUI by CI).
+        // v4.0.0 fix: this source target ships `Resources/LoadingMark/*.png`, loaded by
+        // LoadingMarkAnimationView via `Bundle.module`. The target MUST declare its
+        // resources (mirrors the source-of-truth ios/Package.swift) — otherwise SwiftPM
+        // does not synthesize the `Bundle.module` accessor and every source-consumer of
+        // LivebuyReferenceUI fails with `type 'Bundle' has no member 'module'`.
         .target(
             name: "LivebuyReferenceUI",
             dependencies: ["LivebuyUI", "LivebuySDK", "AmazonIVSPlayer"],
-            path: "Sources/LivebuyReferenceUI"
+            path: "Sources/LivebuyReferenceUI",
+            resources: [
+                .process("Resources")
+            ]
         ),
     ]
 )
