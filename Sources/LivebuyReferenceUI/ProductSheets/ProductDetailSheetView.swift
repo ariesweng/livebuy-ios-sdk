@@ -99,8 +99,9 @@ public struct ProductDetailSheetView: View {
     /// Presentation mode (`.detail` browse vs `.addToCart` compact purchase). Read-only.
     public let presentation: Presentation
     /// `false` (snapshot / demo) → the photo draws the deterministic gradient placeholder only
-    /// (baselines unchanged). `true` (host runtime) → load `detail.photos[0]` over it via
-    /// `RemoteStillImageView` (rb-ios-product-real-images).
+    /// (baselines unchanged). `true` (host runtime) → load the resolved photo over it via
+    /// `RemoteStillImageView` (rb-ios-product-real-images) — resolved from `variant.selectedSpec`
+    /// with a product-level fallback (`resolvedPhoto`, ios-product-sheet-spec-photo-reference-ui).
     public let live: Bool
     /// Genuinely-live signal (rb-ios-live-hide-product-share, design R12) — `ProductSheetsModel.isLive`
     /// (`DefaultPlayerHeaderState.isLive` republish, `liveStatus == 1`). DISTINCT from `live` above
@@ -204,10 +205,33 @@ public struct ProductDetailSheetView: View {
     /// disabled CTA + the「已售完」price treatment.
     private var isSoldOut: Bool { qty.max == 0 }
 
-    /// Whether an original (was) price worth striking through exists.
-    private var hasOriginalPrice: Bool {
-        !detail.originalPriceShow.isEmpty && detail.originalPriceShow != detail.priceShow
+    /// The SPEC-AWARE, SAME-SOURCE price pair for the price row
+    /// (ios-product-sheet-spec-price-reference-ui). Both the sale price and the
+    /// struck-through original come from ONE source — the selected spec when it can
+    /// supply a drawable sale price, otherwise the product level — so the two can
+    /// never disagree and fabricate a discount rate. This is the SINGLE resolution
+    /// point for this sheet: `priceRow` and `hasOriginalPrice` both read it.
+    /// See `ResolvedPriceDisplay.swift` for the degradation ladder and its rationale.
+    private var resolvedPrice: ResolvedPriceDisplay {
+        ResolvedPriceDisplay.resolvePriceDisplay(detail: detail, selectedSpec: variant.selectedSpec)
     }
+
+    /// The SPEC-AWARE product photo SOURCE for this sheet
+    /// (ios-product-sheet-spec-photo-reference-ui). The photo follows the selected spec
+    /// when that spec has a drawable photo, otherwise the product level. This is the
+    /// SINGLE resolution point for this sheet: BOTH the `.detail` 4:3 photo and the
+    /// `.addToCart` 96×96 thumbnail read it, so they can never show different photos.
+    /// See `ResolvedProductPhoto.swift` for the degradation ladder and why "which photo"
+    /// is the first NON-BLANK entry rather than `photos.first`.
+    private var resolvedPhoto: ResolvedProductPhoto {
+        ResolvedProductPhoto.resolveProductPhoto(detail: detail, selectedSpec: variant.selectedSpec)
+    }
+
+    /// Whether an original (was) price worth striking through exists — read from the
+    /// SAME resolved pair the price row draws, never re-derived from `detail` /
+    /// `selectedSpec` separately (that is what would let "which string" and "whether
+    /// to draw" drift apart).
+    private var hasOriginalPrice: Bool { resolvedPrice.hasOriginalPrice }
 
     public var body: some View {
         // Content only — the shared `.lbBottomSheet(item:)` presenter (SheetKit) draws the
@@ -316,11 +340,18 @@ public struct ProductDetailSheetView: View {
         .padding(.bottom, 8)
     }
 
-    // MARK: - Product photo (AddToCartSheet 4:3 thumb — deterministic placeholder)
+    // MARK: - Product photo (AddToCartSheet 4:3 thumb — SPEC-AWARE, deterministic placeholder)
     //
     // `photos` are remote URLs; reference-ui keeps snapshots deterministic (no
     // network / AsyncImage), so it draws a 4:3 gradient placeholder chip with a
     // monogram (host can swap in a real image). Mirrors the design's rounded media.
+    //
+    // WHICH photo comes from `resolvedPhoto` — the selected spec's when that spec has a
+    // drawable photo, otherwise the product level (ios-product-sheet-spec-photo-reference-ui).
+    // Previously this read `detail.photos` unconditionally, so picking「玫瑰棕」left the photo
+    // showing「珊瑚橘」while the price line (fixed by the sibling change) already followed the
+    // spec — for colour / style variants that is a wrong-item risk, not a cosmetic one.
+    // The monogram placeholder itself is UNCHANGED and still drawn from the product name.
 
     private var productPhoto: some View {
         ZStack {
@@ -335,7 +366,9 @@ public struct ProductDetailSheetView: View {
                 .foregroundColor(.white.opacity(0.92))
             // `live` + a real photo → the product image loads over the gradient placeholder
             // (rb-ios-product-real-images). Snapshot / demo (`live == false`) keeps the gradient.
-            if live, let url = Self.photoURL(detail) {
+            // The photo comes from `resolvedPhoto` — SPEC-AWARE with a product-level fallback
+            // (ios-product-sheet-spec-photo-reference-ui).
+            if live, let url = resolvedPhoto.primaryPhotoURL {
                 RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
             }
         }
@@ -379,7 +412,7 @@ public struct ProductDetailSheetView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Self.bgSunken)
-                if live, let url = Self.photoURL(detail) {
+                if live, let url = resolvedPhoto.primaryPhotoURL {
                     RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
@@ -444,10 +477,20 @@ public struct ProductDetailSheetView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Price row (priceShow accent + originalPriceShow strike-through)
+    // MARK: - Price row (SPEC-AWARE priceShow accent + originalPriceShow strike-through)
     //
     // Sold out → 已售完 in the sold-out color (mirrors AddToCartSheet's sold branch).
-    // In stock → accent priceShow + dim strike-through originalPriceShow.
+    // In stock → accent sale price + dim strike-through original.
+    //
+    // Both strings come from `resolvedPrice` — the SAME-SOURCE pair resolved from
+    // `variant.selectedSpec` with a product-level fallback (ios-product-sheet-spec-price-
+    // reference-ui). Previously this row read `detail.*` unconditionally, so picking a
+    // variant with its own price left the price line stuck at the product level while the
+    // stock line (resolved from `selectedSpec` in the view-model) already followed the
+    // spec — i.e. displayed price ≠ price actually added to cart.
+    //
+    // Drawn by BOTH presentations: `.detail` (below the 4:3 photo) and `.addToCart`
+    // (inside `compactProductCard`), so the fix lands on both with one change.
 
     private var priceRow: some View {
         Group {
@@ -457,12 +500,12 @@ public struct ProductDetailSheetView: View {
                     .foregroundColor(Self.soldOutColor)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(detail.priceShow)
+                    Text(resolvedPrice.priceShow)
                         .font(.system(size: 20 * theme.fontScale, weight: .heavy))
                         .foregroundColor(theme.accent)
                     if hasOriginalPrice {
                         StrikeText(
-                            detail.originalPriceShow,
+                            resolvedPrice.originalPriceShow,
                             font: .system(size: 13 * theme.fontScale),
                             color: Self.textDim)
                     }
@@ -799,11 +842,21 @@ public struct ProductDetailSheetView: View {
     // 「請選規格」copy moved to `SelectVariantPromptModalView` (prompt hoisted to the container's
     // overlay root — ios-variant-prompt-overlay-fix).
 
-    /// First product photo as a non-empty URL, or nil (empty / whitespace → placeholder).
-    static func photoURL(_ detail: LBProductDetailState) -> URL? {
-        guard let s = detail.photos.first?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !s.isEmpty else { return nil }
-        return URL(string: s)
+    /// The product photo to draw as a URL, or nil (nothing drawable → placeholder).
+    ///
+    /// SPEC-AWARE (ios-product-sheet-spec-photo-reference-ui): pass the currently selected
+    /// spec and the photo follows it, falling back to the product level when the selection
+    /// is incomplete or the spec has no drawable photo. `selectedSpec` defaults to `nil`,
+    /// which means "no selected-spec context here" — the product level, exactly as before.
+    ///
+    /// A thin iOS-local adapter over `ResolvedProductPhoto`; the degradation ladder and the
+    /// "which photo" predicate live there (and are what the other three platforms mirror).
+    /// Note the predicate is the first NON-BLANK entry, not `photos.first` — see
+    /// `ResolvedProductPhoto.swift`.
+    static func photoURL(_ detail: LBProductDetailState, selectedSpec: LBSpec? = nil) -> URL? {
+        ResolvedProductPhoto
+            .resolveProductPhoto(detail: detail, selectedSpec: selectedSpec)
+            .primaryPhotoURL
     }
 
     /// Up-to-2-char monogram from the product name (deterministic, pure).

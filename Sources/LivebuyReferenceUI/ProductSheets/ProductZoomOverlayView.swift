@@ -23,6 +23,11 @@ import LivebuyUI
 // + the same gradient placeholder: `live == false` (snapshot / demo) draws the deterministic
 // gradient + monogram only; `live == true` overlays `RemoteStillImageView` (.scaleAspectFill).
 //
+// The photo SOURCE is SPEC-AWARE (ios-product-sheet-spec-photo-reference-ui): `photoURL` is
+// given this view's `selectedSpec`, so the lightbox magnifies the same photo the sheet drew
+// rather than always the product-level one. The resolution itself lives in the shared pure
+// function `ResolvedProductPhoto` — this view re-uses it, it does not re-derive the ladder.
+//
 // iOS-14-safe SwiftUI only: `ZStack` / `GeometryReader` / `Button` / `DragGesture` /
 // `LinearGradient` / `.scaleEffect` / `.offset` / `edgesIgnoringSafeArea` are all iOS-13+.
 // No `.task` / `AsyncImage` / `NavigationStack` / `.foregroundStyle` / `.tint`.
@@ -39,8 +44,17 @@ public struct ProductZoomOverlayView: View {
     public let theme: ReferenceUITheme
     /// The product whose image is being zoomed (reads `photos` + `name`). Read-only.
     public let detail: LBProductDetailState
+    /// The currently selected variant spec (`LBVariantState.selectedSpec`), so the lightbox
+    /// magnifies THE SAME photo the sheet is showing (ios-product-sheet-spec-photo-reference-ui).
+    /// The container passes `model.variant.selectedSpec`; defaults to `nil` = "no selected-spec
+    /// context" → the product level, keeping existing call sites / `demo(theme:)` unchanged.
+    ///
+    /// Without this the sheet would show the 玫瑰棕 photo and tapping zoom would show 珊瑚橘 —
+    /// a NEW cross-surface inconsistency of exactly the kind that change removes. Read-only.
+    public let selectedSpec: LBSpec?
     /// `false` (snapshot / demo) → gradient + monogram placeholder only (deterministic baseline);
-    /// `true` (host runtime) → load `detail.photos[0]` over the placeholder via `RemoteStillImageView`.
+    /// `true` (host runtime) → load the resolved photo (see ``selectedSpec``) over the
+    /// placeholder via `RemoteStillImageView`.
     public let live: Bool
     /// Host-wired close (backdrop tap / close button) → container clears `zoomedDetail`.
     private let onClose: (() -> Void)?
@@ -61,12 +75,14 @@ public struct ProductZoomOverlayView: View {
     public init(
         theme: ReferenceUITheme,
         detail: LBProductDetailState,
+        selectedSpec: LBSpec? = nil,
         live: Bool = false,
         shownInitially: Bool = false,
         onClose: (() -> Void)? = nil
     ) {
         self.theme = theme
         self.detail = detail
+        self.selectedSpec = selectedSpec
         self.live = live
         self.onClose = onClose
         self._shown = State(initialValue: shownInitially)
@@ -123,6 +139,10 @@ public struct ProductZoomOverlayView: View {
 
     /// The product photo — gradient + monogram placeholder, with the real image overlaid
     /// when `live`. Mirrors `ProductDetailSheetView.productPhoto`'s placeholder/real-image pattern.
+    ///
+    /// WHICH photo is resolved by the SAME pure function the sheet uses
+    /// (`ResolvedProductPhoto`), fed the same `selectedSpec`, so the magnified image is
+    /// always the image the user just tapped.
     private var productImage: some View {
         ZStack {
             LinearGradient(
@@ -134,7 +154,7 @@ public struct ProductZoomOverlayView: View {
             Text(ProductDetailSheetView.monogram(for: detail.name))
                 .font(.system(size: 64 * theme.fontScale, weight: .heavy))
                 .foregroundColor(.white.opacity(0.92))
-            if live, let url = ProductDetailSheetView.photoURL(detail) {
+            if live, let url = ProductDetailSheetView.photoURL(detail, selectedSpec: selectedSpec) {
                 RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
             }
         }

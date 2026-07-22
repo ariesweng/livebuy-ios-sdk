@@ -48,11 +48,14 @@ public struct PlayerHeaderBarView: View {
     public let hostName: String
     /// Host-pill / top-bar logo URL (`DefaultPlayerHeaderState.shopLogo`). The
     /// avatar is `live`-gated (same convention as `CarouselCardView`): `live ==
-    /// false` (demo / snapshot) ALWAYS paints the deterministic monogram
-    /// placeholder so the baseline is stable without a network image; `live ==
-    /// true` (runtime) draws the REAL shop logo from this URL via the iOS-14-safe
-    /// `RemoteStillImageView` when the URL is non-empty / parseable, and falls back
-    /// to the monogram when it is empty / invalid (no logo → default).
+    /// false` (demo / snapshot) NEVER loads an image, so the baseline is stable
+    /// without a network image; `live == true` (runtime) draws the REAL shop logo
+    /// from this URL via the iOS-14-safe `RemoteStillImageView` when the value —
+    /// TRIMMED — is non-empty and parseable.
+    ///
+    /// The deterministic monogram is NOT an either/or fallback: it is drawn
+    /// UNCONDITIONALLY beneath the image, so it also covers the loading and failure
+    /// windows of a real logo. See `avatar` for why that matters.
     public let shopLogo: String
     /// Live viewer count (`DefaultPlayerHeaderState.viewerCount`). Shown only when
     /// `isLive && viewerCountVisible && showViewerCount` (see `showsViewerBadge`).
@@ -324,35 +327,74 @@ public struct PlayerHeaderBarView: View {
 
     /// Avatar — a white-backed 28×28 circle. The design fills it with the shop
     /// mark. `live`-gated (same convention as `CarouselCardView`): at runtime
-    /// (`live == true`) with a non-empty / parseable `shopLogo` we draw the REAL
-    /// shop logo via the iOS-14-safe `RemoteStillImageView` (no `AsyncImage`),
-    /// clipped to the circle. Otherwise — `live == false` (demo / snapshot) OR an
-    /// empty / invalid URL — we paint the deterministic monogram (first letter of
-    /// host name, accent-tinted) so the baseline is stable without a network image.
+    /// (`live == true`) with a parseable `shopLogo` we draw the REAL shop logo via the
+    /// iOS-14-safe `RemoteStillImageView` (no `AsyncImage`), clipped to the circle.
+    ///
+    /// The gate is a SINGLE predicate — `resolvedShopLogoURL(live:urlString:)`. The
+    /// condition below MUST stay expressed as that function's return value (see its
+    /// doc comment for why); there is deliberately no second decision point, and the
+    /// draw site MUST NOT trim / re-test anything itself.
+    ///
+    /// STACKED, never `if / else` (header-shop-logo-gate-trim-parity-refui) — the same
+    /// shape as the sibling `VideoInfoPanelView.shopRow` and as all three other
+    /// platforms. Three layers, bottom to top:
+    ///
+    ///   1. `Circle().fill(.white)` — backing. Keeps a non-square mark on a clean field
+    ///      and gives the accent-tinted monogram the light background it needs. It is
+    ///      NOT redundant: drop it and the monogram would sit straight on the video.
+    ///   2. the monogram (first letter of host name) — drawn UNCONDITIONALLY, in EVERY
+    ///      gate state including while the real logo is on screen.
+    ///   3. the real logo — drawn only when the gate resolves, via an `if let` with NO
+    ///      `else` (ViewBuilder compiles that to an `Optional`, which occupies nothing
+    ///      when nil).
+    ///
+    /// Why the monogram must be permanent rather than an `else` branch:
+    /// `RemoteStillImageView` paints NO pixels while the image is still downloading (its
+    /// coordinator sets `imageView.image = nil` the moment a load starts, so a recycled
+    /// cell cannot flash the previous image) and NONE at all when the load fails (the
+    /// completion handler simply returns). An `else`-only monogram is therefore skipped
+    /// for the WHOLE duration of every normal load — the user stared at a blank white
+    /// circle with not even the shop's initial on it, on every single open. Stacking
+    /// makes the monogram cover the loading state AND the failure state for free, which
+    /// is why this needs no spinner, no error UI and no extra placeholder asset.
+    ///
+    /// Accepted trade-off: a logo with an alpha channel lets the monogram show through
+    /// underneath. Hiding it once the bitmap decodes would require `RemoteStillImageView`
+    /// to report load state — a primitive-level change affecting every call site (widget
+    /// carousel, product thumbs, upcoming background) and all four platforms. Shop marks
+    /// are overwhelmingly opaque, and this trades a rare small blemish for a frequent
+    /// large one. If it ever becomes a real complaint it is its own four-platform change.
     private var avatar: some View {
         ZStack {
             Circle().fill(Color.white)
-            if live, let url = logoURL {
-                // REAL shop logo over the white backing, filling and clipped to the
+            // Permanent monogram backing: snapshot / demo (`live == false`), no logo,
+            // unparseable URL, AND the loading / failure window of a real logo.
+            Text(monogram)
+                .font(.system(size: 13 * theme.fontScale, weight: .bold))
+                .foregroundColor(theme.accent)
+            if let url = Self.resolvedShopLogoURL(live: live, urlString: shopLogo) {
+                // REAL shop logo over the monogram, filling and clipped to the
                 // circle (square-ish marks fill cleanly; non-square get center-cropped).
                 RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
                     .clipShape(Circle())
-            } else {
-                // No logo (empty / invalid URL) or snapshot path → monogram default.
-                Text(monogram)
-                    .font(.system(size: 13 * theme.fontScale, weight: .bold))
-                    .foregroundColor(theme.accent)
             }
         }
         .frame(width: 28, height: 28)
-        // Subscribe badge sits at the bottom-trailing of the avatar (both backings).
+        // Subscribe badge sits at the bottom-trailing of the avatar (all layers).
         .overlay(subscribeBadge, alignment: .bottomTrailing)
     }
 
-    /// Parsed `shopLogo` URL, or nil when empty / unparseable (→ monogram fallback).
-    private var logoURL: URL? {
-        shopLogo.isEmpty ? nil : URL(string: shopLogo)
-    }
+    /// Test-only hook exposing the SAME `avatar` subtree `body` renders, so unit tests can
+    /// make STRUCTURAL assertions on it (does a `RemoteStillImageView` node exist, and does
+    /// it carry the expected URL). This closes the gap the pure-function tests cannot reach:
+    /// `resolvedShopLogoURL` staying perfectly correct while `avatar` was never wired to
+    /// `shopLogo` at all — feed it a literal `""` or delete the branch outright and every
+    /// pure-function test still passes while the logo silently disappears forever.
+    ///
+    /// MUST NOT be called from production code (it is on no `body` path, so it costs zero
+    /// pixels), and MUST keep returning the very same `avatar` — never a parallel copy, which
+    /// would decouple the assertion target from what is actually drawn.
+    var avatarForTesting: some View { avatar }
 
     /// First grapheme of the host name (or title) for the placeholder monogram.
     private var monogram: String {
@@ -447,6 +489,54 @@ public struct PlayerHeaderBarView: View {
     }
 
     // MARK: - Pure helpers
+
+    /// The avatar's real-shop-logo gate — the SINGLE predicate deciding whether the
+    /// remote image is drawn at all, and which URL it gets. Pure / deterministic: no
+    /// rendering, no IO, directly unit-testable (`docs/unit-test-discipline.md`).
+    ///
+    /// Degradation ladder — VERBATIM IDENTICAL to its sibling
+    /// `VideoInfoPanelView.resolvedShopLogoURL(live:urlString:)`, down to the CharacterSet:
+    ///   1. `live == false`         → nil. Demo / snapshot / preview / non-runtime paths
+    ///                                NEVER load an image, so baselines stay deterministic.
+    ///                                Short-circuits BEFORE the trim and `URL(string:)`.
+    ///   2. trim `.whitespacesAndNewlines`; EMPTY after trimming → nil. No logo (or nothing
+    ///      but blanks) → the monogram IS the answer.
+    ///   3. otherwise               → `URL(string:)` on the TRIMMED string; unparseable → nil
+    ///                                (no crash, no force-unwrap).
+    ///
+    /// The trim is load-bearing, not tidiness (header-shop-logo-gate-trim-parity-refui).
+    /// `URL(string:)` does NOT reject blanks — measured: `URL(string: "   ")` yields a
+    /// non-nil `%20%20%20`, and `URL(string: "\t\n ")` yields `%09%0A%20`. Untrimmed, a
+    /// whitespace-only `shopLogo` sailed through this gate into the image branch, where that
+    /// junk relative URL could only ever fail to load. Conversely `URL(string:)` DOES reject
+    /// a padded real URL (`"  https://…  "` → nil), so an untrimmed gate threw away logos
+    /// that were perfectly loadable. Both are fixed by trimming once, here.
+    ///
+    /// This function and `VideoInfoPanelView`'s MUST agree on every input. That equivalence
+    /// is pinned by `PlayerHeaderBarShopLogoTests.testResolvedShopLogoURL_matchesVideoInfoPanelForEveryInput`,
+    /// so either side drifting again turns that test red. (The two DID diverge until this
+    /// change; the earlier test pinning the divergence was rewritten into that equivalence
+    /// pin rather than deleted.) Note step 3 still resolves a scheme-less bare string such as
+    /// `"BeautyTown"` into a non-nil RELATIVE URL — trimming does not change that, and the
+    /// "wired to the wrong non-empty field" counterproof depends on it staying so.
+    ///
+    /// STRUCTURAL COUPLING (do not undo): `avatar`'s condition MUST be expressed as
+    /// `if let url = Self.resolvedShopLogoURL(live: live, urlString: shopLogo)`. It MUST NOT
+    /// re-derive an equivalent check inline nor trim again at the draw site, and no second
+    /// decision point may exist (the old `logoURL` property was removed for exactly this
+    /// reason). Once the verdict and the drawing each own a copy of the logic they eventually
+    /// diverge, and unit tests of this function would then prove nothing about what is
+    /// actually drawn.
+    ///
+    /// ⚠️ `live` here is the live-RUNTIME IMAGE gate, not the LIVE broadcast state
+    /// (`isLive`) — see the `live` property's doc comment. Note the trap: the `demo(live:)`
+    /// helper's `live:` argument means `isLive`, NOT this gate.
+    static func resolvedShopLogoURL(live: Bool, urlString: String) -> URL? {
+        guard live else { return nil }
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
 
     /// Viewer-count badge visibility gate (rb-ios-viewer-count-show-pv-num). Pure /
     /// deterministic truth table — extracted so the gate is unit-testable without

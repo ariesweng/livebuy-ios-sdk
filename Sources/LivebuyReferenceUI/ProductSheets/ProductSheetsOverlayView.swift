@@ -293,6 +293,12 @@ public struct ProductSheetsOverlayView: View {
                 ProductZoomOverlayView(
                     theme: theme,
                     detail: zoomed,
+                    // Same selected spec the sheet resolved its photo from, so the lightbox
+                    // magnifies the photo the user actually tapped
+                    // (ios-product-sheet-spec-photo-reference-ui). Read live rather than
+                    // captured with `zoomedDetail`: the lightbox covers the sheet, so the
+                    // selection cannot change while it is open.
+                    selectedSpec: model.variant.selectedSpec,
                     live: live,
                     onClose: { zoomedDetail = nil })
             }
@@ -847,6 +853,17 @@ public extension ProductSheetsModel {
             price: 390,
             stock: soldOut == 1 ? 0 : 24,
             soldOut: soldOut,
+            // `photos` stays EMPTY **deliberately** (ios-product-sheet-demo-fixture-spec-coverage
+            // D2). Snapshots cannot observe the product photo AT ALL: `ProductDetailSheetView.live`
+            // defaults to `false` and every snapshot uses that default, so the draw points
+            // (`if live, let url = resolvedPhoto.primaryPhotoURL`) never load a real image — only
+            // the deterministic gradient + monogram. That is precisely why `live` exists (keeps
+            // network I/O and non-determinism out of the baselines).
+            //
+            // So do NOT "complete" this fixture with placeholder URLs: it would change zero pixels
+            // while making the fixture LOOK like it covers spec-aware photos — recreating the exact
+            // false-coverage trap this change exists to remove. Photo coverage lives in the pure-
+            // function unit tests `ResolvedProductPhotoTests`, which is the correct layer for it.
             photos: [],
             specifications: [],
             specOptions: [])
@@ -854,6 +871,11 @@ public extension ProductSheetsModel {
 
     /// A demo variant state WITH a chip group (顏色), the first option selected,
     /// resolving a demo `LBSpec` (public init). Covers the variant-chip surface.
+    ///
+    /// NOTE: this spec's price pair is INTENTIONALLY IDENTICAL to `demoDetail()`
+    /// (`NT$ 390` / `NT$ 590`), so the goldens built on it hold the "spec == product →
+    /// output unchanged" identity case. It therefore CANNOT discriminate 「規格價取代商品價」——
+    /// use `demoVariantSpecPriced` for that.
     static var demoVariantWithGroup: LBVariantState {
         let spec = LBSpec(
             id: "demo-spec-01",
@@ -864,7 +886,48 @@ public extension ProductSheetsModel {
             originalPrice: 590,
             originalPriceShow: "NT$ 590",
             stock: 24,
-            photos: [])
+            photos: [])   // empty on purpose — see `demoDetail()` D2 note
+        return LBVariantState(
+            groups: [LBVariantGroup(label: "顏色", options: ["珊瑚橘", "玫瑰棕", "正紅"])],
+            selection: [0: 0],
+            selectedSpec: spec,
+            selectedSpecificationId: spec.id)
+    }
+
+    /// A demo variant state structurally IDENTICAL to `demoVariantWithGroup` (same 顏色
+    /// group, same selected option, same in-stock spec, non-nil `selectedSpec`) whose ONLY
+    /// difference is the spec's PRICE PAIR — `NT$ 290` / `NT$ 490` against `demoDetail()`'s
+    /// `NT$ 390` / `NT$ 590` (ios-product-sheet-demo-fixture-spec-coverage-reference-ui).
+    ///
+    /// WHY THIS EXISTS: `demoVariantWithGroup` carries a non-nil `selectedSpec`, so the
+    /// spec-aware price wiring IS exercised by the existing goldens — but both sources hold
+    /// the SAME strings, so `resolvePriceDisplay` renders byte-identical pixels whether it
+    /// picks the spec or the product. Those goldens have ZERO discriminating power over
+    /// 「規格價取代商品價」: a regression that hard-codes the product source passes them all.
+    /// 「baseline 沒有變動」MUST NOT be read as a correctness signal there.
+    ///
+    /// This fixture makes two regressions pixel-visible that were previously unobservable:
+    ///   1. price falling back to the product level (`NT$ 390` reappears), and
+    ///   2. the same-source atomicity being split into two independent fallbacks, which would
+    ///      pair spec sale price with product original price (`NT$ 290` over `NT$ 590`) and
+    ///      advertise a FAKE 51% discount — the core clause of the sibling requirement, until
+    ///      now backed only by unit tests.
+    ///
+    /// The strings are chosen to be the SAME CHARACTER WIDTH as the product-level ones (same
+    /// prefix, same digit count) so the golden differs from its twin only in glyphs, with no
+    /// layout reflow — that is what keeps the controlled A/B comparison against
+    /// `product-detail-sheet-variant-instock` / `add-to-cart-sheet-variant-instock` clean.
+    static var demoVariantSpecPriced: LBVariantState {
+        let spec = LBSpec(
+            id: "demo-spec-02",
+            name: "珊瑚橘",
+            specificationNo: "SKU-CORAL-PRICED",
+            price: 290,
+            priceShow: "NT$ 290",
+            originalPrice: 490,
+            originalPriceShow: "NT$ 490",
+            stock: 24,
+            photos: [])   // empty on purpose — see `demoDetail()` D2 note
         return LBVariantState(
             groups: [LBVariantGroup(label: "顏色", options: ["珊瑚橘", "玫瑰棕", "正紅"])],
             selection: [0: 0],

@@ -16,7 +16,9 @@ import LivebuyUI
 //   1. `theme: ReferenceUITheme`            — FIRST positional argument.
 //   2. bound SNAPSHOT VALUES               — `info: LBInfoTabState`,
 //      `activeTab: LBInfoPanelTab`, `canOpenNotice: Bool`,
-//      `systemNotice: String`, `notice: String` — passed BY VALUE.
+//      `systemNotice: String`, `notice: String`, plus the PRESENTATION flag
+//      `live: Bool` (live-runtime image gate, NOT a view-model field — see its
+//      doc comment) — all passed BY VALUE.
 //   3. action closure (LAST, `= nil`)      — `onSelectTab: ((LBInfoPanelTab) -> Void)?`
 //                                             which the host wires to the
 //                                             template's `selectInfoTab` intent.
@@ -59,6 +61,21 @@ public struct VideoInfoPanelView: View {
     /// Shop / video notice text (`DefaultNoticeTab.notice`).
     public let notice: String
 
+    /// Live-runtime image gate (same convention as `PlayerHeaderBarView.live` and
+    /// `CarouselCardView.live`). A by-value presentation flag (default `false`, NOT an
+    /// info-tab view-model field): `PlayerShellView` feeds `!paintsBackgroundPlaceholder`
+    /// — the SAME expression the header avatar uses — so the shop row loads the real
+    /// `info.shopLogo` ONLY when the shell sits over a real video surface (runtime).
+    /// `false` (demo / snapshot / preview / `ImageRenderer` path) → the shop row stays the
+    /// deterministic gradient monogram chip so the baseline never touches the network.
+    ///
+    /// ⚠️ NAMING TRAP: this is the live-RUNTIME IMAGE gate, **not** the LIVE broadcast
+    /// state (`isLive`). `VideoInfoPanelView` has no `isLive` concept, so there is no
+    /// clash here — but note that `PlayerHeaderBarView.demo(live:)`'s `live:` argument
+    /// means `isLive` (LIVE chrome), an entirely different thing. Do not conflate the two
+    /// when mirroring this to Android / RN / Flutter.
+    public let live: Bool
+
     /// Host-wired tab-switch intent. The shell forwards
     /// `model.selectInfoTab(tab)`. nil for demo / snapshot instances — the panel
     /// renders correctly action-free.
@@ -91,6 +108,7 @@ public struct VideoInfoPanelView: View {
         canOpenNotice: Bool,
         systemNotice: String,
         notice: String,
+        live: Bool = false,
         onSelectTab: ((LBInfoPanelTab) -> Void)? = nil,
         onOpenStorefront: (() -> Void)? = nil,
         onContactMerchant: (() -> Void)? = nil,
@@ -103,6 +121,7 @@ public struct VideoInfoPanelView: View {
         self.canOpenNotice = canOpenNotice
         self.systemNotice = systemNotice
         self.notice = notice
+        self.live = live
         self.onSelectTab = onSelectTab
         self.onOpenStorefront = onOpenStorefront
         self.onContactMerchant = onContactMerchant
@@ -262,13 +281,27 @@ public struct VideoInfoPanelView: View {
         .padding(.bottom, 18)
     }
 
-    /// Shop row — circular logo monogram + shopName + 「這裡是 …」 subline +
+    /// Shop row — circular shop logo + shopName + 「這裡是 …」 subline +
     /// subscribe affordance bound to `info.isSubscribed`.
+    ///
+    /// The logo chip is drawn as TWO STACKED LAYERS, mirroring `PlayerHeaderBarView.avatar`
+    /// (which already paints this very same `shopLogo` at the top of the shell):
+    ///
+    ///   • BOTTOM (always drawn) — the deterministic gradient + monogram chip. It is NOT a
+    ///     "host can swap this out" placeholder any more: it IS the loading state, the
+    ///     load-failure state, the no-logo state and the snapshot/demo state.
+    ///   • TOP (conditional)     — the REAL remote logo via the iOS-14-safe
+    ///     `RemoteStillImageView` (no `AsyncImage` — iOS 15+, banned in this package).
+    ///
+    /// Overlay — NOT `if / else`: `RemoteStillImageView` paints NO pixels while the image is
+    /// still downloading and none at all when it fails, so an `else`-only placeholder would
+    /// flash a transparent hole in both cases. Stacking makes the chip cover both for free,
+    /// which is why this change needs zero error UI / spinner / extra placeholder asset.
     private var shopRow: some View {
         HStack(spacing: 12) {
-            // Logo monogram chip (decorative gradient placeholder — host can swap
-            // in a real image; reference-ui keeps it deterministic for snapshots).
             ZStack {
+                // Bottom layer — deterministic gradient + monogram (loading / failure /
+                // no-logo / snapshot placeholder). Unchanged from before this change.
                 LinearGradient(
                     gradient: Gradient(colors: [
                         Color(hex: "#FFD7A8") ?? .orange,
@@ -278,6 +311,15 @@ public struct VideoInfoPanelView: View {
                 Text(Self.monogram(for: info.shopName))
                     .font(.system(size: 12 * theme.fontScale, weight: .bold))
                     .foregroundColor(.white)
+
+                // Top layer — the REAL shop logo, gated by the single resolver predicate.
+                // `.scaleAspectFill` is EXPLICIT (the primitive defaults to `.scaleAspectFit`,
+                // which would letterbox a non-square mark inside the circle) and matches
+                // `PlayerHeaderBarView.avatar`.
+                if let url = Self.resolvedShopLogoURL(live: live, urlString: info.shopLogo) {
+                    RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
+                        .clipShape(Circle())
+                }
             }
             .frame(width: 44, height: 44)
             .clipShape(Circle())
@@ -468,6 +510,47 @@ public struct VideoInfoPanelView: View {
 
     /// `theme.surface.bgSunken` (#F4F4F6) — ghost button fill (design `LBPButton`).
     static let bgSunken = Color(hex: "#F4F4F6") ?? Color.gray.opacity(0.08)
+
+    // MARK: - Shop-logo gate (pure, zero-render, deterministically unit-testable)
+
+    /// Resolves the shop row's REAL logo URL, or `nil` when the gradient monogram chip is
+    /// the final presentation. Pure and render-free, so the whole gate is covered by plain
+    /// unit tests on any Simulator with no network and no snapshot.
+    ///
+    /// Degradation ladder (mirrored verbatim by the Android / RN / Flutter siblings):
+    ///   1. `live == false`             → nil. Demo / snapshot / preview / non-runtime paths
+    ///                                    NEVER load an image, so baselines stay deterministic.
+    ///   2. `urlString` trims to empty  → nil. No logo → the chip IS the answer.
+    ///   3. otherwise                   → `URL(string:)` built from the TRIMMED string;
+    ///                                    unparseable → nil (no crash, no force-unwrap).
+    ///
+    /// Trimming is used for the emptiness verdict AND for URL construction only — this
+    /// function never mutates what it stores anywhere, it just answers "which URL, if any".
+    ///
+    /// STRUCTURAL COUPLING (do not undo): `shopRow`'s overlay condition MUST be expressed
+    /// as `if let url = resolvedShopLogoURL(live:urlString:)`. It MUST NOT re-derive an
+    /// equivalent check inline (`if live, !info.shopLogo.isEmpty, let url = URL(...)`).
+    /// Same discipline as the product-photo resolver's "validity == drawability": once the
+    /// verdict and the drawing each own a copy of the logic they eventually diverge, and
+    /// unit tests of this function would then prove nothing about what is actually drawn.
+    ///
+    /// ⚠️ `live` here is the live-RUNTIME IMAGE gate, not the LIVE broadcast state
+    /// (`isLive`) — see the `live` property's doc comment.
+    static func resolvedShopLogoURL(live: Bool, urlString: String) -> URL? {
+        guard live else { return nil }
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
+
+    /// Test-only hook exposing the SAME `shopRow` subtree `body` renders, so unit tests can
+    /// make STRUCTURAL assertions on it (does a `RemoteStillImageView` node exist, and does
+    /// it carry the expected URL). This closes the gap the pure-function tests cannot reach:
+    /// `resolvedShopLogoURL` staying correct while `shopRow` was never wired to
+    /// `info.shopLogo` at all. MUST NOT be called from production code, and MUST keep
+    /// returning the very same `shopRow` (never a parallel copy — a copy would decouple the
+    /// assertion target from what is actually drawn).
+    var shopRowForTesting: some View { shopRow }
 
     /// Up-to-3-char monogram from the shop name (deterministic, pure).
     static func monogram(for shopName: String) -> String {

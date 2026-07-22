@@ -850,6 +850,11 @@ public struct PlayerShellView: View {
                 canOpenNotice: model.canOpenNotice,
                 systemNotice: model.systemNotice,
                 notice: model.notice,
+                // 商家列的真實 logo 圖片閘門 — 與上方 header avatar 呼叫點（`live:` 同一行運算式）
+                // 共用**同一來源**，而非各自推導：兩個 surface 畫的是同一顆 `shopLogo`，gate 一旦
+                // 分岔就會出現「header 已顯真 logo、面板仍是字母漸層」這種跨面不一致。
+                // snapshot / demo 路徑（`paintsBackgroundPlaceholder == true`）維持漸層 chip、不觸網。
+                live: !paintsBackgroundPlaceholder,
                 onSelectTab: { tab in model.selectInfoTab(tab) },
                 // 與商家一對一對話 → present the「聯絡商家」confirm modal FIRST (design
                 // `contact_merchant`), same intent as the side-rail serviceLink tap; only its

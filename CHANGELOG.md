@@ -5,9 +5,58 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.2.0] - 2026-07-22
 
-_Nothing yet — next features accrue here toward the version after v4.1.0._
+> minor release，無 breaking，源碼相容，兩端 lockstep（iOS `v4.2.0` / Android `4.2.0`）。鎖點
+> `5271eb03`（本版最後一個碰 `ios/Sources/` 的 commit）。自 v4.1.0 以來碰 `ios/Sources/LivebuySDK/`
+> （binary target）共 **3 commit**（ACTIVE_EVENT 對外暴露 `5271eb03`、直播抽獎「參加」turnkey `40d57a02`、
+> `WIN_RECEIVED` params KDoc 校正 `7f865a0b`）→ **binary 已重 build，checksum 為新值**（≠v4.1.0；由
+> `release-ios.yml` 於 `v4.2.0` tag 產生）。`LivebuyReferenceUI`（source 出貨）本版另有多筆 drop-in 修復
+> （商家 logo / 商品明細規格連動），一併隨 source target 出貨。詳見
+> [`docs/release/v4.2.0-tag-runbook.md`](../docs/release/v4.2.0-tag-runbook.md) 與
+> [release notes](../docs/release-notes/v4.2.0.md)。
+
+### Added（新公開符號，皆 additive、源碼相容、無 breaking）
+
+- **`ACTIVE_EVENT_STARTED` notification event (in-progress live event / live giveaway)** — the SDK
+  dispatches this when `POST /sdk/video/goods` returns an `event[]` entry it has not notified before
+  (**fire-once per event id**; the dedup set is cleared on video switch). Params (flat):
+  `{ id, title, keyword?, duration, surplus, award }` — `keyword` (the "join event" passphrase) is
+  omitted when empty, `surplus` is a seconds snapshot at dispatch time (the host counts down locally
+  from `duration` + the wall-clock time it received the event), and `award` reuses the winner
+  `[{type, name, code}]` shape. **Does not carry `stayTime`** (a turnkey-internal dwell threshold).
+  Lets the host draw its own event countdown / prize teaser / join-event entry point.
+- **`LBActiveEvent` public model** — `{ id, title, keyword, award, duration, surplus, stayTime }`,
+  produced via the `Core/DTOs` → `Core/Mappers` route (not `Decodable`, consistent with the other
+  mapped public models). `LBVideoGoodsResponse.event` is promoted from internal to **public** alongside it.
+- **`activeEvents()` public accessor** — returns a snapshot of the in-progress events in the current
+  goods cache, covering the late-subscriber blind spot where a host that attaches mid-stream would miss
+  the fire-once `ACTIVE_EVENT_STARTED` event.
+
+### Fixed / drop-in behavior（reference-ui + turnkey，drop-in `LivebuyPlayer` 使用者自動生效）
+
+- **直播抽獎「參加」turnkey 化（drop-in `LivebuyPlayer`）** — host 未攔截 `EVENT_JOIN_INTENT` 時，drop-in
+  容器自動送出加入活動的口令留言（帶 `event_id` + 純牆上時間 `stay_time`，背景照算 / 每支影片重置），host
+  無須自接領獎流程。poll 每輪對進行中活動 fire-once `eventstay`。對齊 Android（本版兩端同步）。
+- **商家 logo 改繪真實圖片（drop-in 播放器頂部主播列 + 商品資訊面板商家列）** — 兩處商家列改繪真實商家
+  logo（漸層 monogram chip 降為底層佔位、永遠繪製，取代先前只有 monogram 的呈現）；並修好 iOS header
+  **每次首開閃純白圓**（`RemoteStillImageView.load` 開頭無條件清空 image）與**全空白 logo 顯純白圓**
+  （`URL(string:"   ")` 回非 nil 繞過 monogram fallback）兩個既有破口。對齊 Android / info panel。
+- **商品明細 sheet 價格 / 主圖跟隨已選規格（drop-in ProductDetailSheet）** — 選規格後**售價 / 原價**與
+  **主圖 / zoom 燈箱**同步切到該規格（先前價格停在商品層屬**誤導性 bug**、主圖不跟規格）；來源有效性與所繪
+  項目採同一述詞。對齊 Android（本版兩端同步）。
+
+### Notes
+
+- **未新增 / 移除 / 改名任何既有 host-facing public 符號**（本版新增符號皆 additive）；無欄位型別變更、無
+  新增 bundled 資源。ACTIVE_EVENT 新 API 供 headless host 消費；drop-in 修復對 `LivebuyPlayer` 使用者自動
+  生效。
+- **`WIN_RECEIVED` params KDoc 校正（無 wire / 行為變更）** — 事件登錄檔的 winner params 由從未填充的
+  幽靈欄位 `name` 校正為實際 wire 的 `event_id` / `title`（emit 邏輯本就送 `event_id` / `title`，僅四端
+  KDoc 據舊 source 生成錯誤）；**dispatch 的 params 無任何變化**，host 端無感。
+- **binary 重 build**：本版 core（`ios/Sources/LivebuySDK/`）被動到（ACTIVE_EVENT 對外暴露 + turnkey 抽獎
+  參加 + WIN_RECEIVED KDoc codegen），XCFramework 已重 build、checksum 為新值（≠v4.1.0）——由
+  `release-ios.yml` 於 `v4.2.0` tag 自動產生並 patch dist `Package.swift` / podspec。
 
 ---
 
