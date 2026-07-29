@@ -5,6 +5,103 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-07-28
+
+> minor release，**無源碼破壞**、源碼相容，兩端 lockstep（iOS `v4.3.0` / Android `4.3.0`）。鎖點
+> `87149d07`（本版最後一個碰 `ios/Sources/LivebuySDK/` 的 commit）。自 v4.2.0 以來碰
+> `ios/Sources/LivebuySDK/`（binary target）共 **6 commit**（`AWARD_CLAIM_RESULT` 10 key `a1be0fd2`、
+> 其 codegen 描述 `a8adb6ad`、`AUTH_STATE_CHANGED.display_name` 語意收斂 `9a5bb811`、商品獎品自動加購
+> `809741a7`、其 codegen 描述 `dd57ae54`、`LogConfigStore` 自我死鎖根治 `87149d07`）
+> → **binary MUST 重 build，checksum 為新值**（≠v4.2.0；由發版
+> 流程於 `v4.3.0` tag 產生並 patch dist `Package.swift` / podspec）。`LivebuyReferenceUI`（source 出貨）
+> 本版另有兩筆 drop-in 改造（四階段領獎 sheet `62133e9c`、加入活動三層閘 `efcd06a1`），隨 source target
+> 出貨。詳見 [`docs/release/v4.3.0-tag-runbook.md`](../docs/release/v4.3.0-tag-runbook.md)、
+> [真機 e2e 檢查表](../docs/release/v4.3.0-e2e-checklist.md) 與
+> [release notes](../docs/release-notes/v4.3.0.md)。
+
+### Changed（⚠️ 行為變更 — 唯一「不改碼但行為會變」的一條，請先讀）
+
+- **⚠️ `AUTH_STATE_CHANGED` 的 `display_name` 語意收斂為「使用者自己選定的名字；未選定時為空字串 `""`」**
+  （`9a5bb811`，iOS + Android dual）。**iOS 側的實際變化**：登出（`clearUser()`）後由回填系統自動產生的
+  預設名（例如 `"Guest_4F2A"`）**改為回傳 `""`**——除非訪客自己設過暱稱，那就回那個暱稱。
+  `state == "logged_in"` 的既有行為**完全不變**。
+  - **為什麼**：turnkey 的暱稱閘判定是「未登入且 `display_name` 為空 → 要求先設暱稱」。iOS 因為回填了
+    非空的 `"Guest_4F2A"`，讓「登入過又登出」的訪客被判成「已設過名」，**連留言都不會被要求設暱稱，
+    直接頂著機器產生的代號公開發言**。Android 原本行為（沒帶 key，解為 `""`）才是對的，本版往它對齊。
+  - **非源碼破壞**：事件名稱、參數 key、參數型別、公開方法簽名**皆不變**，重新編譯不會壞——故仍走 minor。
+  - **host 因應**：若你在登出 / 訪客狀態下拿 `display_name` 當「畫面上要顯示的名字」直接用，
+    **MUST 自行 fallback**（值為空時改用你自己的訪客預設稱呼，或引導使用者取名）。只在 `logged_in` 時讀
+    它、或本來就自己組訪客顯示名者，**完全不受影響**。
+  - **明確不受影響：`resolvedDisplayName`** —— 聊天 wire 送出用的名字**仍保留 `Guest_XXXX` fallback，
+    一字未改**。留言送出後顯示的名字不會變空白；變的只有 `AUTH_STATE_CHANGED` 帶給你的那個值。
+
+### Added（新公開面，皆 additive、源碼相容、無 breaking）
+
+- **`AWARD_CLAIM_RESULT` params 由 4 key 擴為 10 key**（`a1be0fd2`；codegen 描述 `a8adb6ad`）——新增
+  `winner_id` / `event_title` / `award_name` / `award_expiration` / `award_image_url` / `award_stock`；
+  既有 `status` / `award_type` / `event_id` / `award_code` 的語意與觸發時機**完全不變**（**純新增 key、
+  向後相容**，既有 host 不讀新欄位不會壞）。欄位分兩類——**記憶體來源**（`status` / `award_type` /
+  `winner_id` / `event_title`，成功失敗都可靠）與 **API 回應來源**（其餘六個，僅成功才有）；
+  nil / 空字串的 key **整個省略**；失敗只帶記憶體來源欄位；`award_stock` 含 `0`（＝無庫存）；
+  `award_code` / `award_expiration` 僅折扣型獎品。**SDK 領獎成功後不導頁、不渲染**，資訊交 host 處理。
+- **`CART_ADD_REQUEST` 新增選填 `award_winner_id`**（`809741a7`；codegen 描述 `dd57ae54`）——本筆加購由
+  獎品領獎觸發時才帶，值＝中獎票券 id（同 `AWARD_CLAIM_RESULT` 的 `winner_id`），供 host 識別「這筆是
+  獎品」並串回領獎事件；非獎品觸發時**整個省略 key**。typed accessor `LBCartAddRequest.awardWinnerId`
+  **刻意為 optional**（缺 key → `nil`，不退空字串）。
+- **view-model 層新增帶 email 的領獎提交入口**（`f1bfb841`）—— 含 email 驗證純函式、`submitInFlight`
+  送出中狀態、`dismissClaim()`。**舊 EMAIL-LESS 入口 deprecated 但保留、源碼相容。**
+
+### Fixed / drop-in behavior（reference-ui + turnkey，drop-in `LivebuyPlayer` 使用者自動生效）
+
+- **中獎領獎補 email 欄位 → turnkey 內建領獎 sheet 改為四階段流程**（`62133e9c`）—— 由「單頁通知型
+  sheet」改為 `claim`（填 email）→ `confirmSubmit` / `confirmClose`（二次確認）→ `submitting`（送出中）
+  → `done` / `fail`。**修好一整類「中獎領取失敗」**：core 領獎路徑 `email` **必填**，而舊 sheet 不收
+  email，host 未攔截又沒有 email 時 SDK fail-fast、**連領獎請求都沒送出**，訪客沒有任何地方能填。
+  關閉為**純 dismiss**（中獎票保留、徽章不變、可再次領取）；fail 卡顯示通用錯誤文案（後端不區分失敗原因）。
+  email 為**純聯絡用、非識別鍵**（後端已確認）：填錯不構成領獎失敗、同一 email 可領多個獎、登入態可預填
+  會員 email 但應保持可編輯。**訪客確實能參加、中獎、領獎**，訪客中獎後才登入**不會掉票**。
+- **商品獎品領獎成功後自動加入購物車**（`809741a7`）—— `award_type == "product"` 的獎品領獎成功後
+  SDK 自動加購，該筆領獎共派**兩個事件**：`AWARD_CLAIM_RESULT`（claim 成功即派）→ `CART_ADD_REQUEST`
+  （addcart 成功後派）。**discount 型完全不受影響**（只有一個事件，行為一字未改）。加購失敗時獎品
+  **仍算領到**（`status` 維持 `claimed`）且依既有契約**不派任何事件**——host 判斷方式＝收到
+  `AWARD_CLAIM_RESULT(claimed, award_type=product)` 卻沒有配對的 `CART_ADD_REQUEST`；此情境下 host 只有
+  獎品名稱與圖片、**沒有 host 側商品 id**，無法自行補進自家車（刻意的最小對外面積取捨）。獎品加購
+  **豁免 30 秒防重複建單窗口**、且**不送**加購轉換埋點（0 元獎品不是加購轉換）。
+- **加入活動 CTA 套用與留言一致的三層閘**（`efcd06a1`）—— 修好「**沒設暱稱卻能參加抽獎**」：參加活動
+  本質上就是送一則帶 `event_id` 的口令留言，卻沒有任何閘。現在 drop-in 的加入活動 CTA 走
+  ①登入閘（依 `sdkConfig` 訪客留言開關）→ ②暱稱閘（未登入且沒自選過暱稱）→ ③通過才送出，
+  並在閘攔截後**續作**（pending-join，完成登入 / 設暱稱後自動接續原動作）。iOS 的閘位在 funnel **之前**
+  return，被攔截的 tap **連 `EVENT_JOIN_INTENT` 都不會派**，因此 host 不會收到「假參加」訊號。
+  （Android / RN / Flutter 另有一個 host join 觀察 callback，其「攔截時一併抑制」的收斂由各自平台的
+  change 處理；iOS reference-ui 沒有該 callback，故無對應改動。）
+
+### Fixed（core，iOS 獨有 — 既有缺陷，非本版引入）
+
+- **`configure()` 之後 SDK 內部的一把鎖會被永久卡死**（`87149d07`）—— `LogConfigStore.refreshIfNeeded`
+  在已持有內部 `NSLock` 的區段內呼叫了一個自己也會取同一把鎖的存取器。`NSLock` 不可重入，同執行緒
+  二次取鎖**直接永久阻塞，且該鎖從此不再釋放**。這是確定性、無條件、不可恢復的（不是偶發競爭），
+  而且**正式環境每次 `configure()` 都會觸發**。
+  - **host 可觀察到的最嚴重後果**：同一 process 內**第二次以後的 `LivebuySDK.configure(...)` 永不返回**
+    ——`await configure()` 一直不 resume，host 的 loading 狀態永遠不會結束。會踩到的典型情境是切換
+    apiKey / shopId、或登入登出流程中重新 configure。**單次 configure 的 host 不受此影響。**
+  - 其他後果：每次 configure 永久燒掉一條 Swift concurrency cooperative-pool 執行緒；SDK 內部事件
+    批次上報排程在第一次 tick 後停擺。
+  - **既有缺陷**：由 `1a00d32c`（2026-05-22）引入，已隨 v3.x / v4.0.0 / v4.1.0 / v4.2.0 出貨，
+    **不是 v4.3.0 的 regression**。**iOS 獨有** —— Android 對應實作全檔無鎖，從不受影響。
+  - **公開 API 零變動**，host 無需改碼。
+  - ℹ️ **不要誤讀為「動態日誌降級配置開始生效」**：實測 `/sdk/log_config` 與 `/sdk/log` 在正式環境
+    皆回 404（路由不存在），該功能修好後**仍不會生效**，只是從「死鎖」變成「乾淨地失敗並保留內建
+    預設值」。批次大小 / 刷新間隔仍為內建預設，**行為與 v4.2.0 一致**。
+
+### Notes
+
+- **未新增 / 移除 / 改名任何既有 host-facing public 符號**、無參數型別變更、無 wire 破壞、無新增
+  bundled 資源。本版唯一需要 host 留意的是上方 `Changed` 小節的 `display_name` 語意。
+- **binary 重 build**：本版 core（`ios/Sources/LivebuySDK/`）被 6 顆 commit 動到，XCFramework MUST 重
+  build、checksum 為新值（≠v4.2.0）——由發版流程於 `v4.3.0` tag 自動產生並 patch dist `Package.swift` /
+  podspec。
+- **RN / Flutter 本輪不發**（停在待發 `2.0.0`）；本版四個主題於其主線皆已落地，隨各自 2.0.0 出貨。
+
 ## [4.2.0] - 2026-07-22
 
 > minor release，無 breaking，源碼相容，兩端 lockstep（iOS `v4.2.0` / Android `4.2.0`）。鎖點

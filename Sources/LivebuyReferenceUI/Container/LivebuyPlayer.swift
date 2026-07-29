@@ -192,6 +192,63 @@ func subscribeRequiresLogin(isLoggedIn: Bool) -> Bool {
     !isLoggedIn
 }
 
+/// 「加入活動」抽獎 CTA 的三層閘決策（rb-ios-event-join-gate）。加入活動送出的本質**就是一則公開留言**
+/// （core `requestEventJoin` → `performSendChat`），故套與留言送出**一致**的閘，且 **MUST** 共用留言
+/// pill 的**同一組純函式**（`liveCommentRequiresLogin` / `liveCommentRequiresNickname`）——決策**不複製
+/// 條件**、一律委派，讓兩入口永不分歧（比照 `nickname-login-gate`「兩入口用同一 predicate」原則）。
+/// 優先序同 `onComment`：①**登入閘優先**（訪客 + 該場 `guest_comment==0` ⟺ `!chatEnabled`）→ `.login`；
+/// ②否則暱稱閘（未設名訪客）→ `.nickname`；③否則 `.proceed`。Pure（無副作用）→ 可脫離 SwiftUI 單元測試。
+enum EventJoinGateDecision: Equatable {
+    /// 訪客且該場留言需登入（`!isLoggedIn && !chatEnabled`）→ 先請登入，MUST NOT join / markJoined。
+    case login
+    /// 未設名訪客（`!isLoggedIn && displayName.isEmpty`，`chatEnabled==true`）→ 先設定暱稱、記 pending
+    /// join，MUST NOT join；設名成功後接續完成該次 join。
+    case nickname
+    /// 已登入 / 已設名 → 直接 join。
+    case proceed
+}
+
+func eventJoinGateDecision(isLoggedIn: Bool, chatEnabled: Bool, displayName: String) -> EventJoinGateDecision {
+    if liveCommentRequiresLogin(isLoggedIn: isLoggedIn, chatEnabled: chatEnabled) { return .login }
+    if liveCommentRequiresNickname(isLoggedIn: isLoggedIn, displayName: displayName) { return .nickname }
+    return .proceed
+}
+
+/// 套用「加入活動」三層閘（rb-ios-event-join-gate）：跑 `eventJoinGateDecision`，依決策執行對應副作用
+/// （`presentLogin` / `presentNickname` 皆以參數注入 → 本函式為純控制流、可用 capturing spy 單元測試，
+/// 無需 SwiftUI / template / controller）。回傳是否**已攔截**（`true` → 呼叫端 MUST NOT forward join 到
+/// template）。`.nickname` 時把該次 `(eid, keyword)` 交給 `presentNickname` 記為 pending join。
+func applyEventJoinGate(
+    isLoggedIn: Bool, chatEnabled: Bool, displayName: String,
+    eid: Int, keyword: String,
+    presentLogin: () -> Void,
+    presentNickname: (_ eid: Int, _ keyword: String) -> Void
+) -> Bool {
+    switch eventJoinGateDecision(isLoggedIn: isLoggedIn, chatEnabled: chatEnabled, displayName: displayName) {
+    case .login:
+        presentLogin()
+        return true
+    case .nickname:
+        presentNickname(eid, keyword)
+        return true
+    case .proceed:
+        return false
+    }
+}
+
+/// 設定暱稱送出後接續 pending 的「加入活動」（rb-ios-event-join-gate）：若存在暱稱閘記下的 pending join
+/// 意圖，透過注入的 `forwardJoin` **恰送一次**（呼叫端以 bypass-gate 的 forward 實作），回傳是否有
+/// forward。Pure（副作用注入）→ 可用 spy 單測「有 pending → 接續一次」「無 pending → 不送」。
+@discardableResult
+func completePendingEventJoin(
+    pending: (eid: Int, keyword: String)?,
+    forwardJoin: (_ eid: Int, _ keyword: String) -> Void
+) -> Bool {
+    guard let pending = pending else { return false }
+    forwardJoin(pending.eid, pending.keyword)
+    return true
+}
+
 /// 組商品分享連結（issue 6）：在 `base`（= `channel.share_url`）後加上商品介紹時間 `t=<beginTime>`（秒）。
 /// Pure（無副作用）所以容器的分享預設與單元測共用一份實作。
 /// - `base` 為空 → 回 `""`（呼叫端退回 channel-level `performShare()`）。
@@ -393,6 +450,27 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         coordinator.composerController = ChatComposerController()
         coordinator.nicknameController = NicknamePromptController()
         coordinator.loginController = LoginPromptController()
+
+        // rb-ios-event-join-gate:「加入活動」抽獎 CTA 套與留言送出一致的三層閘（登入 → 暱稱 → 放行），
+        // 共用同一組純函式故永不分歧。CTA tap → `FeedWinModel.joinEvent` 先問此注入 gate：登入閘 →
+        // present login、不 join / 不 markJoined；暱稱閘 → present 設定暱稱 modal 並記住這次 pending
+        // join（eid/keyword）、不 join；放行 → 回 false 讓 `FeedWinModel` forward 到 template。訊號取自
+        // 既有 `shellModel` 鏡像（isLoggedIn / chatEnabled / displayName）。`[weak coordinator]` 破 retain
+        // cycle（coordinator → feedModel → gate closure → weak coordinator）。demo / snapshot 不經此路徑
+        // （直接建構的 FeedWinModel `joinEventGate == nil`）→ baseline byte-identical。
+        coordinator.feedModel?.joinEventGate = { [weak coordinator] eid, keyword in
+            guard let coordinator = coordinator,
+                  let shellModel = coordinator.model,
+                  let nicknameController = coordinator.nicknameController,
+                  let loginController = coordinator.loginController else { return false }
+            return applyEventJoinGate(
+                isLoggedIn: shellModel.isLoggedIn,
+                chatEnabled: shellModel.chatEnabled,
+                displayName: shellModel.displayName,
+                eid: eid, keyword: keyword,
+                presentLogin: { loginController.present() },
+                presentNickname: { e, k in nicknameController.present(pendingJoin: e, keyword: k) })
+        }
     }
 
     /// Single overlay hierarchy attached as ONE child hosting controller (R1). The merged
@@ -607,8 +685,17 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
             onNicknameSubmit: { name in
                 Livebuy.setGuestNickname(name)
                 let compose = nicknameController.composeAfterSubmit
+                // rb-ios-event-join-gate: 若這次設定暱稱是為了一個被暱稱閘擋下的 pending「加入活動」，
+                // 讀出該次 (eid, keyword)（**在 dismiss 前**，dismiss 會清 pending）；設名成功後自動接續
+                // 完成該次 join、**恰一次**。續作 bypass gate（設名後 displayName 由 template onChange
+                // 非同步刷新，此刻可能尚未落地，若再跑 gate 會誤判暱稱未設而重開 modal——比照留言 pill
+                // 設名後直接開 composer 的「直接接續」語意）。
+                let pendingJoin = nicknameController.pendingJoinEvent
                 nicknameController.dismiss()
                 if compose { composerController.open() }
+                completePendingEventJoin(pending: pendingJoin) { eid, keyword in
+                    feedModel.forwardJoinEventBypassingGate(eid: eid, keyword: keyword)
+                }
             },
             onProductTap: { [weak player] product in
                 guard let player = player else { return }

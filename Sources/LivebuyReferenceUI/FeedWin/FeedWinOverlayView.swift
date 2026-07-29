@@ -14,7 +14,7 @@ import LivebuyUI
 //
 //   1. ChatFeedView       — merged chat-feed stream (D-2 #1, `LBLiveChatStream`)
 //   2. WinEntryView       — floating win-claim entry badge (D-3 #2, `LBWinEntry`)
-//   3. WinClaimModalView  — EMAIL-LESS claim sheet, presented on demand
+//   3. WinClaimModalView  — 四階段領獎 modal（含 email 輸入），presented on demand
 //                           (D-4 #3, `LBWinSheet`)
 //
 // This is the SKELETON: it owns the layout + a `FeedWinModel` + the resolved
@@ -67,8 +67,10 @@ import LivebuyUI
 //       winner: LBWinner,
 //       presentation: LBAwardPresentation,
 //       resultState: LBAwardClaimResultState?,
-//       onClaim: (() -> Void)? = nil,
-//       onDismiss: (() -> Void)? = nil)
+//       submitInFlight: Bool = false,
+//       onSubmit: ((String) -> Void)? = nil,   // 帶使用者輸入的 email
+//       onDismiss: (() -> Void)? = nil,
+//       editable: Bool = true)
 //
 // Rules every surface agent honours:
 //   • FIRST positional arg is `theme:`. Snapshot values are passed BY VALUE.
@@ -82,16 +84,18 @@ import LivebuyUI
 //     (`.chat` → ChatLineRow, `.eventJoin` → EventJoinLineRow, `.activity(tier:)`
 //     → ActivityLineRow). `text` is the backend-prebuilt full string — sub-views
 //     MUST NOT split it into fields (D-2).
-//   • `WinClaimModalView` is EMAIL-LESS: NO email / contact field. `onClaim`
-//     funnels to `DefaultWinClaim.submit(winner:)` (contact always nil); the
-//     sheet only renders + offers「稍後再看」(onDismiss) (D-4).
+//   • `WinClaimModalView` 跑四階段領獎流程（claim / confirmSubmit / confirmClose /
+//     submitting / done / fail），**含 email 輸入欄**（EMAIL-LESS 已退役）。`onSubmit`
+//     帶使用者輸入的 email，funnel 到 `DefaultWinClaim.submit(winner:email:)`；
+//     `submitting` 綁 view-model `submitInFlight`、`done`/`fail` 綁 `resultState`；
+//     「關閉視窗」→ `onDismiss`（**純 dismiss**，不放棄中獎資格）。
 //   • iOS-14-safe SwiftUI only; any >14 API guarded with `@available` /
 //     `if #available` inside the sub-view.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The family-2 feed-win container. Drives layout for the merged chat-feed
 /// stream + the floating win-entry badge over the video area, and presents the
-/// EMAIL-LESS win-claim sheet on demand; reads a `FeedWinModel` (republished from
+/// 四階段領獎 modal（含 email 輸入）on demand; reads a `FeedWinModel` (republished from
 /// a live `DefaultPlayerTemplate` or constructed deterministically) and paints
 /// with the resolved `ReferenceUITheme`.
 public struct FeedWinOverlayView: View {
@@ -216,19 +220,27 @@ public struct FeedWinOverlayView: View {
                     .offset(y: geo.size.height * 0.42)
             }
 
-            // EMAIL-LESS claim — a CENTERED MODAL (LBWinSheet), presented as a
+            // 四階段領獎 modal (LBWinSheet) — a CENTERED MODAL presented as a
             // full-bleed overlay layer (NOT a native bottom `.sheet`) so it matches
             // the design's centered-card-over-scrim form factor. The view owns its
-            // own dark scrim; tapping it (or 「稍後再看」/ close) clears the winner.
-            // Surface 3.
+            // own dark scrim. Surface 3.
+            //
+            // 🔴 關閉＝**純 dismiss**：`model.dismissClaim()` 只清 view-model 的
+            // `resultState` / `submitInFlight`，本容器只清自己的呈現綁定 —— MUST NOT
+            // 移除未領中獎 / 呼叫 API / 遞減徽章（設計稿的「放棄資格」文案是刻意的 UX
+            // 摩擦，行為不跟隨；R13 刻意分歧 1/2）。
             if let winner = claimingWinner {
                 WinClaimModalView(
                     theme: theme,
                     winner: winner,
                     presentation: presentation(for: winner),
                     resultState: model.resultState,
-                    onClaim: { model.submitClaim(for: winner) },
-                    onDismiss: { claimingWinner = nil })
+                    submitInFlight: model.submitInFlight,
+                    onSubmit: { email in model.submitClaim(for: winner, email: email) },
+                    onDismiss: {
+                        model.dismissClaim()
+                        claimingWinner = nil
+                    })
             }
         }
     }

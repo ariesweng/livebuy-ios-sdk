@@ -90,6 +90,24 @@ public enum LBAccessibilityID {
     public static let winClaimResultBanner = "lb_win_claim_result_banner"
     public static let winClaimScrim = "lb_win_claim_scrim"
 
+    // 四階段領獎流程（rb-ios-win-claim-email-flow）。
+    /// claim 階段的 email 輸入欄（runtime `TextField` / snapshot 靜態佔位共用同一 id）。
+    public static let winClaimEmailField = "lb_win_claim_email_field"
+    /// `confirmSubmit` / `confirmClose` 的 alert 卡。
+    public static let winClaimAlert = "lb_win_claim_alert"
+    /// alert 的「確定」。
+    public static let winClaimAlertConfirm = "lb_win_claim_alert_confirm"
+    /// alert 的「取消」。
+    public static let winClaimAlertCancel = "lb_win_claim_alert_cancel"
+    /// 送出中疊層（scrim + spinner +「送出中…」）。
+    public static let winClaimSubmitting = "lb_win_claim_submitting"
+    /// `done`（discount）的折扣碼「複製」鈕。
+    public static let winClaimCopyCode = "lb_win_claim_copy_code"
+    /// `fail` 卡的通用錯誤提示列（**不含**任何錯誤代碼，見 R13 刻意分歧 2/2）。
+    public static let winClaimFailNotice = "lb_win_claim_fail_notice"
+    /// 卡底 footer「使用條款 | 隱私政策」（保留版面、不接連結）。
+    public static let winClaimFooter = "lb_win_claim_footer"
+
     // MARK: - Family 3 — product + sheets
 
     public static let productList = "lb_product_list"

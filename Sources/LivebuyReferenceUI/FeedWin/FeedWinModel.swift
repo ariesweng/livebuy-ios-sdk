@@ -25,9 +25,9 @@ import LivebuyUI
 //     (that is a template-internal hook); it observes ONLY the template's single
 //     public `onChange` (design §"容器與 view-model 橋接").
 //   - The ONLY mutating interaction this layer carries is the win-claim submit,
-//     which goes through the existing template exit `submitClaim(for:)` →
-//     `DefaultWinClaim.submit(winner:)` (internally core
-//     `requestAwardClaim(winner, nil)` — EMAIL-LESS, contact always nil). The
+//     which goes through the template exit `submitClaim(for:email:)` →
+//     `DefaultWinClaim.submit(winner:email:)` (帶使用者輸入的 email；EMAIL-LESS 的
+//     舊入口已 deprecated —— 缺 email 時 core fail-fast、連 API 都不送). The
 //     event-join 「加入活動」submit goes through an upstream exit (host wired); this
 //     model does NOT own it.
 //
@@ -89,6 +89,12 @@ public final class FeedWinModel: ObservableObject {
     /// `unclaimedCount` decrements — both republished here via `onChange`.
     @Published public private(set) var resultState: LBAwardClaimResultState?
 
+    /// 領獎「送出中」旗標（`DefaultWinClaim.submitInFlight`），驅動 `WinClaimModalView`
+    /// 的 `submitting` 階段（scrim + spinner +「送出中…」）。
+    /// **這是唯一的 in-flight 真相** —— reference-ui MUST NOT 自造第二份
+    /// （否則 view-model 的 guard 擋下提交時畫面會卡住）。
+    @Published public private(set) var submitInFlight: Bool
+
     // MARK: - Live binding
 
     /// The bound template, when constructed from a live player. nil for demo /
@@ -100,6 +106,16 @@ public final class FeedWinModel: ObservableObject {
     /// deinit so this model unsubscribes ONLY itself — never clobbers another
     /// model's subscription (multi-observer registry, same as `PlayerShellModel`).
     private var observerToken: LBTemplateObserverToken?
+
+    /// Optional three-tier「加入活動」join gate injected by the drop-in container
+    /// (rb-ios-event-join-gate). Consulted by `joinEvent` BEFORE forwarding: returns `true`
+    /// when it INTERCEPTED the intent (raised a login / nickname modal) → `joinEvent` MUST NOT
+    /// forward to the template (MUST NOT join / `markJoined`). `nil` (demo / snapshot instances,
+    /// no injection) → NO gating, `joinEvent` forwards unconditionally → baseline byte-identical.
+    /// The gate shares the 留言 pill's SAME pure predicates (`liveCommentRequiresLogin` /
+    /// `liveCommentRequiresNickname`, via `eventJoinGateDecision`) so the「加入活動」CTA and the
+    /// 留言 pill can never diverge. Container-internal wiring seam (not a host API).
+    var joinEventGate: ((Int, String) -> Bool)?
 
     // MARK: - Live initializer (D-1)
 
@@ -130,7 +146,8 @@ public final class FeedWinModel: ObservableObject {
             unclaimedWinners: t.winClaim.unclaimedWinners,
             resultState: t.winClaim.resultState,
             pinned: t.pinnedMessage,
-            hostName: t.header.hostName
+            hostName: t.header.hostName,
+            submitInFlight: t.winClaim.submitInFlight
         )
     }
 
@@ -147,7 +164,8 @@ public final class FeedWinModel: ObservableObject {
         unclaimedWinners: [LBWinner] = [],
         resultState: LBAwardClaimResultState? = nil,
         pinned: LBPinnedMessage? = nil,
-        hostName: String = ""
+        hostName: String = "",
+        submitInFlight: Bool = false
     ) {
         self.feedItems = feedItems
         self.feedHistory = feedHistory
@@ -156,6 +174,7 @@ public final class FeedWinModel: ObservableObject {
         self.resultState = resultState
         self.pinned = pinned
         self.hostName = hostName
+        self.submitInFlight = submitInFlight
     }
 
     deinit {
@@ -180,6 +199,7 @@ public final class FeedWinModel: ObservableObject {
         resultState = t.winClaim.resultState
         pinned = t.pinnedMessage
         hostName = t.header.hostName
+        submitInFlight = t.winClaim.submitInFlight
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)
@@ -188,11 +208,14 @@ public final class FeedWinModel: ObservableObject {
     // template-owned intents the family-2 surfaces need that have no direct core
     // `simulate*` equivalent reachable here:
     //
-    //   • `submitClaim(for:)` — the EMAIL-LESS win-claim submit (the one true
-    //     mutating interaction of this family). It forwards to
-    //     `DefaultWinClaim.submit(winner:)`, which internally calls core
-    //     `requestAwardClaim(winner, nil)` (contact ALWAYS nil). The result then
-    //     arrives via the template's `awardClaimResult` → `onChange` → `refresh`.
+    //   • `submitClaim(for:email:)` — the win-claim submit carrying the user-entered
+    //     email (the one true mutating interaction of this family). It forwards to
+    //     `DefaultWinClaim.submit(winner:email:)`. The result then arrives via the
+    //     template's `awardClaimResult` → `onChange` → `refresh`. (The EMAIL-LESS
+    //     `submitClaim(for:)` is DEPRECATED — see below.)
+    //   • `dismissClaim()` — 關閉領獎畫面。**僅 dismiss**：只清 view-model 的
+    //     `resultState` / `submitInFlight`，MUST NOT 移除未領中獎 / 呼叫 API /
+    //     遞減徽章（見 `WinClaimModalView.dismissConfirmed` 的 R13 說明）。
     //   • `joinEvent(eid:keyword:)` — the「加入活動」intent for an event-join feed
     //     row. It forwards to the template's `joinEvent` (core
     //     `requestEventJoin` + optimistic `markJoined`). The design notes this is
@@ -200,17 +223,62 @@ public final class FeedWinModel: ObservableObject {
     //     event-join CTA has a single funnel, but a host that takes over the
     //     intent itself can ignore it. No-op for demo instances (no template).
 
-    /// Forward an EMAIL-LESS win claim to the bound template (template exit
-    /// `DefaultWinClaim.submit(winner:)`, internally `requestAwardClaim(winner,
-    /// nil)`). No-op for demo instances (no bound template).
+    /// Forward a win claim carrying the user-entered `email` to the bound template
+    /// (template exit `DefaultWinClaim.submit(winner:email:)`). The template
+    /// validates (`isValidEmail`) + guards re-entrancy before handing off to core,
+    /// so an invalid address never reaches the network. No-op for demo instances
+    /// (no bound template).
+    public func submitClaim(for winner: LBWinner, email: String) {
+        template?.winClaim.submit(winner: winner, email: email)
+    }
+
+    /// Forward「關閉領獎畫面」to the bound template
+    /// (`DefaultWinClaim.dismissClaim()` — clears `resultState` + `submitInFlight`).
+    ///
+    /// 🔴 這是**純 dismiss**：MUST NOT 從 `unclaimedWinners` 移除該 winner、MUST NOT
+    /// 呼叫任何 API、MUST NOT 遞減未領徽章 —— 使用者可以再次開啟領取。設計稿的
+    /// 「放棄資格、此動作無法復原」是**刻意的 UX 摩擦文案**，行為不跟隨（權威：
+    /// `design/contract/claude-design-sync.md` R13 刻意分歧 1/2）。
+    /// No-op for demo instances (no bound template).
+    public func dismissClaim() {
+        template?.winClaim.dismissClaim()
+    }
+
+    /// EMAIL-LESS 領獎轉發 —— **DEPRECATED**，只為源碼相容保留。
+    ///
+    /// 它走 `DefaultWinClaim.submit(winner:)`（contact 恆 nil），而 core 預設領獎路徑
+    /// `email` 必填，故未被 host 攔截時**必然失敗**（core fail-fast、連
+    /// `POST /sdk/video/claim` 都不送）。請改用 `submitClaim(for:email:)`。
+    ///
+    /// （標為 deprecated 亦使其內部對 deprecated template 入口的呼叫不再產生警告。）
+    @available(*, deprecated, renamed: "submitClaim(for:email:)", message: "EMAIL-LESS 領獎未被 host 攔截時必然失敗（core 預設領獎路徑 email 必填）。改用 submitClaim(for:email:)。")
     public func submitClaim(for winner: LBWinner) {
         template?.winClaim.submit(winner: winner)
     }
 
     /// Forward an「加入活動」intent for an event-join feed row to the bound template
-    /// (`joinEvent(eid:keyword:)` → core `requestEventJoin` + optimistic
-    /// `markJoined`). No-op for demo instances (no bound template).
+    /// (`joinEvent(eid:keyword:)` → core `requestEventJoin` + optimistic `markJoined`).
+    ///
+    /// rb-ios-event-join-gate: consult the drop-in container's injected three-tier gate FIRST
+    /// (login / nickname / proceed, sharing the 留言 pill's pure predicates). `true` → the gate
+    /// INTERCEPTED the intent (raised a login / nickname modal) → this method MUST NOT forward
+    /// (MUST NOT join / `markJoined`). `nil` gate (demo / snapshot instances) → NO gating, forward
+    /// as before (baseline byte-identical). No-op for demo instances (no bound template).
     public func joinEvent(eid: Int, keyword: String) {
+        if joinEventGate?(eid, keyword) == true { return }
+        template?.joinEvent(eid: eid, keyword: keyword)
+    }
+
+    /// Forward「加入活動」DIRECTLY to the bound template, **BYPASSING `joinEventGate`**. The drop-in
+    /// container's `onNicknameSubmit` continuation calls this after a guest sets a nickname to
+    /// complete the ONE join the nickname gate deferred (rb-ios-event-join-gate). It bypasses the
+    /// gate deliberately: the guest just satisfied the nickname requirement, but `displayName`
+    /// refreshes ASYNCHRONOUSLY (template `onChange` → a later runloop), so re-running the gate here
+    /// could still read an empty name and wrongly re-present the nickname modal. Mirrors the 留言
+    /// pill's「set nickname → open composer directly」continuation (no re-gate). The container clears
+    /// the pending intent (`NicknamePromptController.dismiss()`) before calling, so this sends EXACTLY
+    /// ONCE. No-op for demo instances (no bound template). Container-internal continuation seam.
+    func forwardJoinEventBypassingGate(eid: Int, keyword: String) {
         template?.joinEvent(eid: eid, keyword: keyword)
     }
 

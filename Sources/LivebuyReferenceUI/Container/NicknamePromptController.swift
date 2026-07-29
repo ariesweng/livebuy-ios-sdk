@@ -32,17 +32,40 @@ public final class NicknamePromptController: ObservableObject {
     /// from the暱稱 button directly. Read by the container's default `onNicknameSubmit`.
     public private(set) var composeAfterSubmit = false
 
+    /// A pending「加入活動」(event-join) intent the NICKNAME gate deferred (rb-ios-event-join-gate):
+    /// when a未設名訪客 taps 加入活動, the container records the join's `(eid, keyword)` HERE and
+    /// presents this modal; a successful submit then completes that ONE join (bypassing the gate).
+    /// `nil` when the modal was NOT opened for a pending join (直接暱稱編輯 / 留言 pill). Cleared by
+    /// `dismiss()` (取消 / 關閉 → 不 join) and by `present(composeAfter:)` (mutually-exclusive entry).
+    /// NOT `@Published` (like `composeAfterSubmit`) → never triggers a re-render → snapshot-neutral.
+    public private(set) var pendingJoinEvent: (eid: Int, keyword: String)?
+
     public init() {}
 
     /// Show the 設定暱稱 modal. `composeAfter == true` → after a successful submit the
     /// container opens the chat composer (the 留言 pill entry); `false` → submit just dismisses.
+    /// Clears any pending event-join intent — the 留言 pill / 暱稱鈕 entry is mutually exclusive
+    /// with the 加入活動 entry (rb-ios-event-join-gate).
     public func present(composeAfter: Bool) {
         composeAfterSubmit = composeAfter
+        pendingJoinEvent = nil
         isPresented = true
     }
 
-    /// Hide the 設定暱稱 modal (scrim tap / close / after submit).
+    /// Show the 設定暱稱 modal to satisfy a PENDING「加入活動」join gate (rb-ios-event-join-gate):
+    /// records the join's `eid` / `keyword` so a successful submit completes that ONE join; sets
+    /// `composeAfterSubmit = false` (this entry does NOT hand off to the composer).
+    public func present(pendingJoin eid: Int, keyword: String) {
+        composeAfterSubmit = false
+        pendingJoinEvent = (eid, keyword)
+        isPresented = true
+    }
+
+    /// Hide the 設定暱稱 modal (scrim tap / close / after submit). Also clears any pending event-join
+    /// intent so a cancelled / closed modal NEVER joins after the fact (rb-ios-event-join-gate); the
+    /// submit continuation reads `pendingJoinEvent` BEFORE calling `dismiss()`.
     public func dismiss() {
         isPresented = false
+        pendingJoinEvent = nil
     }
 }
