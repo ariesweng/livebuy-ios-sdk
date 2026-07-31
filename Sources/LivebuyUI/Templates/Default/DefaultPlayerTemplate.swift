@@ -4,7 +4,25 @@ import LivebuySDK
 
 /// In-app browser opener (Task 2.1 / 2.5). Injectable so unit tests can verify
 /// the diversion path with a fake opener without a live UIKit hierarchy.
+///
+/// Reached ONLY for URLs `LBURLOpenPolicy` decided are `.inApp` — see
+/// `openResolvedURL(_:)` (url-open-host-routing-template).
 typealias InAppBrowserOpener = (URL) -> Void
+
+/// System-URL-router opener (url-open-host-routing-template). Reached ONLY for
+/// URLs `LBURLOpenPolicy` decided are `.external`.
+///
+/// A SEPARATE closure from `InAppBrowserOpener` on purpose: core's contract says
+/// an `.external` URL MUST be handed to the system URL router and MUST NOT be
+/// loaded into ANY WebView / in-app browser (that would evaluate it under the
+/// currently-loaded page's origin). One shared closure + a `target` argument
+/// would let a caller violate that by simply forgetting to branch; two closures
+/// make the violation something you have to write on purpose.
+///
+/// Injectable for the same reason as `InAppBrowserOpener`: without a seam the
+/// real `UIApplication.open` silently no-ops under unit tests, and every
+/// "the OTHER seam was called zero times" assertion becomes vacuous.
+typealias ExternalURLOpener = (URL) -> Void
 
 /// Opaque, identity-equality handle returned by
 /// `DefaultPlayerTemplate.addObserver(_:)`, used to `removeObserver(_:)` later
@@ -42,6 +60,7 @@ public final class DefaultPlayerTemplate {
     private weak var player: LivebuyPlayerViewController?
     private let effectiveConfig: EffectiveConfig
     private let openInAppBrowser: InAppBrowserOpener
+    private let openExternalURL: ExternalURLOpener
 
     /// Guest rename-intent forwarder (auth-gate-template-state §Guest 改名意圖
     /// passthrough). Injected so the wiring hands the template a closure that
@@ -179,7 +198,8 @@ public final class DefaultPlayerTemplate {
 
     /// product-detail sheet `{ productId, name, priceShow, …, specifications,
     /// specOptions }` for `LBPBottomSheet` + `LBPProductRow`. Set on a
-    /// `diversion == 0` `productTap`; `diversion == 1` keeps the in-app browser.
+    /// `diversion == 0` `productTap`; `diversion == 1` opens `diversionUrl` through
+    /// `LBURLOpenPolicy` instead and leaves this state untouched.
     public let productSheet: DefaultProductSheet
 
     /// variant-picker `groups` (from `specOptions`) + `selection` + resolved
@@ -324,6 +344,7 @@ public final class DefaultPlayerTemplate {
         sdkConfig: SDKConfig,
         hostOptions: LBUIOptions?,
         openInAppBrowser: InAppBrowserOpener? = nil,
+        openExternalURL: ExternalURLOpener? = nil,
         guestNameEditRequester: (() -> Void)? = nil,
         viewCartRequester: ((String?) -> Void)? = nil,
         setAwaitGoods: ((String, Bool) -> Void)? = nil,
@@ -370,10 +391,18 @@ public final class DefaultPlayerTemplate {
         // (already initialised above) by reference.
         infoTab.isSubscribedProvider = { [header] in header.isSubscribed }
         infoTab.canOpenNoticeProvider = { [noticeTab] in noticeTab.canOpen }
-        // Default presents SFSafariViewController over the player VC so the user
-        // stays in-app (the live keeps playing behind it; the user can swipe back).
+        // `.inApp` decisions present SFSafariViewController over the player VC so
+        // the user stays in-app (the live keeps playing behind it; the user can
+        // swipe back). Only livebuy.tv (and its subdomains) reach here — see
+        // `openResolvedURL(_:)`.
         self.openInAppBrowser = openInAppBrowser ?? { [weak player] url in
             player?.present(SFSafariViewController(url: url), animated: true)
+        }
+        // `.external` decisions go to the SYSTEM URL router — the user may leave
+        // the app, which is the intended behaviour for non-livebuy links. MUST NOT
+        // be swapped for a WebView (url-open-host-routing-template).
+        self.openExternalURL = openExternalURL ?? { url in
+            UIApplication.shared.open(url)
         }
         // mini-cart「open detail」re-opens the peeked product's detail sheet using
         // the latest known products snapshot (productOverlay). cart CTA「openCart」
@@ -779,10 +808,11 @@ public final class DefaultPlayerTemplate {
     // triggers, it does NOT bump the tick (no double animation). System-UI for share
     // (share sheet) is presented by the host on the not-intercepted `videoShareRequest`
     // event (TK-4). serviceLink is the ONE exception: when neither `INFO_CUSTOMER_SERVICE`
-    // nor `SERVICE_LINK_REQUEST` is intercepted, the template itself opens a default
-    // in-app browser via the existing `openInAppBrowser` seam (dropin-service-link-
-    // default-browser) — there is no reference-ui container config seam for it (unlike
-    // `onShare`), so the default lives here instead.
+    // nor `SERVICE_LINK_REQUEST` is intercepted, the template itself opens the link via
+    // `openResolvedURL` — `LBURLOpenPolicy` picks the in-app or the system-router seam
+    // (dropin-service-link-default-browser, re-routed by url-open-host-routing-template).
+    // There is no reference-ui container config seam for it (unlike `onShare`), so the
+    // default lives here instead.
 
     /// Like (❤️) — forwards to the throttled core exit.
     public func performLike() { player?.performLike() }
@@ -791,17 +821,15 @@ public final class DefaultPlayerTemplate {
     /// Toggle subtitles (CC) — forwards to the gated core exit.
     public func toggleSubtitle() { player?.performSubtitleToggle() }
     /// Open the shop service link — forwards to core (emits interceptable `INFO_CUSTOMER_SERVICE` /
-    /// `SERVICE_LINK_REQUEST`). If NEITHER event was intercepted by the host AND
-    /// `channel.shop.serviceLink` is a non-empty, parseable URL, opens it via the existing
-    /// `openInAppBrowser` seam (dropin-service-link-default-browser) — mirrors the `diversionUrl`
-    /// precedent. Empty / unparseable url → safe no-op (does NOT present an empty browser).
+    /// `SERVICE_LINK_REQUEST`). Host interception wins: if EITHER event was intercepted, neither
+    /// opener seam is touched and the policy is not even consulted. Otherwise
+    /// `channel.shop.serviceLink` is routed through `LBURLOpenPolicy` exactly like `diversionUrl`
+    /// (url-open-host-routing-template) — livebuy.tv → in-app browser, other sites → system URL
+    /// router, unopenable → safe no-op (does NOT present an empty browser).
     public func openServiceLink() {
         let intercepted = player?.performServiceLink() ?? false
-        guard !intercepted,
-              let urlString = player?.channel?.shop.serviceLink, !urlString.isEmpty,
-              let url = URL(string: urlString)
-        else { return }
-        openInAppBrowser(url)
+        guard !intercepted, let urlString = player?.channel?.shop.serviceLink else { return }
+        openResolvedURL(urlString)
     }
     /// Subscribe / unsubscribe — forwards to core.
     public func toggleSubscribe() { player?.performSubscribe() }
@@ -952,22 +980,48 @@ public final class DefaultPlayerTemplate {
         player?.presentingViewController?.dismiss(animated: true)
     }
 
-    /// PRODUCT_TAP — diversion=1 opens the purchase page in an in-app browser
-    /// (Task 2.1 / D3); diversion=0 opens the in-app product-detail sheet state
-    /// (product-sheet-stack-template D1 — host renders the sheet from the exposed
-    /// product-detail / variant / qty view-models). Only reached when the host did
-    /// NOT intercept `productTap` (route-A typed callback = core's not-intercepted
+    /// PRODUCT_TAP — diversion=1 routes the purchase page through `LBURLOpenPolicy`
+    /// (url-open-host-routing-template); diversion=0 opens the in-app product-detail
+    /// sheet state (product-sheet-stack-template D1 — host renders the sheet from the
+    /// exposed product-detail / variant / qty view-models). Only reached when the host
+    /// did NOT intercept `productTap` (route-A typed callback = core's not-intercepted
     /// default behaviour → host-takeover exclusion is the dispatcher gate, NOT
-    /// re-judged here; a host that takes over `productTap` never reaches this).
-    /// MUST NOT eject the user to the system browser.
+    /// re-judged here; a host that takes over `productTap` never reaches this) — so
+    /// the ordering is host-interception FIRST, policy second.
     func handleProductTap(product: LBProduct, diversion: Int) {
         if diversion == 1 {
-            guard !product.diversionUrl.isEmpty, let url = URL(string: product.diversionUrl) else { return }
-            openInAppBrowser(url)
+            openResolvedURL(product.diversionUrl)
             return
         }
         // diversion == 0 →站內面板: feed the product-detail sheet state.
         openProductDetail(product)
+    }
+
+    /// The template's ONE URL exit: `LBURLOpenPolicy` is the sole judge of how a raw
+    /// URL string is opened — call sites MUST NOT hard-code in-app vs external
+    /// (url-open-host-routing-template). Both consumers (`handleProductTap`'s
+    /// diversion==1 branch and `openServiceLink()`) funnel through here, so the
+    /// routing rule exists exactly once.
+    ///
+    /// - `nil` decision (empty / whitespace-only / no scheme / scheme outside the
+    ///   allow-list such as `javascript:` or `intent:` / http(s) without a host) →
+    ///   safe no-op. NOTE this is a deliberate tightening: `URL(string:)` happily
+    ///   returns non-nil for `"javascript:alert(1)"`, so the previous `guard let url
+    ///   = URL(string: raw)` shape would have presented it in a browser.
+    /// - MUST use `decision.url`, NEVER re-parse `rawURL` — the host judgement was
+    ///   made against the policy's own parser output, and a second parser reintroduces
+    ///   exactly the parser differential the judgement is meant to close.
+    /// - The `switch` deliberately has NO `default`: if core ever adds an
+    ///   `LBURLOpenTarget` case, this must fail to compile rather than silently fall
+    ///   into one of today's branches.
+    private func openResolvedURL(_ rawURL: String) {
+        guard let decision = LBURLOpenPolicy.decide(rawURL) else { return }
+        switch decision.target {
+        case .inApp:
+            openInAppBrowser(decision.url)
+        case .external:
+            openExternalURL(decision.url)
+        }
     }
 
     /// Open the product-detail sheet state for `product` (diversion==0 tap, or a

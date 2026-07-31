@@ -5,6 +5,66 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] - 2026-07-31
+
+> minor release，**無 API 破壞**（但有一條行為 BREAKING，見 `Changed`）、源碼相容，兩端 lockstep
+> （iOS `v4.4.0` / Android `4.4.0`）。鎖點 `dcea410f`（本版最後一個碰 `ios/Sources/LivebuySDK/` 的
+> commit）。自 v4.3.0 以來碰 `ios/Sources/LivebuySDK/`（binary target）共 **3 commit**（URL 開啟
+> 策略與法務連結常數 `dcea410f`、暱稱驗證不再靜默成功 `12c894a4`、設定暱稱前先驗證是否被佔用
+> `81a76425`）→ **binary MUST 重 build，checksum 為新值**（≠v4.3.0；由發版流程於 `v4.4.0` tag 產生
+> 並 patch dist `Package.swift` / podspec）。`LivebuyUI`（view-model 層，source 出貨）本版另有一筆
+> 把購買頁／客服連結接上 URL 開啟策略的**行為變更**（`5457c97e`，見下方 `Changed`）；
+> `LivebuyReferenceUI`（source 出貨）本版有兩筆改動（中獎領獎 modal 頁尾連結可點擊 `55ef0e8d`、
+> 暱稱被佔用時就地顯示錯誤 `fad82c7f`）。詳見
+> [`docs/release/v4.4.0-tag-runbook.md`](../docs/release/v4.4.0-tag-runbook.md) 與
+> [release notes](../docs/release-notes/v4.4.0.md)。
+
+### Changed（⚠️ 行為變更 — 唯一「不改簽章但行為會變」的一條，請先讀）
+
+- **⚠️ 外部連結（商品導購頁 `diversion == 1` / 客服連結，host 未攔截時）改依網址分流**
+  （`5457c97e`，消費 core `dcea410f` 新增的 `LBURLOpenPolicy.decide(_:)`）。**規則**：
+  `livebuy.tv`（含任意層子網域）→ 維持 in-app（`SFSafariViewController`）；其他可開網址
+  （`http`/`https`/`mailto`/`tel`/`sms`）→ 系統瀏覽器；不在允許清單內（`javascript:` /
+  `intent:` / `data:` / `file:` / 自訂 scheme 等）→ 安全 no-op（先前可能被原樣 present 進
+  in-app browser）。**典型後果**：非 `livebuy.tv` 網域的商品導購頁與客服連結會從 in-app 瀏覽器
+  改為 eject 到系統瀏覽器——這是刻意的行為變更，不是 regression。host 攔截順序（`PRODUCT_CLICK`
+  / `performServiceLink()`）逐字不變，策略只在 host 未攔截時套用。「直播背景續播」的既有保證
+  **只在 in-app 分支保留**，走系統瀏覽器分支後不再是無條件保證。**API 面零破壞**：呼叫點對 host
+  不可見，無新參數、無新事件。
+
+### Added（新公開面，皆 additive、源碼相容、無 breaking）
+
+- **`LBURLOpenPolicy.decide(_:)` / `LBURLOpenTarget` / `LBLegalLinks.termsOfUse` /
+  `.privacyPolicy`**（`dcea410f`）——純函式 URL 開啟目標裁決規則與法務連結網址事實來源，發布時
+  尚無 production 消費者（純新增）。
+- **`LivebuyPlayerViewController.setGuestNicknameVerified(_ name: String) async throws`**
+  （`81a76425`）——設定留言暱稱前先對目前 video 呼叫既有 `checkName` 驗證，通過才持久化 + 廣播
+  `AUTH_STATE_CHANGED`；被取走或其他錯誤一律不持久化、不廣播，拋出可分辨的 `LBError`
+  （複用既有 `.guestNameTaken` / `.networkError` 等分類，不新增 case）。既有
+  `setGuestNickname(_:)`（同步、無驗證）簽章與行為不變。
+- **`setGuestNicknameVerified` 不再有靜默成功路徑**（`12c894a4`）——先前有兩道前置 guard（名稱
+  trim 後為空、或 SDK 未 configure / 播放器未載入影片）會在完全沒有提交暱稱的情況下正常返回。
+  現在一律 `throw`：SDK 未 configure → 既有 `.notConfigured`；名稱為空或無影片 → **新增**
+  `LBError.nicknameSetPreconditionFailed`。public 簽章不變（本來就是 `async throws`），
+  成功路徑與 `checkName` 失敗映射完全不變。
+
+### Fixed / drop-in behavior（reference-ui，drop-in `LivebuyPlayer` 使用者自動生效）
+
+- **中獎領獎 modal 底部使用條款／隱私政策改為可點擊**（`55ef0e8d`）——先前純版面佔位、不接連結；
+  現在各自可點擊，經 `LBURLOpenPolicy.decide()` 裁決開啟方式，連結來源為 `LBLegalLinks`。既有
+  82 張 snapshot baseline 逐位元組不變。
+- **暱稱被佔用時就地顯示錯誤、不關閉 modal**（`fad82c7f`）——暱稱設定 modal 送出改走
+  `setGuestNicknameVerified`，只有驗證成功才關閉；被取走或其他錯誤則就地顯示錯誤、留在 modal
+  內讓使用者改名重試。`onSubmit` 簽章不變，既有呼叫端零改動。一併修掉一個併發世代缺失
+  （送出→取消→重開會讓舊請求消費新一次呈現，加 `presentationGeneration` gate 堵住）。
+
+### Notes
+
+- **未新增 / 移除 / 改名任何既有 host-facing public 符號**、無參數型別變更、無 wire 破壞。本版
+  唯一需要 host 留意的是上方 `Changed` 小節的外部連結開啟方式。
+- **binary 重 build**：見上方鎖點說明，XCFramework MUST 重 build，checksum 為新值（≠v4.3.0）。
+- **RN / Flutter 本輪不發**（停在待發 `2.0.0`）；本版全部主題於其主線皆已落地，隨各自 2.0.0 出貨。
+
 ## [4.3.0] - 2026-07-28
 
 > minor release，**無源碼破壞**、源碼相容，兩端 lockstep（iOS `v4.3.0` / Android `4.3.0`）。鎖點

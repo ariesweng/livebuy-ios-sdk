@@ -105,8 +105,12 @@ public enum LBAccessibilityID {
     public static let winClaimCopyCode = "lb_win_claim_copy_code"
     /// `fail` 卡的通用錯誤提示列（**不含**任何錯誤代碼，見 R13 刻意分歧 2/2）。
     public static let winClaimFailNotice = "lb_win_claim_fail_notice"
-    /// 卡底 footer「使用條款 | 隱私政策」（保留版面、不接連結）。
+    /// 卡底 footer「使用條款 | 隱私政策」外層共用 id（兩段文字各自的 id 見下）。
     public static let winClaimFooter = "lb_win_claim_footer"
+    /// footer「使用條款」文字（rb-ios-win-claim-footer-links，可點擊）。
+    public static let winClaimFooterTerms = "lb_win_claim_footer_terms"
+    /// footer「隱私政策」文字（rb-ios-win-claim-footer-links，可點擊）。
+    public static let winClaimFooterPrivacy = "lb_win_claim_footer_privacy"
 
     // MARK: - Family 3 — product + sheets
 
@@ -200,6 +204,8 @@ public enum LBAccessibilityID {
     public static let guestNameField = "lb_guest_name_field"
     public static let guestNameSubmit = "lb_guest_name_submit"
     public static let guestNameScrim = "lb_guest_name_scrim"
+    /// Inline「暱稱被取走 / 設定失敗」error row (rb-ios-nickname-taken-inline-error).
+    public static let guestNameError = "lb_guest_name_error"
 
     // MARK: - Family 7 — container + sheetkit
 

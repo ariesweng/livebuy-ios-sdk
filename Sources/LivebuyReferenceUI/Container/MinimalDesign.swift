@@ -180,7 +180,10 @@ struct PlayerOverlayRootView: View {
     let onSubscribe: () -> Void
     /// LIVE 底部 bar 暱稱按鈕 → 本地呈現 設定暱稱 modal（不走被 gating 的 core 路徑）。
     let onNickname: () -> Void
-    /// 設定暱稱 modal 送出 → 設定顯示名（容器預設 `Livebuy.setUser`）。
+    /// 設定暱稱 modal 送出 → 設定訪客留言暱稱（容器預設走 checkName 驗證過的
+    /// `LivebuyPlayerViewController.setGuestNicknameVerified`；**不**是 `Livebuy.setUser`——設名 ≠ 登入）。
+    /// 僅在驗證通過時關閉 modal / 接續後續流程，失敗時留在 modal 顯示 inline 錯誤
+    /// （rb-ios-nickname-taken-inline-error）。傳 trimmed 暱稱。
     let onNicknameSubmit: (String) -> Void
     let onProductTap: (LBProduct) -> Void
     let onShare: () -> Void
@@ -297,12 +300,17 @@ struct PlayerOverlayRootView: View {
             // `nicknameController.isPresented` (default false → snapshot-neutral): the LIVE
             // bottom-bar 暱稱 button and the 留言 pill's未設定-暱稱 branch present it; the modal
             // owns its own scrim. `displayName` / `isLoggedIn` bind from the shell snapshot;
-            // 送出 → `onNicknameSubmit` (container fulfils via `Livebuy.setUser`).
+            // `errorMessage` / `isSubmitting` bind from `nicknameController` (rb-ios-nickname-taken-
+            // inline-error) so a taken/failed verified set shows inline WITHOUT dismissing (both
+            // default nil/false when idle → snapshot-neutral, same as `isPresented`); 送出 →
+            // `onNicknameSubmit` (container fulfils via `LivebuyPlayerViewController.setGuestNicknameVerified`).
             if nicknameController.isPresented {
                 GuestNameEditModalView(
                     theme: theme,
                     displayName: shellModel.displayName,
                     isLoggedIn: shellModel.isLoggedIn,
+                    errorMessage: nicknameController.errorMessage,
+                    isSubmitting: nicknameController.isSubmitting,
                     onSubmit: { name in onNicknameSubmit(name) },
                     onDismiss: { nicknameController.dismiss() })
             }

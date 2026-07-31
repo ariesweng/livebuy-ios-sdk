@@ -249,6 +249,91 @@ func completePendingEventJoin(
     return true
 }
 
+/// The two distinguishable ways a `setGuestNicknameVerified` submit can fail
+/// (rb-ios-nickname-taken-inline-error) — mirrors core's own three-state design (success /
+/// `.guestNameTaken` / any other `LBError`), collapsed to the two FAILURE branches here because
+/// the success branch has no error to classify. Kept as an explicit enum (rather than going
+/// straight to a message string) so a later Android / RN / Flutter parity change has an unambiguous
+/// concept to mirror, independent of this platform's exact copy.
+enum NicknameSubmitFailure: Equatable {
+    /// `LBError.guestNameTaken` — another guest/user already holds this name in this video's chat
+    /// namespace. The guest should pick a DIFFERENT name.
+    case taken
+    /// Any other thrown error (network / server failures) — validation could not complete. The
+    /// guest can retry the SAME name.
+    case retryable
+}
+
+/// Pure classification of a `setGuestNicknameVerified` failure (only ever called from a `catch`
+/// block, so `error` is never a "no failure" case). `LBError.guestNameTaken` → `.taken`; anything
+/// else → `.retryable`. No SwiftUI / player / controller dependency → unit-testable with bare
+/// `LBError` values.
+func nicknameSubmitFailure(for error: Error) -> NicknameSubmitFailure {
+    if case LBError.guestNameTaken = error { return .taken }
+    return .retryable
+}
+
+/// Pure copy mapping (rb-ios-nickname-taken-inline-error): the fixed `GuestNameEditModalView`
+/// error text a submit failure should show, keyed off `nicknameSubmitFailure`. Kept separate from
+/// the classification above so a test can assert "which bucket" and "which string" independently.
+func nicknameSubmitErrorMessage(for error: Error) -> String {
+    switch nicknameSubmitFailure(for: error) {
+    case .taken:     return GuestNameEditModalView.takenErrorText
+    case .retryable: return GuestNameEditModalView.retryableErrorText
+    }
+}
+
+/// Raised when the verified set cannot even be attempted because the player it needs is already
+/// gone (`[weak player]` resolved to nil between the tap and the `Task` body). Classified
+/// `.retryable` by `nicknameSubmitFailure` (it is NOT "the name is taken"), though in practice the
+/// presentation-generation gate usually discards the continuation first — a deallocated player means
+/// the whole overlay is going away. Internal: never surfaced as a distinct user-facing case.
+struct NicknameSubmitUnavailableError: Error {}
+
+/// Build the drop-in's 設定暱稱 送出 handler (rb-ios-nickname-taken-inline-error).
+///
+/// Factored out of `makeOverlayContext` as a SEAM with every side effect injected, so the whole
+/// submit lifecycle — "locks in-flight synchronously", "stale generations are abandoned", "success
+/// vs. taken vs. retryable branch" — is unit-testable WITHOUT a real `LivebuyPlayerViewController`
+/// (`public final` in the core layer this change MUST NOT modify, and instantiating it repeatedly in
+/// a test host is a known hang). Mirrors this file's existing "副作用注入 → 可用 spy 單元測試"
+/// pattern (`applyEventJoinGate` / `completePendingEventJoin`).
+///
+/// - `beginSubmit`: called SYNCHRONOUSLY on tap (before any `await`), so the CTA locks immediately
+///   rather than after the first suspension point. Returns the presentation generation to stamp.
+/// - `verify`: the core round-trip (`player.setGuestNicknameVerified(name)`).
+/// - `isCurrentGeneration`: the staleness gate. When it returns `false` the continuation is
+///   abandoned ENTIRELY — no dismiss, no failure message, no pendingJoin consumption, no composer.
+/// - `onVerified` / `onFailure`: the success / failure continuations, both run on the main actor.
+func makeNicknameSubmitHandler(
+    beginSubmit: @escaping () -> Int,
+    verify: @escaping (String) async throws -> Void,
+    isCurrentGeneration: @escaping (Int) -> Bool,
+    onVerified: @escaping () -> Void,
+    onFailure: @escaping (String) -> Void
+) -> (String) -> Void {
+    return { name in
+        let generation = beginSubmit()
+        Task {
+            do {
+                try await verify(name)
+                await MainActor.run {
+                    // Stale continuation (modal was dismissed / re-presented while this was in
+                    // flight) → abandon everything. MUST come before ANY state mutation.
+                    guard isCurrentGeneration(generation) else { return }
+                    onVerified()
+                }
+            } catch {
+                let message = nicknameSubmitErrorMessage(for: error)
+                await MainActor.run {
+                    guard isCurrentGeneration(generation) else { return }
+                    onFailure(message)
+                }
+            }
+        }
+    }
+}
+
 /// 組商品分享連結（issue 6）：在 `base`（= `channel.share_url`）後加上商品介紹時間 `t=<beginTime>`（秒）。
 /// Pure（無副作用）所以容器的分享預設與單元測共用一份實作。
 /// - `base` 為空 → 回 `""`（呼叫端退回 channel-level `performShare()`）。
@@ -678,25 +763,56 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
                     nicknameController.present(composeAfter: false)
                 }
             },
-            // 設定暱稱 modal 送出 → 以 `Livebuy.setGuestNickname` 設訪客留言暱稱（**不**用
-            // `setUser`：設名 ≠ 登入，避免誤觸 logged_in 事件 / PendingAuth 重放 / isGuest 翻 false；
-            // rb-ios-nickname-modal-use-guest-nickname / set-guest-nickname-core）、關閉 modal，
-            // 並依進入意圖決定是否接著開 composer。
-            onNicknameSubmit: { name in
-                Livebuy.setGuestNickname(name)
-                let compose = nicknameController.composeAfterSubmit
-                // rb-ios-event-join-gate: 若這次設定暱稱是為了一個被暱稱閘擋下的 pending「加入活動」，
-                // 讀出該次 (eid, keyword)（**在 dismiss 前**，dismiss 會清 pending）；設名成功後自動接續
-                // 完成該次 join、**恰一次**。續作 bypass gate（設名後 displayName 由 template onChange
-                // 非同步刷新，此刻可能尚未落地，若再跑 gate 會誤判暱稱未設而重開 modal——比照留言 pill
-                // 設名後直接開 composer 的「直接接續」語意）。
-                let pendingJoin = nicknameController.pendingJoinEvent
-                nicknameController.dismiss()
-                if compose { composerController.open() }
-                completePendingEventJoin(pending: pendingJoin) { eid, keyword in
-                    feedModel.forwardJoinEventBypassingGate(eid: eid, keyword: keyword)
-                }
-            },
+            // 設定暱稱 modal 送出 → 以 `LivebuyPlayerViewController.setGuestNicknameVerified` **驗證式**
+            // 設訪客留言暱稱（rb-ios-nickname-taken-inline-error，取代舊的 fire-and-forget
+            // `Livebuy.setGuestNickname` —— 舊路徑「暱稱重複沒有出現錯誤，後續留言才會報錯」，本次改成
+            // 送出當下就用該場直播的 checkName 驗證一次；仍**不**用 `setUser`：設名 ≠ 登入，避免誤觸
+            // logged_in 事件 / PendingAuth 重放 / isGuest 翻 false，這點沿用 rb-ios-nickname-modal-use-
+            // guest-nickname / set-guest-nickname-core 的既有決策不變）。
+            //
+            //   • 成功（不 throw）→ 沿用**既有**「讀 compose / pendingJoin → dismiss → 開 composer /
+            //     續作 event-join」整段邏輯，只是包在驗證成功之後才跑（邏輯本身一個字不改）。
+            //   • `LBError.guestNameTaken` → **不** dismiss：`nicknameController.failSubmit` 顯示
+            //     「此暱稱已被使用」，使用者留在輸入框可直接修改重試。
+            //   • 其他錯誤（網路等）→ 同樣**不** dismiss，顯示通用重試文案（`nicknameSubmitErrorMessage`
+            //     依 `nicknameSubmitFailure` 分流，兩段判斷皆為純函式、皆有單元測試）。
+            //
+            // `beginSubmit()` 在起跑「當下」（Task 外、同步）就設 in-flight，讓 CTA 立刻鎖住 + 顯示
+            // spinner，不必等第一個 await 排程；每個注入的閉包都 `[weak ...]`，跨 await 邊界不強留這些
+            // 物件（比照 `DefaultPlayerTemplate.addToCart` 的 `Task { [weak self] in ... await
+            // MainActor.run { [weak self] in ... } }` 既有慣例）。整段生命週期（含世代 gate）抽到
+            // `makeNicknameSubmitHandler`，副作用全注入 → 無需真 player 即可單元測試。
+            onNicknameSubmit: makeNicknameSubmitHandler(
+                beginSubmit: { [weak nicknameController] in
+                    // controller 已消失 → 回一個永不等於任何 generation 的哨兵，讓續作必然被 gate 掉。
+                    nicknameController?.beginSubmit() ?? -1
+                },
+                verify: { [weak player] name in
+                    guard let player = player else { throw NicknameSubmitUnavailableError() }
+                    try await player.setGuestNicknameVerified(name)
+                },
+                isCurrentGeneration: { [weak nicknameController] generation in
+                    nicknameController?.isCurrentGeneration(generation) ?? false
+                },
+                onVerified: { [weak nicknameController, weak composerController, weak feedModel] in
+                    guard let nicknameController = nicknameController else { return }
+                    let compose = nicknameController.composeAfterSubmit
+                    // rb-ios-event-join-gate: 若這次設定暱稱是為了一個被暱稱閘擋下的 pending
+                    // 「加入活動」，讀出該次 (eid, keyword)（**在 dismiss 前**，dismiss 會清
+                    // pending）；驗證成功後自動接續完成該次 join、**恰一次**。續作 bypass gate
+                    // （設名後 displayName 由 template onChange 非同步刷新，此刻可能尚未落地，
+                    // 若再跑 gate 會誤判暱稱未設而重開 modal——比照留言 pill 設名後直接開
+                    // composer 的「直接接續」語意）。
+                    let pendingJoin = nicknameController.pendingJoinEvent
+                    nicknameController.dismiss()
+                    if compose { composerController?.open() }
+                    completePendingEventJoin(pending: pendingJoin) { eid, keyword in
+                        feedModel?.forwardJoinEventBypassingGate(eid: eid, keyword: keyword)
+                    }
+                },
+                onFailure: { [weak nicknameController] message in
+                    nicknameController?.failSubmit(message: message)
+                }),
             onProductTap: { [weak player] product in
                 guard let player = player else { return }
                 if let custom = config.onProductTap { custom(player, product) } else { player.performProductTap(product) }

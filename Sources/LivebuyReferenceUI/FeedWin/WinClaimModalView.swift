@@ -132,6 +132,14 @@ public struct WinClaimModalView: View {
     /// `model.dismissClaim()` 後清掉自己的呈現綁定。demo / snapshot 為 nil。
     private let onDismiss: (() -> Void)?
 
+    /// footer「使用條款」文字被點擊（rb-ios-win-claim-footer-links）。容器轉發
+    /// `openLegalLink(LBLegalLinks.termsOfUse)`（core `LBURLOpenPolicy` 裁決開啟）。
+    /// demo / snapshot 為 nil —— 點擊時安全 inert，見 `handleFooterTermsTap()`。
+    private let onOpenTermsOfUse: (() -> Void)?
+    /// footer「隱私政策」文字被點擊。同上，容器轉發
+    /// `openLegalLink(LBLegalLinks.privacyPolicy)`。demo / snapshot 為 nil。
+    private let onOpenPrivacyPolicy: (() -> Void)?
+
     /// email 欄位是否為**真的可輸入** `TextField`（runtime 預設 `true`），或是靜態唯讀
     /// 佔位（`false`）。SwiftUI 的 `ImageRenderer`（reference-ui snapshot 路徑）**無法**
     /// 渲染 live `TextField`（會畫成黃色「unsupported control」方塊），故 snapshot /
@@ -147,6 +155,8 @@ public struct WinClaimModalView: View {
         submitInFlight: Bool = false,
         onSubmit: ((String) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil,
+        onOpenTermsOfUse: (() -> Void)? = nil,
+        onOpenPrivacyPolicy: (() -> Void)? = nil,
         editable: Bool = true
     ) {
         self.theme = theme
@@ -156,6 +166,8 @@ public struct WinClaimModalView: View {
         self.submitInFlight = submitInFlight
         self.onSubmit = onSubmit
         self.onDismiss = onDismiss
+        self.onOpenTermsOfUse = onOpenTermsOfUse
+        self.onOpenPrivacyPolicy = onOpenPrivacyPolicy
         self.isEditable = editable
     }
 
@@ -900,21 +912,43 @@ public struct WinClaimModalView: View {
         }
     }
 
-    // MARK: - Footer（使用條款 | 隱私政策 — 保留版面、不接連結）
+    // MARK: - Footer（使用條款 | 隱私政策 — 各自可點擊，接 core LBURLOpenPolicy 分流）
     //
-    // R13 決策 4：連結來源尚未決定，本 change **只保留版面、不接任何實際連結 / 導覽**。
-    // 故意畫成純 `Text`（不是 `Button` / `Link`），避免給出「可點」的錯誤 affordance。
+    // R13 決策 4 曾寫「連結來源尚未決定，本 change 只保留版面、不接任何實際連結 / 導覽」——
+    // 該決策已由 `rb-ios-win-claim-footer-links` 收尾：`LBLegalLinks.termsOfUse` /
+    // `.privacyPolicy`（core，兩者皆為 `livebuy.tv`）連結來源已定，本層 footer 兩段文字各自
+    // 可點擊。本層只轉發「使用者點了哪一段」給容器（`onOpenTermsOfUse` / `onOpenPrivacyPolicy`）
+    // ——開啟方式（in-app / 系統瀏覽器 / 不可開安全 no-op）由容器 `FeedWinOverlayView` 呼叫 core
+    // `LBURLOpenPolicy.decide(_:)` 裁決，本層不判定網域、不呈現任何瀏覽器。
+    //
+    // `.onTapGesture` + `.contentShape(Rectangle())`（不是 `Button`）：兩者皆不繪製任何像素，
+    // 只疊加手勢辨識器 / 擴大命中區域，對既有 82 張 snapshot baseline 逐位元組不變
+    // （`Button` 的預設樣式 / hit-testing 包裝有改變視覺樹的風險，見 design.md D-A）。
 
     private var footer: some View {
         HStack(spacing: 0) {
             Text(Self.footerTerms)
+                .contentShape(Rectangle())
+                .onTapGesture { handleFooterTermsTap() }
+                .accessibilityIdentifier(LBAccessibilityID.winClaimFooterTerms)
             Text(" | ").opacity(0.5)
             Text(Self.footerPrivacy)
+                .contentShape(Rectangle())
+                .onTapGesture { handleFooterPrivacyTap() }
+                .accessibilityIdentifier(LBAccessibilityID.winClaimFooterPrivacy)
         }
         .font(.system(size: 12.5 * theme.fontScale, weight: .medium))
         .foregroundColor(Self.textDim)
         .accessibilityIdentifier(LBAccessibilityID.winClaimFooter)
     }
+
+    /// footer「使用條款」被點擊 —— 轉發 `onOpenTermsOfUse`。抽成非 `private` 的 dispatch
+    /// method（同 `PlayerShellView.handleSwipeEnded` 既有慣例）讓測試可以直接呼叫，不必
+    /// 渲染 SwiftUI 手勢（simulator 手勢在本機環境受 TCC 限制）。callback 為 nil 時安全 inert。
+    func handleFooterTermsTap() { onOpenTermsOfUse?() }
+
+    /// footer「隱私政策」被點擊 —— 轉發 `onOpenPrivacyPolicy`。同上。
+    func handleFooterPrivacyTap() { onOpenPrivacyPolicy?() }
 
     // MARK: - 鍵盤位移（純函式）
 

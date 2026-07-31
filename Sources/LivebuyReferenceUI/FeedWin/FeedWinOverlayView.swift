@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import SafariServices
 import LivebuySDK
 import LivebuyUI
 
@@ -151,6 +153,13 @@ public struct FeedWinOverlayView: View {
     /// is driven by the model; this just governs which winner is on screen.
     @State private var claimingWinner: LBWinner?
 
+    /// The resolved URL of a footer legal link (`LBLegalLinks.termsOfUse` /
+    /// `.privacyPolicy`) currently presented in-app, if any (rb-ios-win-claim-footer-links).
+    /// Set only by `openLegalLink(_:)` when `LBURLOpenPolicy.decide(_:)` judges `.inApp`;
+    /// drives the `.sheet` below. Local presentation state only — this container does
+    /// NOT own the legal-link CONTENT (the URL comes from core `LBLegalLinks`).
+    @State private var presentedLegalLink: URL?
+
     public init(model: FeedWinModel, theme: ReferenceUITheme,
                 chatBottomInset: CGFloat = 0, chatScrollable: Bool = false,
                 infoPanelOpen: Bool = false, chatTrailingInset: CGFloat = 0,
@@ -240,7 +249,25 @@ public struct FeedWinOverlayView: View {
                     onDismiss: {
                         model.dismissClaim()
                         claimingWinner = nil
-                    })
+                    },
+                    // footer「使用條款 | 隱私政策」（rb-ios-win-claim-footer-links）— the
+                    // container is the ONLY layer that judges HOW a legal link opens
+                    // (`LBURLOpenPolicy.decide(_:)`); `WinClaimModalView` only reports WHICH
+                    // segment was tapped.
+                    onOpenTermsOfUse: { openLegalLink(LBLegalLinks.termsOfUse) },
+                    onOpenPrivacyPolicy: { openLegalLink(LBLegalLinks.privacyPolicy) })
+            }
+        }
+        // Footer legal-link in-app presentation (rb-ios-win-claim-footer-links). A plain
+        // `.sheet(isPresented:)` computed from `presentedLegalLink` — `URL` is not
+        // `Identifiable` and this state has exactly one reader, so a wrapper type solely to
+        // satisfy `.sheet(item:)` would add a type without adding clarity (see design.md D-G).
+        .sheet(isPresented: Binding(
+            get: { presentedLegalLink != nil },
+            set: { if !$0 { presentedLegalLink = nil } }
+        )) {
+            if let url = presentedLegalLink {
+                SafariView(url: url)
             }
         }
     }
@@ -260,6 +287,88 @@ public struct FeedWinOverlayView: View {
     private func presentation(for winner: LBWinner) -> LBAwardPresentation {
         model.presentation(for: winner)
     }
+
+    // MARK: - Footer legal-link routing (rb-ios-win-claim-footer-links)
+    //
+    // The SOLE judge of "how a legal link opens" is core `LBURLOpenPolicy.decide(_:)` —
+    // this container MUST NOT write a second domain rule.
+    //
+    // `legalLinkRoute(for:)` is split OUT as a `static`, `self`-free pure function (rather
+    // than inlining its guard+switch directly into `openLegalLink`) for a concrete,
+    // empirically-confirmed reason: `@State` writes performed on a `FeedWinOverlayView`
+    // instance that was never actually installed by SwiftUI's renderer are silently
+    // discarded (SwiftUI's own runtime behavior for un-installed `@State` — "will result in
+    // a constant Binding of the initial value and will not update"; confirmed by an actual
+    // failing test run, not by doc-reading). That makes `presentedLegalLink` unit-testable
+    // ONLY through a real render pass, which this package has no harness for (no
+    // ViewInspector; snapshot tests use `ImageRenderer`, which does not surface `.sheet`
+    // content either). Pulling the actual branching decision into a pure static function
+    // mirrors this file's sibling `WinClaimModalView.stage(phase:submitInFlight:result:)` —
+    // a static pure engine tested directly, with the `@State` write left as an untested,
+    // reviewed one-line dispatch (same split, same reason).
+    //
+    // `legalLinkRoute(for:)`'s inner `switch` on `LBURLOpenTarget` is EXHAUSTIVE and
+    // deliberately has NO `default`: if core ever adds a target case, this MUST fail to
+    // compile rather than silently fall into an existing branch (same convention as
+    // `DefaultPlayerTemplate.openResolvedURL`, `url-open-host-routing-template` design.md
+    // decision D). `LBLegalLinks`'s two constants are BOTH `livebuy.tv` (pinned by core's
+    // `URLOpenPolicyTests`), so `.presentInApp` is the only case reachable through today's
+    // two callers — `.openExternally` stays reachable only if a future caller feeds this a
+    // non-livebuy string.
+
+    /// The routing action for a raw legal-link URL string, entirely delegated to core
+    /// `LBURLOpenPolicy.decide(_:)` — this function adds no domain logic of its own.
+    enum LegalLinkRoute: Equatable {
+        /// Present in-app (`SFSafariViewController` via `.sheet`), carrying the
+        /// ALREADY-RESOLVED URL from the policy decision.
+        case presentInApp(URL)
+        /// Hand off to the system URL router, carrying the already-resolved URL.
+        case openExternally(URL)
+        /// Unopenable (`LBURLOpenPolicy.decide(_:)` returned `nil`) — safe no-op.
+        case none
+    }
+
+    /// Pure: what should happen for `rawUrl`, without touching `@State` / `UIApplication`.
+    static func legalLinkRoute(for rawUrl: String) -> LegalLinkRoute {
+        guard let decision = LBURLOpenPolicy.decide(rawUrl) else { return .none }
+        switch decision.target {
+        case .inApp:
+            return .presentInApp(decision.url)
+        case .external:
+            return .openExternally(decision.url)
+        }
+    }
+
+    /// Route a raw legal-link URL string through `legalLinkRoute(for:)` and act on it.
+    private func openLegalLink(_ rawUrl: String) {
+        switch Self.legalLinkRoute(for: rawUrl) {
+        case .presentInApp(let url):
+            presentedLegalLink = url
+        case .openExternally(let url):
+            UIApplication.shared.open(url)
+        case .none:
+            break
+        }
+    }
+}
+
+// MARK: - Legal-link in-app presentation (rb-ios-win-claim-footer-links)
+//
+// A minimal SwiftUI wrapper for `SFSafariViewController`. `DefaultPlayerTemplate`
+// (template layer) already uses `SFSafariViewController`, but imperatively
+// (`player?.present(...)`) — that does not apply here because `FeedWinOverlayView` is a
+// SwiftUI `View`, not a `UIViewController`. Grep confirmed `ios/Sources/LivebuyReferenceUI/`
+// has no existing SwiftUI-native Safari wrapper to reuse, so this is a new (small, private)
+// one rather than a rebuild of an existing seam.
+
+private struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
 
 // MARK: - Identifiable conformance for sheet(item:)
