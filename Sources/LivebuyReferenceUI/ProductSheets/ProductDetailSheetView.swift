@@ -60,6 +60,68 @@ import LivebuyUI
 // Rectangle` is NOT redefined here (it lives in `VideoInfoPanelView.swift`). No
 // `.task` / `AsyncImage` / `NavigationStack` / `.foregroundStyle` / `.tint`.
 
+// MARK: - LBShowStock — the single fallback entry point (normalizeShowStock)
+
+/// Turns the RAW wire value of `POST /sdk/config` → `data.extensions.show_stock` into the `Bool`
+/// that `LivebuyPlayerConfig.showStock` takes. The iOS counterpart of the design's
+/// `normalizeShowStock` (`design/templates/minimal/sdk-components.jsx`, R15).
+///
+/// `extensions` is an OPAQUE RAW BAG: the `sdk-config` capability forbids the SDK from interpreting
+/// any key in it, so core never normalizes this value. The host reads it
+/// (`sdkConfig.extensions["show_stock"]?.value` — one `AnyEquatable` unwrap) and hands it here.
+/// That makes THIS layer the owner of the malformed-value fallback, which is why the rule lives in
+/// reference-ui rather than in core or in each host.
+///
+/// Deliberately uninhabited (a namespace, not a state): the domain is genuinely binary.
+public enum LBShowStock {
+
+    /// THE ONLY place a raw `show_stock` value becomes a `Bool`. Mirrors the design's
+    /// `normalizeShowStock(raw)` (`!(raw === 0 || raw === '0' || raw === false)`) EXACTLY:
+    /// ONLY `false`, the number `0`, and the string `"0"` spelled verbatim mean "hide the caption".
+    ///
+    /// Everything else lands on `true` — the absent key, JSON `null` (`NSNull`), `1`, `"1"`, `""`,
+    /// `" 0 "`, `"false"`, and any unexpected type. The comparison is STRICT: no trimming, no case
+    /// folding, no alias table, exactly like `LBVideoTitleScroll.normalized(_:)` /
+    /// `LBProductCardMode.normalized(_:)` / `LBFloatingEntryPosition.normalized(_:)`. Being
+    /// deliberately as strict as the design keeps the four platforms' fallback boundary identical
+    /// precisely when the backend emits something malformed — which is when a divergence would be
+    /// hardest to spot. The backend passes `extensions` through raw and normalizes nothing (the
+    /// source is a JSON column that can hold legacy or hand-edited values), so this really happens.
+    ///
+    /// ⚠️ WHY the fallback is `true`, and why that reason is NOT "the backend default":
+    /// the backend contract (`openspec/specs/backend/sdk-config.md`, Requirement「`extensions` raw
+    /// bag schema」) says of `show_stock`「直接取商家該欄位的值,本契約不宣告其預設」— unlike its table
+    /// neighbours `show_pv_num` / `video_title_scroll`, which DO declare「未設定時為 `1`」. So this
+    /// module MUST NOT claim a backend default for this key. The reason we land on `true` is:
+    ///   1. it matches the design as it stood before R15 (the caption was drawn unconditionally), and
+    ///   2. it matches this module's own behavior before the flag existed (only `isSoldOut` hid it),
+    /// so an absent / malformed value costs an existing host nothing and never makes an existing
+    /// screen silently lose a line of text.
+    ///
+    /// ⚠️ `false` means "do not show the REMAINING-STOCK COUNT", NOT "the product has no stock" —
+    /// see `ProductDetailSheetView.showStock`.
+    ///
+    /// Type notes (why the cases are in this order):
+    ///   - `Bool` first absorbs the `NSNumber` values JSON decoding produces for `0` / `1`, both of
+    ///     which bridge to `Bool`; that avoids leaning on `Int` bridging subtleties for the two
+    ///     values that actually matter. `NSNumber(2)` does NOT bridge to `Bool` and falls through
+    ///     to the `Int` case → `2 != 0` → `true`, matching JS's `2 !== 0`.
+    ///   - The `Double` case exists for a Swift-native `0.0` (which `as? Int` would reject); JS
+    ///     treats `0.0 === 0` as true, so both land on "hide".
+    ///   - A host that forgets the `.value` unwrap and hands over the `AnyEquatable` wrapper hits
+    ///     `default` → `true`: the setting silently fails OPEN (caption still shown) rather than
+    ///     removing information the merchant never asked to remove.
+    public static func normalized(_ raw: Any?) -> Bool {
+        switch raw {
+        case let flag as Bool:     return flag
+        case let number as Int:    return number != 0
+        case let number as Double: return number != 0
+        case let text as String:   return text != "0"
+        default:                   return true
+        }
+    }
+}
+
 /// The family-3 product-detail sheet for one `LBProductDetailState`. Renders the
 /// product photo / name / price (with strike-through original), the variant chip
 /// picker (one `LBPVariantPicker` per group), the qty stepper, and the primary
@@ -117,6 +179,25 @@ public struct ProductDetailSheetView: View {
     /// → 不畫（使既有無 brief 的 demo / baseline byte-identical）。`.addToCart` 呈現不畫。Read-only.
     public let brief: String
 
+    /// Backend / merchant-driven REMAINING-STOCK-COUNT gate (rb-ios-show-stock-caption-toggle).
+    /// A by-value presentation flag fed from `ProductSheetsModel.showStock` (sourced from
+    /// `LivebuyPlayerConfig.showStock`, itself normalized by the host from the wire value
+    /// `sdkConfig.extensions["show_stock"]` via `LBShowStock.normalized(_:)`). Default `true` —
+    /// this module's behavior before the flag existed, so every existing call site is unchanged.
+    ///
+    /// It answers「MAY the remaining-stock count be shown」; `isSoldOut` answers「is there a stock
+    /// count worth stating at all」. They are ANDed in `showsStockCaption` — this flag NEVER relaxes
+    /// the sold-out rule, so on a sold-out product it is a no-op.
+    ///
+    /// ⚠️ Scope: it gates ONLY the「只剩庫存 N 組」line in `qtyRow`. It MUST NOT be read as an
+    /// availability switch: the「已售完」treatment (driven by `isSoldOut`) and
+    /// `NotifyRestockSheetView`'s「尚無庫存」(a sold-out state caption) are untouched by it.
+    ///
+    /// Because `qtyRow` is orthogonal to `presentation`, this ONE flag covers BOTH the full
+    /// 商品明細 sheet (`.detail`) and the compact 加入購物車 sheet (`.addToCart`, reached through
+    /// the thin `AddToCartSheetView` wrapper, which forwards this value).
+    public let showStock: Bool
+
     /// Host-wired variant chip tap → `model.selectVariant(...)` → `template.selectVariant`.
     /// nil for demo / snapshot instances.
     private let onSelectVariant: ((_ groupIndex: Int, _ optionIndex: Int) -> Void)?
@@ -162,6 +243,7 @@ public struct ProductDetailSheetView: View {
         live: Bool = false,
         isLive: Bool = false,
         brief: String = "",
+        showStock: Bool = true,
         onSelectVariant: ((_ groupIndex: Int, _ optionIndex: Int) -> Void)? = nil,
         onSetQty: ((Int) -> Void)? = nil,
         onInc: (() -> Void)? = nil,
@@ -186,6 +268,7 @@ public struct ProductDetailSheetView: View {
         self.live = live
         self.isLive = isLive
         self.brief = brief
+        self.showStock = showStock
         self.onSelectVariant = onSelectVariant
         self.onSetQty = onSetQty
         self.onInc = onInc
@@ -202,7 +285,8 @@ public struct ProductDetailSheetView: View {
 
     /// Sold-out / out-of-stock (`qty.max == 0`, set by `DefaultQtyStepper`'s bounds
     /// rule when `soldOut == 1 || stock <= 0`). Drives the disabled qty stepper +
-    /// disabled CTA + the「已售完」price treatment.
+    /// disabled CTA + the「已售完」price treatment, and — ANDed with `showStock` in
+    /// `showsStockCaption` — whether the「只剩庫存 N 組」caption is drawn.
     private var isSoldOut: Bool { qty.max == 0 }
 
     /// The SPEC-AWARE, SAME-SOURCE price pair for the price row
@@ -549,6 +633,33 @@ public struct ProductDetailSheetView: View {
     //
     // Bound to `qty.qty` within `[qty.min, qty.max]`. The stepper is DISABLED when
     // sold out (`qty.max == 0`); `-` is also disabled at `qty.min`, `+` at `qty.max`.
+    //
+    // The「只剩庫存 N 組」caption is drawn ⟺ `showsStockCaption(showStock:isSoldOut:)` — an AND of
+    // TWO independent gates (rb-ios-show-stock-caption-toggle):
+    //   • `!isSoldOut`  — "is there a stock count worth stating" (data state; a sold-out product
+    //     already reads「已售完」in the price row, so「只剩庫存 0 組」would contradict it). This is
+    //     the pre-existing rule and it is NOT relaxed by the new flag.
+    //   • `showStock`   — "MAY the merchant's remaining-stock count be shown" (backend / merchant
+    //     capability gate, `extensions.show_stock`).
+    //
+    // Note this row is ORTHOGONAL to `presentation`: BOTH `.detail` and `.addToCart` draw it, so
+    // one gate covers the 商品明細 sheet and the 加入購物車 sheet alike.
+    //
+    // When the caption is not drawn it is REMOVED OUTRIGHT — no placeholder, no substitute copy.
+    // The stepper still hugs the trailing edge because the EXISTING `Spacer(minLength: 0)` after the
+    // 「數量」label is what pushes it there — the same structural guarantee as the design's
+    // `justifyContent: 'space-between'`. That `Spacer` is LOAD-BEARING: delete it and the whole row
+    // collapses to the leading edge (measured — it is what the trailing-edge pixel test catches).
+    //
+    // Nothing MAY be added back "to keep the alignment" (an empty `Text`, an extra `Spacer`, a
+    // fixed-width box). Note this rule is only PARTLY observable, and the boundary was measured
+    // rather than reasoned about (this change's counter-evidence round, 361pt row, demo fixture):
+    // a NARROW placeholder is swallowed by the `Spacer`'s slack and moves nothing — an empty
+    // `Text("")`, a 40pt clear box, and even a 220pt one all left the whole suite green — whereas
+    // a placeholder wide enough to exhaust that slack does shift the stepper and IS caught by
+    // `testQtyRow_stepperDoesNotMoveWhenTheCaptionIsRemoved` (red from 230pt up). So the rule is
+    // worth keeping for the narrow cases too: those are exactly the ones no test would catch, and
+    // they are what later drifts into a wide, visible one.
 
     private var qtyRow: some View {
         HStack(spacing: 12) {
@@ -556,7 +667,7 @@ public struct ProductDetailSheetView: View {
                 .font(.system(size: 14 * theme.fontScale, weight: .semibold))
                 .foregroundColor(theme.text)
             Spacer(minLength: 0)
-            if !isSoldOut {
+            if Self.showsStockCaption(showStock: showStock, isSoldOut: isSoldOut) {
                 Text(stockCaption)
                     .font(.system(size: 12 * theme.fontScale))
                     .foregroundColor(Self.textDim)
@@ -565,6 +676,16 @@ public struct ProductDetailSheetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    /// Test-only hook exposing the SAME `qtyRow` subtree `body` renders, so unit tests can measure
+    /// the row's INTRINSIC HEIGHT and compare two in-process renders (incl. a trailing-edge crop
+    /// that pins「the stepper did not move」) in both `showStock` states. Follows the established
+    /// `titleViewForTesting` / `shopRowForTesting` precedent.
+    ///
+    /// MUST NOT be called from production code (it is on no `body` path, so it costs zero pixels),
+    /// and MUST keep returning the very same `qtyRow` — never a parallel copy, which would decouple
+    /// the assertions from what is actually drawn.
+    var qtyRowForTesting: some View { qtyRow }
 
     /// LBPQtyStepper: `-`  value  `+`. Disabled entirely when sold out.
     private var qtyStepper: some View {
@@ -606,6 +727,24 @@ public struct ProductDetailSheetView: View {
 
     private var stockCaption: String {
         "\(Self.stockCaptionPrefix)\(qty.max)\(Self.stockCaptionSuffix)"
+    }
+
+    /// THE single predicate deciding whether the「只剩庫存 N 組」caption is drawn
+    /// (rb-ios-show-stock-caption-toggle). `qtyRow` calls only this; the view body MUST NOT
+    /// re-test `isSoldOut` for the caption anywhere else.
+    ///
+    /// The two gates are ANDed because they answer DIFFERENT questions and neither may stand in for
+    /// the other:
+    ///   • `isSoldOut` (= `qty.max == 0`) — whether a stock count is worth stating at all. This is a
+    ///     data-state rule, independent of any merchant setting, and `showStock == true` MUST NOT
+    ///     relax it (a sold-out product reads「已售完」in the price row;「只剩庫存 0 組」next to it
+    ///     would contradict itself).
+    ///   • `showStock` — whether the merchant permits the count to be shown at all.
+    ///
+    /// A direct consequence, and an intentional one: on a sold-out product `showStock` is a NO-OP —
+    /// both states render identically.
+    static func showsStockCaption(showStock: Bool, isSoldOut: Bool) -> Bool {
+        showStock && !isSoldOut
     }
 
     // MARK: - Footer (sticky 加入購物車 CTA + cart-CTA badge)
@@ -1057,7 +1196,10 @@ public extension ProductDetailSheetView {
 
     /// A deterministic demo detail sheet WITH a variant group (顏色) + in-stock qty,
     /// pre-add (no guards tripped). Renders correctly action-free.
-    static func demo(theme: ReferenceUITheme) -> ProductDetailSheetView {
+    ///
+    /// `showStock` defaults to `true`, so an existing `demo(theme:)` call renders byte-identically
+    /// to before this parameter existed (rb-ios-show-stock-caption-toggle).
+    static func demo(theme: ReferenceUITheme, showStock: Bool = true) -> ProductDetailSheetView {
         ProductDetailSheetView(
             theme: theme,
             detail: ProductSheetsModel.demoDetail(),
@@ -1065,7 +1207,8 @@ public extension ProductDetailSheetView {
             qty: ProductSheetsModel.demoQtyInStock,
             cartCount: 1,
             needsVariantSelection: false,
-            addToCartFailed: false)
+            addToCartFailed: false,
+            showStock: showStock)
     }
 }
 

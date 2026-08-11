@@ -8,8 +8,8 @@ import LivebuyUI
 // Spec: `reference-ui-rendering/spec.md` (family-5 widget surfaces:
 //        carousel / video-shop grid / floating / minimized).
 // Design: rb-ios-widget design.md §"渲染計畫" + §"守住的不變式" +
-//          `design/templates/minimal/widgets.jsx` (LBPCarousel / LBPVideoShop /
-//          LBPFloatingWidget) + `sdk-components.jsx` (LBPMinimizedWidget).
+//          `design/templates/minimal/widgets.jsx` (LBPCarousel / LBPVideoShop) +
+//          `sdk-components.jsx` (LBPFloatingWidget / LBPMinimizedWidget).
 //
 // This is the SKELETON for rb-ios-widget. It bridges the headless widget-content
 // view-model exposed by `DefaultWidgetTemplate` (obtained via
@@ -21,8 +21,8 @@ import LivebuyUI
 //   - It does NOT own a second copy of authoritative state — it republishes
 //     SNAPSHOT VALUES taken from the template's own `private(set) public` read
 //     (`content.current`: `videos` / `mode` / `currentPage` / `lastPage` /
-//     `liveVideo` / `widgetColor` / `widgetBgcolor`) each time the template
-//     notifies its registered change observers (design §"容器與 view-model 橋接").
+//     `liveVideo` / `widgetColor` / `widgetBgcolor` / `productCard`) each time the
+//     template notifies its registered change observers (design §"容器與 view-model 橋接").
 //   - It does NOT add pixels and it does NOT add any accessor to `LivebuyUI`
 //     (that would be a template-layer concern, out of scope here).
 //   - It does NOT subscribe to the content view-model's internal `onMutation`
@@ -33,10 +33,18 @@ import LivebuyUI
 //     (card tap → open player / load-more pagination / floating close+expand) are
 //     HOST-WIRED CONTAINER closures carried by `WidgetOverlayView`, NOT this model.
 //     This model is a PURE read-only snapshot (do NOT invent template forwarders).
-//   - `widgetColor` / `widgetBgcolor` are RAW PASSTHROUGH web-embed colors — this
-//     model carries them verbatim and MUST NOT interpret their semantics (the
-//     reference-ui native theme comes from `ReferenceUITheme` only; these are a
-//     SEPARATE track — Key Invariant `widget_color` / `widget_bgcolor`).
+//   - `widgetColor` / `widgetBgcolor` are RAW PASSTHROUGH web-embed colors — THIS
+//     MODEL carries them verbatim and MUST NOT interpret their semantics. The
+//     interpretation lives one layer out, in the three widget SURFACES
+//     (`ReferenceUIWidgetEmbedTheme.derive`, rb-ios-widget-embed-colors); the
+//     global `ReferenceUIThemeResolver` still never sees them.
+//   - `productCard` (`product_card`) is the SAME KIND of raw passthrough
+//     (rb-ios-widget-product-card-modes): this model mirrors the wire string
+//     VERBATIM — including `nil`, which means THE BACKEND SENT NOTHING and is a
+//     DIFFERENT fact from the backend sending `"inside"`. Normalizing the value
+//     (unknown / missing → `inside`) is `CarouselCardView`'s job via the single
+//     pure entry point `LBProductCardMode.normalized(_:)`; this model MUST NOT
+//     normalize, and the normalized value MUST NOT be written back here.
 //
 // iOS-14-safe: `ObservableObject` + `@Published` are available from iOS 13, so no
 // `@available` guard is needed here.
@@ -76,14 +84,26 @@ public final class WidgetModel: ObservableObject {
     /// renders this single card; nil → render NOTHING (EmptyView).
     @Published public private(set) var liveVideo: LBVideoItem?
 
-    /// Web-embed text color (`widget_color`) — RAW PASSTHROUGH (1=black / 2=white
-    /// per web embed). This layer MUST NOT interpret it for the native theme (the
-    /// theme comes from `ReferenceUITheme` only — they are independent tracks).
+    /// Web-embed text color mode (`widget_color`) — RAW PASSTHROUGH. `1`=預設色彩,
+    /// `2`=色彩反轉 (web renders `2` as `#ffffff` and `1` as no override); these are
+    /// MODES, not color swatches. THIS layer MUST NOT interpret it — the three
+    /// widget surfaces do, via `ReferenceUIWidgetEmbedTheme.derive`.
     @Published public private(set) var widgetColor: Int
 
     /// Web-embed background color (`widget_bgcolor`) — RAW PASSTHROUGH (mixed
-    /// Int/String on wire, carried as `String?`). This layer MUST NOT interpret it.
+    /// Int/String on wire, carried as `String?`; transparent is the EMPTY STRING
+    /// `""`, never Int `1`). THIS layer MUST NOT interpret it — the three widget
+    /// surfaces do, treating `""` / nil / unparseable alike as "leave it alone".
     @Published public private(set) var widgetBgcolor: String?
+
+    /// Carousel card product-card display mode (`product_card`) — RAW PASSTHROUGH
+    /// (backend domain `inside` / `below` / `hidden`, backend default `inside`).
+    /// Mirrored VERBATIM: `nil` means the backend sent nothing (the field is absent
+    /// on `/sdk/widget/live`, on the linetv branch, and before the first load) — NOT
+    /// the same fact as `"inside"`, so this model deliberately does NOT substitute
+    /// the backend default. The fallback (missing / unknown → `inside`) lives in
+    /// `LBProductCardMode.normalized(_:)`, consumed by `CarouselCardView`.
+    @Published public private(set) var productCard: String?
 
     // MARK: - Live binding
 
@@ -136,7 +156,8 @@ public final class WidgetModel: ObservableObject {
             lastPage: c.lastPage,
             liveVideo: WidgetVisibility.visibleLive(c.liveVideo),
             widgetColor: c.widgetColor,
-            widgetBgcolor: c.widgetBgcolor
+            widgetBgcolor: c.widgetBgcolor,
+            productCard: c.productCard
         )
     }
 
@@ -145,9 +166,9 @@ public final class WidgetModel: ObservableObject {
     /// Construct a deterministic instance WITHOUT a live widget — for the widget
     /// sub-views' previews and the per-surface snapshot tests. Every value defaults
     /// to the empty / at-attach seed (`videos: []`, `.carousel`, `currentPage: 0`,
-    /// `lastPage: 1`, no live card, core color defaults `1` / `nil`) so a
-    /// zero-argument call yields a stable baseline that matches the freshly-attached
-    /// template content (`LBWidgetContent.empty(mode: .carousel)`).
+    /// `lastPage: 1`, no live card, core color defaults `1` / `nil`, no
+    /// `productCard`) so a zero-argument call yields a stable baseline that matches
+    /// the freshly-attached template content (`LBWidgetContent.empty(mode: .carousel)`).
     public init(
         videos: [LBVideoItem] = [],
         mode: LBWidgetContentMode = .carousel,
@@ -155,7 +176,8 @@ public final class WidgetModel: ObservableObject {
         lastPage: Int = 1,
         liveVideo: LBVideoItem? = nil,
         widgetColor: Int = 1,
-        widgetBgcolor: String? = nil
+        widgetBgcolor: String? = nil,
+        productCard: String? = nil
     ) {
         self.videos = videos
         self.mode = mode
@@ -164,6 +186,7 @@ public final class WidgetModel: ObservableObject {
         self.liveVideo = liveVideo
         self.widgetColor = widgetColor
         self.widgetBgcolor = widgetBgcolor
+        self.productCard = productCard
     }
 
     deinit {
@@ -192,5 +215,6 @@ public final class WidgetModel: ObservableObject {
         liveVideo = WidgetVisibility.visibleLive(c.liveVideo)
         widgetColor = c.widgetColor
         widgetBgcolor = c.widgetBgcolor
+        productCard = c.productCard
     }
 }

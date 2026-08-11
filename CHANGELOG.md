@@ -5,6 +5,72 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.0] - 2026-08-12
+
+> **Minor — 一條 BREAKING 移除，但實務衝擊視為零（見下方說明）。** 本版新增一批 reference-ui 視覺
+> 設定面（皆 additive）並修一批已出貨的 drop-in 呈現 bug。**iOS + Android 兩端 lockstep**；
+> React Native / Flutter 不在此列車（見 [`livebuy-android-sdk/CHANGELOG.md`](../livebuy-android-sdk/CHANGELOG.md#450---2026-08-12)
+> 的 Android 對照段）。
+
+### Removed（⚠️ BREAKING）
+
+- **⚠️ 移除 `LBWidgetResponse.showGoods: Int?`**（含 `init` 的 `showGoods:` 參數）。該欄位對應的 wire key
+  `show_goods` **後端從未 emit**，因此它永遠是 `nil` —— 留著等於在 public API 上擺一個看起來可用、
+  實際永遠沒值的假設定。其原本標註的語意（「0=名後 / 1=影片中 / 2=不顯示」）源自後端 repo 一則
+  已被該 repo 自己更正的稽核錯誤，並在 2026-05-29 經由「對照後端權威契約」被抄進本 SDK。
+  證據鏈（後端 handler 註解、後端測試的「必須不存在」斷言、後端更正紀錄、正式環境實打回應）見
+  [`docs/backend/go-rewrite-wire-contract.md`](../docs/backend/go-rewrite-wire-contract.md) §2.2。
+  **遷移**：wire 上真正承載「商品卡顯示模式」的是新增的 `productCard`（見下方 `Added`）。
+  讀過 `showGoods` 的 host 只可能拿到 `nil`，改讀 `productCard` 即可；若原本就寫了 nil 分支，
+  刪掉該欄位的引用即可編譯。
+  **為什麼仍是 minor、不是 v5.0.0**：該欄位對應的 wire key 後端從未送過值，repo 內（含
+  `LivebuyUI` / `LivebuyReferenceUI` / Example / RN / Flutter 橋接層）零消費端——沒有任何一個
+  真實 host 讀過非 `nil` 的值。實務衝擊視為零，這是團隊已確認的判斷，非自動套用 SemVer 字面規則。
+
+### Added
+
+- **`LBWidgetResponse.productCard: String?`** —— `POST /sdk/widget` 回應 root 的 `product_card`
+  raw passthrough。語意為 widget 輪播卡上「商品卡」的顯示模式，後端值域 `below`（卡片下方）/
+  `inside`（卡內疊層）/ `hidden`（不顯示），後端預設 `inside`。**SDK 不解讀語意、不據此排版**。
+  缺欄位（linetv 分支不送）→ `nil`，**SDK 刻意不補後端預設 `"inside"`**，讓 UI 層能區分
+  「後端沒送」與「後端明確送 inside」。
+- **`LivebuyWidgetCore.productCard: String?`** —— 同一個值的 host 可讀唯讀狀態，比照既有
+  `widgetColor` / `widgetBgcolor`，於 carousel / grid 的 `loadFirstPage` / `requestLoadMore` 後更新。
+  floating（`/sdk/widget/live`）不帶此欄，維持 `nil`。
+- **Widget 輪播卡依 `product_card` 渲染三態**（`CarouselCardView`）——`inside`（維持既有縮圖內
+  dark-glass 疊層，像素不變）/ `below`（商品卡移到縮圖外，落在**標題之下、卡片最底**；未綁商品時
+  渲染等高透明佔位維持同列同格等高）/ `hidden`（完全不畫，不留佔位）。缺值或白名單外字串一律
+  fallback 為 `inside`。
+- **Widget 表面顏色接上 `widget_color` / `widget_bgcolor`**——`CarouselView` / `ScrollableCarouselView` /
+  `VideoShopGridView` 三個 widget 表面依後台設定衍生文字與背景色：`widget_color == 2` 時文字轉
+  `#FFFFFF`（`1` 不覆寫）；`widget_bgcolor` 為合法 hex 時覆寫背景（空字串 / 缺 key 視同不覆寫）。
+  未設定時渲染與現況逐位元組相同。僅套用於這三個 widget 表面，不影響全域主題（player shell、
+  product sheets 等維持既有 minimal palette）。
+- **商品明細 / 快速購買 sheet 新增庫存文案開關** `LivebuyPlayerConfig.showStock`（DEFAULT `true`）——
+  `false` 時「只剩庫存 N 組」整行不畫、不留佔位，既有「售完不顯示」閘不變（AND 關係）。
+- **PlayerHeader 標題新增跑馬燈開關** `LivebuyPlayerConfig.titleScroll`（DEFAULT `true`）——是否
+  捲動仍 100% 由內容是否覆蓋容器的量測決定，`titleScroll` 是疊加在量測之上的後端能力閘（AND
+  關係），`false` 時維持既有單行省略顯示、行高不變。
+- **浮動直播入口新增初始落點與延遲出現時機**（`LivebuyLiveEntryConfig`）——`position`（`nil` →
+  右下，既有落點）/ `timing`（`nil` → 立即，既有時機）/ `delay`（DEFAULT `3` 秒）。`timing ==
+  "delay"` 時延遲指定秒數才掛載並播進場動畫；`immediate` 維持現況、零行為變動。
+
+### Fixed
+
+- **`widget_color` 為 JSON 數字字串時不再被靜默吃掉。** 該欄宣告型別是 Int，但後端只在商城 base 值
+  做整數轉型；widget-group override 那條路徑是逐字賦值、沒有轉型，故 wire 上可能是字串 `"2"`。
+  舊解碼遇到字串會 fallback 成預設 `1`，**後台在 widget group 設定的「白色文字（2）」在 App 端
+  無聲地變回黑色**。現在 Int 與數字字串皆正確解析；缺 key / `null` / 不可解析字串（如 `"abc"`）
+  維持既有預設 `1` 且不拋錯。**API 面零變化**（`widgetColor` 仍是 `Int`）。
+- **浮動直播入口關閉鈕改對齊現行設計稿。** 舊造型抄自一個已於 2026-06-09 移除的設計元件（框外
+  24×24 深色玻璃 + 白描邊 + 自身陰影），現改為框內右上 20×20、`rgba(0,0,0,0.55)`、無描邊
+  （對齊現行 `sdk-components.jsx:LBPFloatingWidget`）。卡片本身尺寸與位置不變，只有關閉鈕像素改變。
+
+> **平台範圍**：iOS + Android 兩端本輪皆完整落地（parity change，見 Android CHANGELOG）。
+> React Native / Flutter 對應能力已在主線，隨各自待發 `2.0.0` 出貨。
+
+---
+
 ## [4.4.0] - 2026-07-31
 
 > minor release，**無 API 破壞**（但有一條行為 BREAKING，見 `Changed`）、源碼相容，兩端 lockstep
@@ -35,8 +101,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added（新公開面，皆 additive、源碼相容、無 breaking）
 
 - **`LBURLOpenPolicy.decide(_:)` / `LBURLOpenTarget` / `LBLegalLinks.termsOfUse` /
-  `.privacyPolicy`**（`dcea410f`）——純函式 URL 開啟目標裁決規則與法務連結網址事實來源，發布時
-  尚無 production 消費者（純新增）。
+  `.privacyPolicy`**（`dcea410f`）——純函式 URL 開啟目標裁決規則與法務連結網址事實來源。對 host
+  而言是**可選用的新增 API**（不呼叫即無任何行為變化）；SDK 內部的消費點隨本版一起出貨，見上方
+  `Changed`（view-model 層 `5457c97e`）與下方 `Fixed / drop-in behavior`（reference-ui 層
+  `55ef0e8d`）。
 - **`LivebuyPlayerViewController.setGuestNicknameVerified(_ name: String) async throws`**
   （`81a76425`）——設定留言暱稱前先對目前 video 呼叫既有 `checkName` 驗證，通過才持久化 + 廣播
   `AUTH_STATE_CHANGED`；被取走或其他錯誤一律不持久化、不廣播，拋出可分辨的 `LBError`

@@ -41,8 +41,11 @@ import LivebuyUI
 // One-way data flow: this sub-surface reads ONLY its passed-in `model` (the
 // read-only `videos` mirror, observed so a live template update re-renders); it
 // never reaches back into `DefaultWidgetTemplate`, holds NO second copy of state,
-// and MUST NOT interpret `widgetColor` / `widgetBgcolor` for the native theme
-// (theme comes ONLY from `ReferenceUITheme`). Card tap forwards via the
+// and MUST NOT interpret `widgetColor` / `widgetBgcolor` itself — it paints with
+// whatever `ReferenceUITheme` it is handed. When composed by `CarouselView` /
+// `ScrollableCarouselView` that theme is ALREADY embed-color-derived by the parent
+// surface (rb-ios-widget-embed-colors), so a host embedding this sub-surface
+// directly gets the underived theme by design. Card tap forwards via the
 // host-wired `onTapVideo` exit; this layer NEVER scrolls / paginates / opens the
 // player itself. An empty list renders NOTHING (the carousel empty-state line
 // stays with `CarouselView`).
@@ -145,6 +148,10 @@ public struct CarouselRowView: View {
                     theme: theme,
                     width: cardWidth,
                     live: live,
+                    // RAW `product_card` from the bound model — the card owns the
+                    // fallback (`LBProductCardMode.normalized(_:)`); this strip only
+                    // hands the value over (rb-ios-widget-product-card-modes).
+                    productCard: model.productCard,
                     onTap: { onTapVideo?(item) })
                     .accessibilityIdentifier(LBAccessibilityID.carouselCard(index))
             }

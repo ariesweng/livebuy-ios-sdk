@@ -31,6 +31,63 @@ import LivebuyUI
 // an `@available` guard (`.foregroundStyle`) is intentionally NOT used; we use the
 // iOS-13-safe `.foregroundColor` throughout (D-7).
 
+// MARK: - LBVideoTitleScroll — the single fallback entry point (normalizeTitleScroll)
+
+/// Turns the RAW wire value of `POST /sdk/config` → `data.extensions.video_title_scroll` into the
+/// `Bool` that `LivebuyPlayerConfig.titleScroll` takes. The iOS counterpart of the design's
+/// `normalizeTitleScroll` (`design/templates/minimal/sdk-components.jsx`, R15).
+///
+/// `extensions` is an OPAQUE RAW BAG: the `sdk-config` capability forbids the SDK from interpreting
+/// any key in it, so core never normalizes this value and never applies the backend's default. The
+/// host reads it (`sdkConfig.extensions["video_title_scroll"]?.value` — one `AnyEquatable` unwrap)
+/// and hands it here. That makes THIS layer the owner of the malformed-value fallback, which is why
+/// the rule lives in reference-ui rather than in core or in each host.
+///
+/// Deliberately uninhabited (a namespace, not a state): the domain is genuinely binary, so wrapping
+/// the answer in a two-case enum would only add a conversion hop between the config field and the
+/// view without buying any type safety.
+public enum LBVideoTitleScroll {
+
+    /// THE ONLY place a raw `video_title_scroll` value becomes a `Bool`. Mirrors the design's
+    /// `normalizeTitleScroll(raw)` (`!(raw === 0 || raw === '0' || raw === false)`) EXACTLY:
+    /// ONLY `false`, the number `0`, and the string `"0"` spelled verbatim mean "do not scroll".
+    ///
+    /// Everything else lands on `true` — the absent key, JSON `null` (`NSNull`), `1`, `"1"`, `""`,
+    /// `" 0 "`, `"false"`, and any unexpected type. The comparison is STRICT: no trimming, no case
+    /// folding, no alias table, exactly like `LBProductCardMode.normalized(_:)` and
+    /// `LBFloatingEntryPosition.normalized(_:)`. Being deliberately as strict as the design keeps
+    /// the four platforms' fallback boundary identical precisely when the backend emits something
+    /// malformed — which is when a divergence would be hardest to spot. The backend passes
+    /// `extensions` through raw and normalizes nothing (the source is a JSON column that can hold
+    /// legacy or hand-edited values), so this really does happen.
+    ///
+    /// The fallback lands on `true` (scrolling) on purpose: that is the side the backend's own
+    /// default (`1`, when the merchant never set it) is on, AND the side this module behaved on
+    /// before the setting existed — so an unset / malformed value costs an existing host nothing.
+    ///
+    /// ⚠️ `false` means "do not scroll", NOT "do not show" — see `PlayerHeaderBarView.titleScroll`.
+    ///
+    /// Type notes (why the cases are in this order):
+    ///   - `Bool` first absorbs the `NSNumber` values JSON decoding produces for `0` / `1`, both of
+    ///     which bridge to `Bool`; that avoids leaning on `Int` bridging subtleties for the two
+    ///     values that actually matter. `NSNumber(2)` does NOT bridge to `Bool` and falls through
+    ///     to the `Int` case → `2 != 0` → `true`, matching JS's `2 !== 0`.
+    ///   - The `Double` case exists for a Swift-native `0.0` (which `as? Int` would reject); JS
+    ///     treats `0.0 === 0` as true, so both land on "do not scroll".
+    ///   - A host that forgets the `.value` unwrap and hands over the `AnyEquatable` wrapper hits
+    ///     `default` → `true`: the setting silently fails OPEN (title still scrolls) rather than
+    ///     doing something destructive.
+    public static func normalized(_ raw: Any?) -> Bool {
+        switch raw {
+        case let flag as Bool:     return flag
+        case let number as Int:    return number != 0
+        case let number as Double: return number != 0
+        case let text as String:   return text != "0"
+        default:                   return true
+        }
+    }
+}
+
 /// The family-1 top-bar chrome. Pinned to the top of the player shell; paints the
 /// glassy host pill + round glass control cluster over a dark scrim gradient.
 public struct PlayerHeaderBarView: View {
@@ -103,6 +160,23 @@ public struct PlayerHeaderBarView: View {
     /// from `showViewerCount` (host config): BOTH must be true to draw the badge.
     public let viewerCountVisible: Bool
 
+    /// Backend / merchant-driven marquee CAPABILITY gate (rb-ios-video-title-scroll).
+    /// A by-value presentation flag fed from `PlayerShellModel.titleScroll` (sourced from
+    /// `LivebuyPlayerConfig.titleScroll`, itself normalized by the host from the wire value
+    /// `sdkConfig.extensions["video_title_scroll"]` via `LBVideoTitleScroll.normalized(_:)`).
+    /// Default `true` — the backend's own default when the merchant never set it (`1`), and the
+    /// behavior this module had before this flag existed, so every existing call site is unchanged.
+    ///
+    /// It answers「MAY the title scroll」; `marqueeTitleOverflows` answers「is there anything TO
+    /// scroll」. They are ANDed in `showsMarqueeTitle` — this flag NEVER changes the measurement.
+    ///
+    /// ⚠️ `false` means "do not scroll", NOT "do not show". The backend contract
+    /// (`openspec/specs/backend/sdk-config.md`, Requirement「`extensions` raw bag schema」) states
+    /// it in so many words: `video_title_scroll` expresses HOW the title is presented and MUST NOT
+    /// be read as a title-visibility switch. `false` keeps the very same single-line, tail-ellipsized
+    /// `Text` (see `titleView`), so the title still occupies its row at exactly the same height.
+    public let titleScroll: Bool
+
     // -- Optional action closures (LAST, each defaulting to nil) ----------------
     //
     // The header's top-right is a SINGLE minimize affordance (design `LBPTopBar`
@@ -134,6 +208,7 @@ public struct PlayerHeaderBarView: View {
         live: Bool = false,
         showViewerCount: Bool = true,
         viewerCountVisible: Bool = true,
+        titleScroll: Bool = true,
         onMinimize: (() -> Void)? = nil,
         onSubscribe: (() -> Void)? = nil,
         onTapHostBadge: (() -> Void)? = nil
@@ -149,6 +224,7 @@ public struct PlayerHeaderBarView: View {
         self.live = live
         self.showViewerCount = showViewerCount
         self.viewerCountVisible = viewerCountVisible
+        self.titleScroll = titleScroll
         self.onMinimize = onMinimize
         self.onSubscribe = onSubscribe
         self.onTapHostBadge = onTapHostBadge
@@ -256,12 +332,13 @@ public struct PlayerHeaderBarView: View {
         .background(Capsule().fill(pillGlass))
     }
 
-    // MARK: - Title (LBPMarqueeText) — rb-ios-marquee-title-scroll
+    // MARK: - Title (LBPMarqueeText) — rb-ios-marquee-title-scroll / rb-ios-video-title-scroll
     //
     // Parity `design/templates/minimal/sdk-components.jsx`'s `LBPMarqueeText` and the
     // already-shipped Android port. Closes a documented design/implementation gap: the
     // title used to always truncate with an ellipsis; it now marquee-scrolls when it
-    // overflows.
+    // overflows AND the backend/merchant setting allows scrolling
+    // (`titleScroll`, rb-ios-video-title-scroll — design `LBPHostBadge`'s `titleScroll` prop).
 
     /// The title slot. The layout-participating (and therefore negotiation-affecting)
     /// view is ALWAYS the exact same unconstrained, static `Text` this rendered before
@@ -295,8 +372,25 @@ public struct PlayerHeaderBarView: View {
     /// the proposed size directly inside the overlay's own `GeometryReader` sidesteps
     /// that non-determinism entirely — no second pass is ever required.
     ///
-    /// Purely content-driven — there is NO manual toggle; whether the overlay paints is
-    /// 100% determined by `marqueeTitleOverflows`.
+    /// The OVERFLOW decision stays purely content-driven — no caller preference can stand in for
+    /// the measurement. On top of it sits ONE backend/merchant capability gate, `titleScroll`
+    /// (rb-ios-video-title-scroll); the two are ANDed in the single pure entry point
+    /// `showsMarqueeTitle(titleScroll:textWidth:containerWidth:)`, which is the ONLY thing that
+    /// decides whether the overlay paints.
+    ///
+    /// WHY `titleScroll == false` CANNOT CHANGE THE LINE HEIGHT (structural, not tuned):
+    /// disabling the marquee means the `.overlay` is simply not attached. The
+    /// layout-participating view — the `Text` below — is byte-identical in BOTH states (same font,
+    /// same `lineLimit(1)`, no `.frame`), and overlay content is layout-inert to its ancestors. So
+    /// the title row's height, and therefore the host-name / LIVE-pill row beneath it, cannot move.
+    /// This mirrors the design's own note on `LBPHostBadge`'s non-scrolling branch (「字級 / 行高 /
+    /// maxWidth 與 marquee 分支完全一致，單行高度不變」) — but here it is guaranteed by sharing the
+    /// one `Text` rather than by keeping two branches' numbers in agreement.
+    ///
+    /// MUST NOT be "fixed" by adding a parallel static branch (`if titleScroll { … } else { Text(…) }`):
+    /// two copies drift, and that downgrades the equal-height guarantee from a structural fact to a
+    /// coincidence. `Text(...).lineLimit(1)` already IS the design's non-scrolling branch (nowrap +
+    /// overflow hidden + tail ellipsis).
     private var titleView: some View {
         let font = Font.system(size: 12 * theme.fontScale, weight: .bold)
         let textWidth = Self.marqueeIntrinsicTextWidth(title, fontSize: 12 * theme.fontScale)
@@ -308,7 +402,9 @@ public struct PlayerHeaderBarView: View {
                 GeometryReader { proxy in
                     let containerWidth = proxy.size.width
                     Group {
-                        if Self.marqueeTitleOverflows(textWidth: textWidth, containerWidth: containerWidth) {
+                        if Self.showsMarqueeTitle(titleScroll: titleScroll,
+                                                  textWidth: textWidth,
+                                                  containerWidth: containerWidth) {
                             MarqueeTitleLoopView(
                                 title: title,
                                 font: font,
@@ -324,6 +420,16 @@ public struct PlayerHeaderBarView: View {
                 alignment: .leading
             )
     }
+
+    /// Test-only hook exposing the SAME `titleView` subtree `body` renders, so unit tests can
+    /// measure the title slot's INTRINSIC HEIGHT in both `titleScroll` states and compare two
+    /// in-process renders of it (rb-ios-video-title-scroll). Follows the established
+    /// `avatarForTesting` precedent.
+    ///
+    /// MUST NOT be called from production code (it is on no `body` path, so it costs zero pixels),
+    /// and MUST keep returning the very same `titleView` — never a parallel copy, which would
+    /// decouple the equal-height assertion from what is actually drawn.
+    var titleViewForTesting: some View { titleView }
 
     /// Avatar — a white-backed 28×28 circle. The design fills it with the shop
     /// mark. `live`-gated (same convention as `CarouselCardView`): at runtime
@@ -593,8 +699,30 @@ public struct PlayerHeaderBarView: View {
     /// is strictly wider than the container — a direct, strict `>` port of Android's
     /// decision (NOT the JSX's own `+ 1` CSS tolerance), kept for 2-platform-consistent
     /// behavior rather than re-deriving from the JSX independently.
+    ///
+    /// This answers「is there anything TO scroll」ONLY. It is 100% content-driven and MUST stay
+    /// that way: no caller preference may stand in for this measurement. Whether the marquee is
+    /// actually attached is `showsMarqueeTitle`, which ANDs this with the `titleScroll` capability
+    /// gate. `titleView` MUST call `showsMarqueeTitle`, never this function directly.
     static func marqueeTitleOverflows(textWidth: CGFloat, containerWidth: CGFloat) -> Bool {
         textWidth > containerWidth
+    }
+
+    /// THE single decision for whether the marquee overlay is attached (rb-ios-video-title-scroll).
+    /// Pure / deterministic. Two orthogonal questions, ANDed — and they MUST NOT be allowed to
+    /// substitute for one another:
+    ///
+    ///   - `titleScroll` — MAY it scroll? A backend / merchant capability gate, sourced from
+    ///     `extensions.video_title_scroll` (design `LBPHostBadge`'s `titleScroll` prop). This is
+    ///     NOT a caller preference knob, and it MUST NOT influence the measurement below.
+    ///   - `marqueeTitleOverflows` — is there anything TO scroll? Content measurement, automatic.
+    ///
+    /// `titleScroll == false` therefore means「single-line, tail-ellipsized, no scrolling」— NOT
+    ///「hidden」: the caller keeps rendering the same `Text`, at the same height (see `titleView`).
+    static func showsMarqueeTitle(titleScroll: Bool,
+                                  textWidth: CGFloat,
+                                  containerWidth: CGFloat) -> Bool {
+        titleScroll && marqueeTitleOverflows(textWidth: textWidth, containerWidth: containerWidth)
     }
 
     /// Marquee loop duration in seconds (parity JSX `dur = Math.max(8, scrollWidthPx /
@@ -660,9 +788,10 @@ private struct MarqueeTitleLoopView: View {
 
     /// Continuous-animation throttling gate (ios-power-profile-animation-throttle-reference-ui).
     /// The infinite marquee `repeatForever` driver only STARTS when this allows it (device not
-    /// hot, Reduce Motion off, on-screen). This is layered ON TOP of the existing overflow gate
-    /// (this view is only instantiated when the title overflows) — it does NOT change whether
-    /// this view is built, only whether it scrolls. Defaults to neutral "animate" when unset.
+    /// hot, Reduce Motion off, on-screen). This is layered ON TOP of the existing attach gate
+    /// (this view is only instantiated when `PlayerHeaderBarView.showsMarqueeTitle` holds — i.e.
+    /// the title overflows AND `titleScroll` allows scrolling) — it does NOT change whether this
+    /// view is built, only whether it scrolls. Defaults to neutral "animate" when unset.
     @Environment(\.continuousAnimationGate) private var motionGate
 
     var body: some View {
@@ -724,11 +853,16 @@ extension PlayerHeaderBarView {
     /// baseline does not depend on a live player. `title` defaults to the existing
     /// short demo title (byte-identical for every existing call site); pass a
     /// deliberately long one (rb-ios-marquee-title-scroll) to exercise the marquee
-    /// overflow branch in a snapshot.
+    /// overflow branch in a snapshot. `titleScroll` defaults to `true` (the backend's own
+    /// default and this module's pre-existing behavior), so every existing call site renders
+    /// byte-identically; pass `false` (rb-ios-video-title-scroll) to exercise the
+    /// merchant-disabled branch — the title then stays a single ellipsized line at the SAME
+    /// height, it does NOT disappear.
     static func demo(theme: ReferenceUITheme = ReferenceUIThemePalette.minimal,
                      live: Bool = true,
                      replay: Bool = false,
-                     title: String = "夏日彩妝特賣") -> PlayerHeaderBarView {
+                     title: String = "夏日彩妝特賣",
+                     titleScroll: Bool = true) -> PlayerHeaderBarView {
         PlayerHeaderBarView(
             theme: theme,
             title: title,
@@ -737,7 +871,8 @@ extension PlayerHeaderBarView {
             viewerCount: 12345,
             isSubscribed: false,
             isLive: live,
-            isReplay: replay
+            isReplay: replay,
+            titleScroll: titleScroll
         )
     }
 }

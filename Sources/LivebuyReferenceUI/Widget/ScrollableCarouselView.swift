@@ -58,8 +58,20 @@ public struct ScrollableCarouselView: View {
     /// The read-only widget content snapshot, passed through to the sub-surfaces.
     @ObservedObject public var model: WidgetModel
 
-    /// The resolved reference-ui theme, passed through to the sub-surfaces.
-    public let theme: ReferenceUITheme
+    /// The theme AS SUPPLIED by the caller (`ReferenceUIThemeResolver` output),
+    /// before this surface overlays the `/sdk/widget` embed colors. Read `theme`,
+    /// not this — the sub-surfaces receive the derived value.
+    private let resolvedTheme: ReferenceUITheme
+
+    /// The theme this surface actually paints with, passed through to the
+    /// sub-surfaces. Derived per render from `resolvedTheme` + the model's
+    /// `widgetColor` / `widgetBgcolor` (`widget-embed-colors`); EQUAL to
+    /// `resolvedTheme` when nothing is configured.
+    public var theme: ReferenceUITheme {
+        ReferenceUIWidgetEmbedTheme.derive(from: resolvedTheme,
+                                           widgetColor: model.widgetColor,
+                                           widgetBgcolor: model.widgetBgcolor)
+    }
 
     /// Section title, forwarded to `CarouselHeaderView`. Defaults to「精選影片」.
     public let title: String
@@ -94,7 +106,7 @@ public struct ScrollableCarouselView: View {
         onTapVideo: ((LBVideoItem) -> Void)? = nil
     ) {
         self.model = model
-        self.theme = theme
+        self.resolvedTheme = theme
         self.title = title
         self.subtitle = subtitle
         self.cardWidth = cardWidth

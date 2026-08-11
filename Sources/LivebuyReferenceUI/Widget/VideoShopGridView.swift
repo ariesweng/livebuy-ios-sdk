@@ -59,10 +59,17 @@ import LivebuyUI
 // `videos` / `currentPage` / `lastPage` snapshot) + `theme`; it never reaches back
 // into `DefaultWidgetTemplate`, holds NO second copy of the list, and NEVER loads /
 // paginates / opens the player itself. Card tap → `onTapVideo(item)` (host-wired);
-// footer load-more → `onLoadMore` (host-wired). It MUST NOT interpret
-// `widgetColor` / `widgetBgcolor` for the native theme (those are a SEPARATE
-// raw-passthrough track — theme comes ONLY from `ReferenceUITheme`). It renders
-// correctly with all actions nil (so demo / snapshot tests construct it action-free).
+// footer load-more → `onLoadMore` (host-wired). It renders correctly with all
+// actions nil (so demo / snapshot tests construct it action-free).
+//
+// EMBED COLORS (rb-ios-widget-embed-colors): this IS one of the three widget
+// surfaces that interpret `widgetColor` / `widgetBgcolor` — see the `theme`
+// computed property below, which overlays them onto the caller-supplied
+// `resolvedTheme` via `ReferenceUIWidgetEmbedTheme.derive`. The scope is strictly
+// this surface: `ReferenceUIThemeResolver` still never sees these two values, and
+// the player / sheets / floating widget keep the underived theme. This is the ONE
+// widget surface whose body paints `theme.background`, so it is where
+// `widget_bgcolor` is actually visible (design D4 note).
 //
 // iOS-14-safe SwiftUI only. `VStack` / `HStack` / `Text` / `Button` /
 // `Image(systemName:)` / `RoundedRectangle` are all iOS-13+. No `.task` /
@@ -81,10 +88,25 @@ public struct VideoShopGridView: View {
     /// (the footer load-more vs end-of-list gate). Read-only mirror.
     @ObservedObject public var model: WidgetModel
 
-    /// The resolved reference-ui theme. The footer label uses `theme.text` (dimmed);
-    /// the load-more affordance uses `theme.accent`; cards paint with their own
-    /// theme-driven title color (via `CarouselCardView`).
-    public let theme: ReferenceUITheme
+    /// The theme AS SUPPLIED by the caller (`ReferenceUIThemeResolver` output),
+    /// before this surface overlays the `/sdk/widget` embed colors. Read `theme`,
+    /// not this — every paint site goes through the derived value.
+    private let resolvedTheme: ReferenceUITheme
+
+    /// The theme this surface actually paints with. The footer label uses
+    /// `theme.text` (dimmed); the load-more affordance uses `theme.accent`; cards
+    /// paint with their own theme-driven title color (via `CarouselCardView`).
+    ///
+    /// Derived per render from `resolvedTheme` + the model's `widgetColor` /
+    /// `widgetBgcolor` (`widget-embed-colors`). This is the ONE widget surface whose
+    /// body paints `theme.background` directly, so `widget_bgcolor` is visible here.
+    /// When nothing is configured this is EQUAL to `resolvedTheme`, keeping existing
+    /// snapshots byte-identical.
+    public var theme: ReferenceUITheme {
+        ReferenceUIWidgetEmbedTheme.derive(from: resolvedTheme,
+                                           widgetColor: model.widgetColor,
+                                           widgetBgcolor: model.widgetBgcolor)
+    }
 
     /// Runtime media gate forwarded to every `CarouselCardView`. `false` (default —
     /// demo / snapshot) → placeholder thumbnails (baselines unchanged); `true` (host
@@ -136,7 +158,7 @@ public struct VideoShopGridView: View {
         onLoadMore: (() -> Void)? = nil
     ) {
         self.model = model
-        self.theme = theme
+        self.resolvedTheme = theme
         self.live = live
         self.hostScrollable = hostScrollable
         self.containerWidth = containerWidth
@@ -224,6 +246,10 @@ public struct VideoShopGridView: View {
                     theme: theme,
                     width: cellWidth,
                     live: live,
+                    // RAW `product_card` from the bound model — the card owns the
+                    // fallback (`LBProductCardMode.normalized(_:)`); the grid only
+                    // hands the value over (rb-ios-widget-product-card-modes).
+                    productCard: model.productCard,
                     onTap: { onTapVideo?(item) })
                     .accessibilityIdentifier(LBAccessibilityID.gridCard(rowIndex * 2 + colIndex))
             }

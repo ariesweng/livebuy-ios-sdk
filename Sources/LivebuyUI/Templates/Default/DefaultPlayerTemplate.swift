@@ -1672,16 +1672,18 @@ public final class DefaultWidgetTemplate {
 
     // MARK: - Host-bindable widget content view-model (widget-content-template)
 
-    /// Widget content (videos / mode / pagination / liveVideo / colors) mirrored
-    /// from core `LivebuyWidgetCore` (colors from `widget-bridge-color-core`). The
-    /// host draws `widgets.jsx` from this; the template renders nothing (D1).
+    /// Widget content (videos / mode / pagination / liveVideo / colors /
+    /// productCard) mirrored from core `LivebuyWidgetCore` (colors from
+    /// `widget-bridge-color-core`, `productCard` from `widget-product-card-core`).
+    /// The host draws `widgets.jsx` from this; the template renders nothing (D1).
     public let content: DefaultWidgetContent
 
     // MARK: - Change notification (expose-default-template-bindable-state)
 
     /// Coalesced "host-bindable state changed" notification. Fires EXACTLY ONCE
     /// per single widget-content change (videos update / mode change / page
-    /// advance / liveVideo update / color update), dispatched on the main thread,
+    /// advance / liveVideo update / color update / productCard update),
+    /// dispatched on the main thread,
     /// after the state has been updated (the host re-reads `content.current` — the
     /// callback carries no diff payload). Purely additive: nil by default; when
     /// unset the template behaves exactly as before.

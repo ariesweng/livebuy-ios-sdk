@@ -17,8 +17,14 @@ import LivebuySDK
 // `LBPFloatingWidget` / `LBPMinimizedWidget`). The template renders NOTHING.
 //
 // D2 — single source of truth stays in core `LivebuyWidgetCore` (and the
-//       `widget-bridge-color-core` snapshot for colors). This model does NOT hold
-//       a second copy of the data — it re-reads core on every `refresh`.
+//       `widget-bridge-color-core` / `widget-product-card-core` exits for the
+//       `/sdk/widget` response-root settings). This model does NOT hold a second
+//       copy of the data — it re-reads core on every `refresh`.
+//
+// widget-product-card-content-template — the snapshot additionally carries
+// `productCard` (`product_card`, the carousel card's product-card display mode).
+// Raw passthrough alongside the colors; this layer NEVER substitutes the backend
+// default `"inside"` (see `LBWidgetContent.productCard`).
 
 /// Host-bindable widget layout mode. `carousel` / `grid` / `floating` map 1:1 to
 /// core `WidgetMode`; `minimized` is a TEMPLATE-DERIVED state (core floating
@@ -32,8 +38,10 @@ public enum LBWidgetContentMode: Equatable {
 }
 
 /// One host-bindable widget-content snapshot. Mirrors core `LivebuyWidgetCore` plus
-/// the `widget-bridge-color-core` web-embed colors (raw passthrough — the
-/// template MUST NOT interpret the color semantics, D4).
+/// the `/sdk/widget` response-root settings: the `widget-bridge-color-core`
+/// web-embed colors and the `widget-product-card-core` product-card display mode
+/// (all raw passthrough — the view-model MUST NOT interpret their semantics,
+/// D4 / widget-product-card-content-template D2).
 public struct LBWidgetContent: Equatable {
     /// Card-row data — core `LivebuyWidgetCore.videos` (read-only mirror).
     public let videos: [LBVideoItem]
@@ -54,10 +62,22 @@ public struct LBWidgetContent: Equatable {
     /// raw passthrough (mixed Int/String on wire; template does NOT interpret).
     /// Fallback `nil` when absent (core DTO default).
     public let widgetBgcolor: String?
+    /// Carousel card's product-card display mode (`product_card`) —
+    /// `widget-product-card-core` raw passthrough. Backend domain `below` /
+    /// `inside` / `hidden`, backend default `inside`; an unrecognized value is
+    /// kept verbatim.
+    ///
+    /// `nil` means THE BACKEND SENT NOTHING (the linetv branch omits the field;
+    /// `/sdk/widget/live` does not carry it; and nothing has loaded yet) — it is
+    /// NOT the same fact as the backend sending `"inside"`, so this layer
+    /// deliberately does NOT substitute the backend default. Applying a default
+    /// is the reference-ui layer's job (widget-product-card-content-template D2).
+    public let productCard: String?
 
     public init(videos: [LBVideoItem], mode: LBWidgetContentMode,
                 currentPage: Int, lastPage: Int, liveVideo: LBVideoItem?,
-                widgetColor: Int, widgetBgcolor: String?) {
+                widgetColor: Int, widgetBgcolor: String?,
+                productCard: String? = nil) {
         self.videos = videos
         self.mode = mode
         self.currentPage = currentPage
@@ -65,14 +85,17 @@ public struct LBWidgetContent: Equatable {
         self.liveVideo = liveVideo
         self.widgetColor = widgetColor
         self.widgetBgcolor = widgetBgcolor
+        self.productCard = productCard
     }
 
     /// The empty / not-loaded default snapshot (core defaults: `currentPage = 0`,
-    /// `lastPage = 1`, `widgetColor = 1`, `widgetBgcolor = nil`). Mode is supplied
+    /// `lastPage = 1`, `widgetColor = 1`, `widgetBgcolor = nil`,
+    /// `productCard = nil` — NOT the backend default `"inside"`). Mode is supplied
     /// since it depends on the widget's configured `WidgetMode`.
     static func empty(mode: LBWidgetContentMode) -> LBWidgetContent {
         LBWidgetContent(videos: [], mode: mode, currentPage: 0, lastPage: 1,
-                        liveVideo: nil, widgetColor: 1, widgetBgcolor: nil)
+                        liveVideo: nil, widgetColor: 1, widgetBgcolor: nil,
+                        productCard: nil)
     }
 
     /// Per-video diff signature for the snapshot equality guard. Beyond the stable
@@ -118,6 +141,7 @@ public struct LBWidgetContent: Equatable {
             && lhs.lastPage == rhs.lastPage
             && lhs.widgetColor == rhs.widgetColor
             && lhs.widgetBgcolor == rhs.widgetBgcolor
+            && lhs.productCard == rhs.productCard
             && lhs.liveVideo.map(videoDiffSignature) == rhs.liveVideo.map(videoDiffSignature)
             && lhs.videos.map(videoDiffSignature) == rhs.videos.map(videoDiffSignature)
     }
@@ -155,6 +179,12 @@ public final class DefaultWidgetContent {
     /// widget instance (`widget.widgetColor` / `widget.widgetBgcolor`); when that
     /// dependency is absent the widget instance still carries the core DTO
     /// defaults (`1` / `nil`), so this never throws (D4 / R5).
+    ///
+    /// `productCard` rides the SAME path — `widget.productCard` is the
+    /// `widget-product-card-core` host-readable exit alongside the colors. Raw
+    /// passthrough: whatever core holds (a whitelist value, an unrecognized
+    /// string, or `nil` for "backend sent nothing") is mirrored verbatim; this
+    /// layer never substitutes the backend default `"inside"`.
     func refresh(from widget: LivebuyWidgetCore) {
         let next = LBWidgetContent(
             videos: widget.videos,
@@ -163,7 +193,8 @@ public final class DefaultWidgetContent {
             lastPage: widget.lastPage,
             liveVideo: widget.liveVideo,
             widgetColor: widget.widgetColor,
-            widgetBgcolor: widget.widgetBgcolor)
+            widgetBgcolor: widget.widgetBgcolor,
+            productCard: widget.productCard)
         guard next != current else { return }
         current = next
         onMutation?()

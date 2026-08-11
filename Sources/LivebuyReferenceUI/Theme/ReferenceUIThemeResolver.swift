@@ -18,8 +18,15 @@ import LivebuyUI
 // supplies only `primaryColor` still lets `fontScale` fall through to host /
 // minimal. This is intentional per-field merge (not all-or-nothing).
 //
-// Independent of `widget_color` / `widget_bgcolor` (web-embed colors) — those are
-// a separate raw-passthrough concern owned by core (D-E).
+// This resolver is and stays INDEPENDENT of `widget_color` / `widget_bgcolor`:
+// those two MUST NOT become inputs here, and this output MUST NOT vary with them
+// (`reference-ui-rendering` § 解析器輸出不受 widget 顏色影響). They are applied in a
+// SEPARATE, NARROWER step that runs after this one and only on the three widget
+// surfaces — `ReferenceUIWidgetEmbedTheme.derive` (rb-ios-widget-embed-colors).
+// Wiring them in here would tint the player and every sheet, since `background` /
+// `text` are global tokens. Effective order:
+//
+//   sdkConfig.theme  >  widget colors (widget surfaces only)  >  LBUIOptions  >  minimal
 
 public enum ReferenceUIThemeResolver {
 

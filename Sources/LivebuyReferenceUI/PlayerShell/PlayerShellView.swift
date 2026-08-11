@@ -681,6 +681,11 @@ public struct PlayerShellView: View {
                     // The badge shows ⟺ isLive && viewerCountVisible && showViewerCount — so replay
                     // (LIVE chrome) honours the original live-time show_pv_num setting.
                     viewerCountVisible: model.viewerCountVisible,
+                    // Backend / merchant title-marquee capability gate (rb-ios-video-title-scroll):
+                    // mirrors `extensions.video_title_scroll` via `LivebuyPlayerConfig.titleScroll`.
+                    // `false` keeps the title (single line + ellipsis, same height) but stops it
+                    // scrolling; the overflow MEASUREMENT itself is untouched.
+                    titleScroll: model.titleScroll,
                     onMinimize: { onMinimize?() },
                     // 訂閱徽章 → 容器注入的 gate（未登入 → AuthGate(.subscribe)）；未注入 fallback
                     // `model.toggleSubscribe()`（rb-ios-subscribe-login-gate）。與 info pill 共用。

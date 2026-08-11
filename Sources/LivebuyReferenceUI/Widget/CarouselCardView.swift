@@ -8,7 +8,8 @@ import LivebuyUI
 //
 // Spec: `reference-ui-rendering/spec.md` (family-5 widget surfaces).
 // Design: rb-ios-widget design.md §"渲染計畫" +
-//          `design/templates/minimal/widgets.jsx` `LBPCarouselCard` (lines 54-160).
+//          `design/templates/minimal/widgets.jsx` `LBPCarouselCard` (lines 135-226) +
+//          `LBPCardProductOverlay` (107-131) / `LBPCardProductRow` (66-103).
 //
 // The single 9:16 thumbnail card shared by ALL four family-5 widget surfaces
 // (carousel row, video-shop grid, floating live card, and — at a smaller scale —
@@ -22,12 +23,46 @@ import LivebuyUI
 //                  indicates live,
 //       - VOD    → a「▶ mm:ss」duration pill (from `LBVideoItem.duration` seconds,
 //                  formatted) otherwise,
-//   • a BOTTOM dark-glass product overlay (product thumb + `goods.name` + display
-//     price) when `goods != nil` (`LBVideoItem.goods` — `LBFeaturedGood`). The thumb
-//     binds `goods.pic` on the live runtime path (gradient chip fallback); the price
-//     is de-duplicated via `displayPrice(_:)` so a symbol-bearing wire value does not
-//     render a double currency,
+//   • a PRODUCT CARD whose placement depends on `product_card` (see below) — drawn
+//     from `LBVideoItem.goods` (`LBFeaturedGood`: product thumb + `goods.name` +
+//     display price). The thumb binds `goods.pic` on the live runtime path (gradient
+//     chip fallback); the price is de-duplicated via `displayPrice(_:)` so a
+//     symbol-bearing wire value does not render a double currency,
 //   • the `LBVideoItem.title` BELOW the thumbnail.
+//
+// PRODUCT-CARD MODES (rb-ios-widget-product-card-modes, design R14; the `below`
+// placement was later reversed by design R17 / rb-ios-widget-product-card-below-slot-
+// reposition — `design/templates/minimal/widgets.jsx` `normalizeProductCardMode` /
+// `LBPCardProductRow` / `LBPCardProductOverlay`). `POST /sdk/widget` carries a root
+// `product_card` String (`inside` / `below` / `hidden`, backend default `inside`),
+// raw-passed through core → `LBWidgetContent.productCard` → `WidgetModel.productCard`
+// → this card's `productCard: String?` parameter:
+//
+//     inside (default)  the dark-glass overlay INSIDE the 9:16 thumbnail (the
+//                       historical, unconditional rendering — pixels unchanged).
+//                       `goods == nil` → the whole block is not drawn.
+//     below             the product card moves OUTSIDE the thumbnail, landing UNDER
+//                       THE TITLE — at the very bottom of the card. Off the dark video
+//                       backdrop it switches to the design's surface vocabulary
+//                       (`bgElev` fill + `stroke` border + `theme.text` name +
+//                       `sale` price + `textFaint` struck-through original price).
+//                       `goods == nil` → an EQUAL-HEIGHT TRANSPARENT SPACER so
+//                       cards in the same row / grid cell stay the same height.
+//     hidden            no product card at all (neither overlay nor row, and NO
+//                       spacer — every card in the surface is equally card-less).
+//
+// The LIVE tag / duration pill / upcoming veil / title are IDENTICAL in all three
+// modes. Equal height comes from the FIXED constant `belowRowHeight` (design
+// `LB_BELOW_ROW_H = 44`), NOT from the content.
+//
+// FALLBACK IS THIS LAYER'S JOB: core deliberately does NOT substitute the backend
+// default (`widget-decode-robustness` — `nil` means "the backend sent nothing",
+// which is a different fact from `"inside"`), and neither does the view-model layer.
+// `LBProductCardMode.normalized(_:)` is the SINGLE pure entry point that maps
+// anything that is not exactly `"below"` / `"hidden"` (including `nil`, `""`,
+// whitespace-padded and differently-cased spellings, and any unknown string) to
+// `.inside`. It MUST NOT be duplicated in the view body, and the normalized value
+// MUST NOT be written back into `WidgetModel` / `LBWidgetContent` / core.
 //
 // KIND MAPPING (three-way: LIVE → UPCOMING → VOD). The core `LBVideoItem` carries
 // `liveStatus: Int` + `type: Int` + `publishAt: String` (UTC+8):
@@ -46,7 +81,8 @@ import LivebuyUI
 // (and the detection no longer touches `Date()` → fully deterministic). `replay` (liveStatus==3)
 // is excluded by `liveStatus == 0`.
 //
-// One-way data flow: this primitive reads ONLY its passed-in `item` + `theme`; it
+// One-way data flow: this primitive reads ONLY its passed-in `item` + `theme` +
+// `productCard`; it
 // never reaches back into `WidgetModel` / `DefaultWidgetTemplate`. The tap exit is
 // host-wired (`onTap`) — the card NEVER opens the player / calls core itself
 // (design §"守住的不變式": 互動一律 host-wired exit 轉發). It renders correctly with
@@ -56,10 +92,48 @@ import LivebuyUI
 // `LinearGradient` / `Text` / `Image(systemName:)` / `Button` / `.aspectRatio` are
 // all iOS-13+. NO `AsyncImage` / `.task` / `.foregroundStyle` / `.tint`.
 
+// MARK: - LBProductCardMode — the single fallback entry point (normalizeProductCardMode)
+
+/// Where (and whether) the widget card draws its product card. The iOS counterpart
+/// of the design's `LB_PRODUCT_CARD_MODES` + `normalizeProductCardMode`
+/// (`design/templates/minimal/widgets.jsx`).
+///
+/// The wire value (`product_card`) is a raw passthrough `String?` all the way from
+/// core; this enum is where it becomes a closed set, so the view body can `switch`
+/// exhaustively and the compiler flags every unhandled site if the domain ever grows.
+public enum LBProductCardMode: String {
+    /// Dark-glass overlay INSIDE the 9:16 thumbnail (backend default, and the
+    /// fallback for everything unrecognized).
+    case inside
+    /// A surface-styled product row OUTSIDE the thumbnail, under the title (card bottom).
+    case below
+    /// No product card at all.
+    case hidden
+
+    /// THE ONLY place a raw `product_card` value becomes a mode. Mirrors the design's
+    /// `normalizeProductCardMode(raw)` (`raw === 'below' || raw === 'hidden' ? raw :
+    /// 'inside'`) EXACTLY — the comparison is strict, with no trimming and no case
+    /// folding, so `" below "` / `"BELOW"` fall back to `.inside` just like any other
+    /// unknown string. Being deliberately as strict as the design keeps the four
+    /// platforms' fallback boundary identical precisely when the backend emits
+    /// something malformed, which is when a divergence would be hardest to spot.
+    ///
+    /// `nil` (the backend sent nothing — absent key / JSON null / `/sdk/widget/live` /
+    /// nothing loaded yet) also lands on `.inside`, WITHOUT that default ever being
+    /// written back into the view-model (core's `nil` semantics are preserved).
+    public static func normalized(_ raw: String?) -> LBProductCardMode {
+        switch raw {
+        case LBProductCardMode.below.rawValue: return .below
+        case LBProductCardMode.hidden.rawValue: return .hidden
+        default: return .inside
+        }
+    }
+}
+
 /// The shared family-5 widget card (`LBPCarouselCard`): a 9:16 thumbnail
-/// placeholder + LIVE / VOD kind badge + an optional bottom dark-glass product
-/// overlay + the title below. `onTap` is a host-wired exit (the card never opens
-/// the player itself).
+/// placeholder + LIVE / VOD kind badge + a product card placed per `product_card`
+/// (`inside` overlay / `below` row / `hidden`) + the title below. `onTap` is a
+/// host-wired exit (the card never opens the player itself).
 public struct CarouselCardView: View {
 
     /// The video this card renders (read-only — `cover` / `title` / `duration` /
@@ -83,6 +157,13 @@ public struct CarouselCardView: View {
     /// `reference-ui-rendering` (family-5 widget card).
     public let live: Bool
 
+    /// RAW `product_card` wire value (`WidgetModel.productCard`), carried verbatim —
+    /// this card does NOT expect a pre-normalized value, so every call site is a plain
+    /// hand-off and the fallback stays in ONE place (`productCardMode`). `nil` (the
+    /// default, and what every existing call site / preview / snapshot passes) →
+    /// `.inside` → pixels identical to before this parameter existed.
+    public let productCard: String?
+
     /// Card tap → host-wired exit (→ host → core open player for `item.id`). nil for
     /// demo / snapshot instances — the card is inert. This layer NEVER opens the
     /// player / calls core simulate* itself.
@@ -93,13 +174,21 @@ public struct CarouselCardView: View {
         theme: ReferenceUITheme,
         width: CGFloat = 132,
         live: Bool = false,
+        productCard: String? = nil,
         onTap: (() -> Void)? = nil
     ) {
         self.item = item
         self.theme = theme
         self.width = width
         self.live = live
+        self.productCard = productCard
         self.onTap = onTap
+    }
+
+    /// The resolved product-card mode. The ONE call of `LBProductCardMode.normalized(_:)`
+    /// in this view — every branch below switches on this, never on the raw string.
+    private var productCardMode: LBProductCardMode {
+        LBProductCardMode.normalized(productCard)
     }
 
     /// Whether `item` is a LIVE card. `liveStatus == 1` → live (red LIVE tag).
@@ -121,15 +210,48 @@ public struct CarouselCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 thumbnail
                 title
+                // `below` ONLY — the product card sits UNDER THE TITLE, at the very
+                // bottom of the card (design R17, 2026-08-11: upstream reversed its own
+                // 2026-08-05 decision, which had put this slot BETWEEN the thumbnail and
+                // the title; `widgets.jsx` `LBPCarouselCard` now orders its children
+                // thumbnail → title → `LBPCardProductRow`). `inside` / `hidden`
+                // contribute nothing here, so the `VStack` lays out exactly as it did
+                // before this mode existed (a nil optional view adds no spacing).
+                if drawsBelowRow {
+                    belowProductSlot
+                }
             }
             .frame(width: width)
         }
         .buttonStyle(PlainButtonStyle())
     }
 
+    // MARK: - Mode-derived drawing decisions (exhaustive — no `default`)
+    //
+    // Both gates switch EXHAUSTIVELY over `LBProductCardMode`, so growing the domain
+    // is a compile error here rather than a silently-unhandled mode. The raw wire
+    // string is never compared outside `LBProductCardMode.normalized(_:)`.
+
+    /// `inside` → the dark-glass overlay is drawn inside the 9:16 thumbnail.
+    private var drawsInsideOverlay: Bool {
+        switch productCardMode {
+        case .inside: return true
+        case .below, .hidden: return false
+        }
+    }
+
+    /// `below` → a product row (or its equal-height transparent spacer) is drawn
+    /// under the title, at the bottom of the card (design R17).
+    private var drawsBelowRow: Bool {
+        switch productCardMode {
+        case .below: return true
+        case .inside, .hidden: return false
+        }
+    }
+
     // MARK: - Thumbnail (9:16, placeholder + kind badge + product overlay)
     //
-    // Mirrors LBPCarouselCard's thumbnail block (widgets.jsx 63-150): a 9:16
+    // Mirrors LBPCarouselCard's thumbnail block (widgets.jsx 145-213): a 9:16
     // rounded media area with the kind badge top-left and the dark-glass product
     // overlay anchored bottom.
 
@@ -156,8 +278,10 @@ public struct CarouselCardView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(LBAccessibilityID.cardKindBadge)
 
-            // Bottom dark-glass product overlay (only when goods != nil).
-            if let goods = item.goods {
+            // Bottom dark-glass product overlay — `inside` mode only (`below` draws
+            // the row outside the thumbnail, `hidden` draws nothing), and only when
+            // goods != nil (an unbound card keeps a clean thumbnail).
+            if drawsInsideOverlay, let goods = item.goods {
                 VStack {
                     Spacer(minLength: 0)
                     productOverlay(goods)
@@ -266,7 +390,7 @@ public struct CarouselCardView: View {
         }
     }
 
-    /// LIVE red tag (LBPCarouselCard 97-108): a static pulse dot + 「LIVE」on the
+    /// LIVE red tag (LBPCarouselCard 180-192): a static pulse dot + 「LIVE」on the
     /// brand-red surface. The pulse animation is drawn statically (snapshot-safe).
     private var liveTag: some View {
         HStack(spacing: 4) {
@@ -287,7 +411,7 @@ public struct CarouselCardView: View {
         .accessibilityIdentifier(LBAccessibilityID.cardLiveBadge)
     }
 
-    /// VOD「▶ mm:ss」duration pill (LBPCarouselCard 110-124) over a translucent
+    /// VOD「▶ mm:ss」duration pill (LBPCarouselCard 193-210) over a translucent
     /// dark capsule. `LBVideoItem.duration` is `Int` SECONDS — formatted to `mm:ss`.
     private var durationPill: some View {
         HStack(spacing: 4) {
@@ -308,9 +432,9 @@ public struct CarouselCardView: View {
         .accessibilityIdentifier(LBAccessibilityID.cardDurationPill)
     }
 
-    // MARK: - Bottom dark-glass product overlay (goods != nil)
+    // MARK: - Bottom dark-glass product overlay (`inside` mode, goods != nil)
 
-    /// Dark-glass product overlay (LBPCarouselCard 126-149): a 24×24 product thumb +
+    /// Dark-glass product overlay (`LBPCardProductOverlay`, widgets.jsx 107-131): a 24×24 product thumb +
     /// the product name (1-line) + the display price, on a translucent dark surface.
     /// The thumb binds `goods.pic` on the `live == true` runtime path (gradient chip
     /// as the loading / empty fallback); `live == false` (snapshot / demo) keeps the
@@ -342,28 +466,29 @@ public struct CarouselCardView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 0.5)))
     }
 
-    /// 24×24 product thumb chip. `live == true` + non-empty `goods.pic` → the remote
-    /// product image (`RemoteStillImageView`, iOS-14-safe — NOT `AsyncImage`,
-    /// `scaleAspectFit` so the COMPLETE product image is visible), with the
-    /// deterministic gradient chip behind it as the loading / pre-load fallback.
-    /// `live == false` (snapshot / demo) or empty `pic` → the gradient chip alone, so
-    /// snapshot baselines stay placeholder-only and byte-identical.
+    /// Square product thumb chip (`24` inside the overlay, `32` in the `below` row).
+    /// `live == true` + non-empty `goods.pic` → the remote product image
+    /// (`RemoteStillImageView`, iOS-14-safe — NOT `AsyncImage`, `scaleAspectFit` so the
+    /// COMPLETE product image is visible), with the deterministic gradient chip behind
+    /// it as the loading / pre-load fallback. `live == false` (snapshot / demo) or
+    /// empty `pic` → the gradient chip alone, so snapshot baselines stay
+    /// placeholder-only and byte-identical.
     @ViewBuilder
-    private func productThumb(_ goods: LBFeaturedGood) -> some View {
+    private func productThumb(_ goods: LBFeaturedGood, size: CGFloat = 24) -> some View {
         if live, let url = productPicURL(goods) {
             ZStack {
-                thumbPlaceholder
+                thumbPlaceholder(size: size)
                 RemoteStillImageView(url: url)
             }
-            .frame(width: 24, height: 24)
+            .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 5))
         } else {
-            thumbPlaceholder
+            thumbPlaceholder(size: size)
         }
     }
 
     /// Deterministic gradient thumb chip (the design's `<ProductMock>` stand-in).
-    private var thumbPlaceholder: some View {
+    private func thumbPlaceholder(size: CGFloat = 24) -> some View {
         RoundedRectangle(cornerRadius: 5)
             .fill(
                 LinearGradient(
@@ -372,7 +497,81 @@ public struct CarouselCardView: View {
                         Color(hex: "#E27D5A") ?? .orange,
                     ]),
                     startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(width: 24, height: 24)
+            .frame(width: size, height: size)
+    }
+
+    // MARK: - Card-bottom product row (`below` mode, LBPCardProductRow)
+
+    /// The `below` slot — laid out UNDER THE TITLE, at the bottom of the card (design
+    /// R17): the surface-styled product row, or — when the video has no featured good —
+    /// an EQUAL-HEIGHT TRANSPARENT SPACER. The spacer (design's
+    /// `aria-hidden` empty div) is what keeps cards in the same carousel row / grid
+    /// cell the same height without drawing an empty frame. `Color.clear` with a fixed
+    /// height, NOT a `Spacer()` (which would absorb the container's free space).
+    @ViewBuilder
+    private var belowProductSlot: some View {
+        if let goods = item.goods {
+            belowProductRow(goods)
+        } else {
+            Color.clear.frame(height: Self.belowRowHeight)
+        }
+    }
+
+    /// Surface-styled product row (`LBPCardProductRow`, widgets.jsx 66-103): a 32×32
+    /// product thumb + the product name (1-line) + the sale price + an optional
+    /// struck-through original price, on an elevated surface with a hairline border.
+    /// Off the dark video backdrop the dark-glass + white-text vocabulary no longer
+    /// holds, so this row uses the design's surface tokens instead (see the token
+    /// constants below). Height is the FIXED `belowRowHeight` — never content-driven.
+    private func belowProductRow(_ goods: LBFeaturedGood) -> some View {
+        HStack(spacing: 7) {
+            productThumb(goods, size: 32)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(goods.name)
+                    .font(.system(size: 11 * theme.fontScale, weight: .semibold))
+                    .foregroundColor(theme.text)
+                    .lineLimit(1)
+                belowPriceLine(goods)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .frame(height: Self.belowRowHeight)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Self.belowRowBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Self.belowRowStroke, lineWidth: 1)))
+    }
+
+    /// The `below` row's price line: sale price + optional struck-through original
+    /// price, baseline-aligned like the design. Both run through the same
+    /// `displayPrice(_:)` de-duplication; an empty `originalPrice` draws nothing.
+    ///
+    /// The sale price takes layout priority: at the design's 132pt card width the two
+    /// prices together can exceed the text column, and the design (HTML) simply lets
+    /// the line overflow. SwiftUI cannot overflow, so without a priority BOTH prices
+    /// truncate to「NT$…」and the card shows no readable price at all. Prioritizing the
+    /// sale price keeps the primary figure intact and lets the secondary struck-through
+    /// original price absorb the squeeze instead.
+    private func belowPriceLine(_ goods: LBFeaturedGood) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(Self.displayPrice(goods.price))
+                .font(.system(size: 11 * theme.fontScale, weight: .heavy))
+                .foregroundColor(Self.saleColor)
+                .lineLimit(1)
+                .layoutPriority(1)
+            if let original = Self.strikePrice(goods.originalPrice) {
+                Text(original)
+                    .font(.system(size: 10 * theme.fontScale, weight: .semibold))
+                    .foregroundColor(Self.textFaint)
+                    .strikethrough()
+                    .lineLimit(1)
+            }
+        }
     }
 
     /// `goods.pic` as a non-empty URL, or nil (empty string → absent). Mirrors the
@@ -384,7 +583,7 @@ public struct CarouselCardView: View {
 
     // MARK: - Title (below thumbnail)
 
-    /// The video title below the thumbnail (LBPCarouselCard 152-157), 1-line clamp,
+    /// The video title below the thumbnail (LBPCarouselCard 218-224), 1-line clamp,
     /// painted with `theme.text` (the card sits on the host surface, not the dark
     /// thumbnail).
     private var title: some View {
@@ -428,6 +627,16 @@ public struct CarouselCardView: View {
         return first.isNumber ? pricePrefix + trimmed : trimmed
     }
 
+    /// The `below` row's struck-through ORIGINAL price, or nil when there is nothing
+    /// to strike. Reuses `displayPrice(_:)` (same currency de-duplication), and maps
+    /// the "trimmed to empty" case to nil so the caller draws no struck-through label
+    /// at all rather than an empty one. Only the `below` row shows an original price —
+    /// the `inside` overlay never has (design `LBPCardProductOverlay`).
+    static func strikePrice(_ raw: String) -> String? {
+        let shown = displayPrice(raw)
+        return shown.isEmpty ? nil : shown
+    }
+
     /// First non-whitespace character of a title, uppercased, for the placeholder
     /// monogram. Falls back to a play glyph stand-in when empty.
     static func monogram(for title: String) -> String {
@@ -438,10 +647,36 @@ public struct CarouselCardView: View {
 
     // MARK: - Decorative design tokens (literal widgets.jsx hex via Color(hex:))
 
-    /// Brand-red LIVE tag surface (`#F03246`, LBPCarouselCard 102).
+    /// Brand-red LIVE tag surface (`#F03246`, LBPCarouselCard 185).
     static let liveRed = Color(hex: "#F03246") ?? .red
-    /// Dark-glass product overlay surface (`rgba(20,20,24,0.78)`, LBPCarouselCard 130).
+    /// Dark-glass product overlay surface (`rgba(20,20,24,0.78)`, LBPCardProductOverlay 111).
     static let productGlass = (Color(hex: "#141418") ?? .black).opacity(0.78)
+
+    // `below` row tokens. iOS `ReferenceUITheme` is a 5-token thin palette with no
+    // surface / sale entries, so — following the existing convention in
+    // `ProductListView` / `WinClaimModalView` / `NotifyRestockSheetView` — the
+    // design's tokens are pinned here as LIGHT-MODE literals from
+    // `design/brands/livebuy/tokens.jsx`. The product NAME deliberately uses the
+    // RESOLVED `theme.text` (the design's `theme.surface.text`), matching how the
+    // card's own `title` is painted.
+    //
+    // NOTE: `ProductListView.saleColor` carries an older `#E0334B`; the value below is
+    // the one `tokens.jsx` currently defines for `theme.sale`. Converging the two is a
+    // separate token-drift question and is NOT done here (it would move existing
+    // family-3 baselines).
+
+    /// Fixed height of the `below` product row AND of its no-goods transparent spacer
+    /// (design `LB_BELOW_ROW_H = 44`). Equal card height comes from THIS constant, not
+    /// from how much content the row happens to hold.
+    static let belowRowHeight: CGFloat = 44
+    /// `theme.surface.bgElev` — the `below` row's elevated fill (light mode).
+    static let belowRowBackground = Color(hex: "#FAFAFA") ?? Color.gray.opacity(0.04)
+    /// `theme.surface.stroke` — the `below` row's hairline border (light mode).
+    static let belowRowStroke = Color(hex: "#ECECEF") ?? Color.gray.opacity(0.2)
+    /// `theme.sale` — the `below` row's sale price.
+    static let saleColor = Color(hex: "#F03246") ?? .red
+    /// `theme.surface.textFaint` — the `below` row's struck-through original price.
+    static let textFaint = Color(hex: "#9A9BA5") ?? Color.gray.opacity(0.5)
 
     // MARK: - Fixed presentation strings
 
@@ -934,16 +1169,31 @@ struct RemoteStillImageView: UIViewRepresentable {
 struct CarouselCardView_Previews: PreviewProvider {
     static var previews: some View {
         let theme = ReferenceUIThemePalette.minimal
-        HStack(alignment: .top, spacing: 12) {
-            // VOD card with a product overlay (duration pill).
-            CarouselCardView(item: .demo(), theme: theme)
-                .previewDisplayName("vod + goods")
-            // LIVE card (red LIVE tag).
-            CarouselCardView(item: .demo(id: "demo-vid-002", title: "早春保養 LIVE", live: true),
-                             theme: theme)
+        Group {
+            HStack(alignment: .top, spacing: 12) {
+                // VOD card with a product overlay (duration pill).
+                CarouselCardView(item: .demo(), theme: theme)
+                    .previewDisplayName("vod + goods")
+                // LIVE card (red LIVE tag).
+                CarouselCardView(item: .demo(id: "demo-vid-002", title: "早春保養 LIVE", live: true),
+                                 theme: theme)
+            }
+            .frame(width: 320, height: 320)
+
+            // product_card modes: `below` bound / `below` unbound (equal-height
+            // transparent spacer) / `hidden`.
+            HStack(alignment: .top, spacing: 12) {
+                CarouselCardView(item: .demo(), theme: theme, productCard: "below")
+                CarouselCardView(item: .demo(id: "demo-vid-003", goods: nil),
+                                 theme: theme, productCard: "below")
+                CarouselCardView(item: .demo(id: "demo-vid-004"), theme: theme,
+                                 productCard: "hidden")
+            }
+            .frame(width: 460, height: 340)
+            .previewDisplayName("product_card modes")
         }
         .padding()
-        .frame(width: 320, height: 320)
+        .background(theme.background)
         .previewLayout(.sizeThatFits)
     }
 }

@@ -129,6 +129,44 @@ public struct LivebuyPlayerConfig {
     /// is unaffected; the LIVE pill is unaffected.
     public var showViewerCount: Bool = true
 
+    /// Whether the PlayerHeader title MAY marquee-scroll when it overflows. Default `true`
+    /// (rb-ios-video-title-scroll) — the backend's own default for `extensions.video_title_scroll`
+    /// (`1`, when the merchant never set it) and this module's existing behavior, so an existing
+    /// host is unchanged.
+    ///
+    /// This is the merchant's `/admin/additional` setting, NOT a host styling preference: read it
+    /// from `sdkConfig.extensions["video_title_scroll"]?.value` and convert it through
+    /// `LBVideoTitleScroll.normalized(_:)` — the single entry point that decides what a malformed
+    /// or absent value means, so all four platforms agree on that boundary. The container never
+    /// reads `sdkConfig.extensions` itself (`extensions` is an opaque raw bag the SDK MUST NOT
+    /// interpret; reading + injecting is the host's job).
+    ///
+    /// ⚠️ `false` means "do not scroll", NOT "do not show" — the backend contract says so
+    /// explicitly. The title keeps its row, its single line, its tail ellipsis and its exact
+    /// height; only the scrolling stops. Whether there is anything to scroll in the first place
+    /// stays 100% content-measured and is unaffected by this flag.
+    public var titleScroll: Bool = true
+
+    /// Whether the product sheets show the「只剩庫存 N 組」remaining-stock caption next to the qty
+    /// stepper. Default `true` (rb-ios-show-stock-caption-toggle) — this module's behavior before
+    /// the flag existed, so an existing host is unchanged.
+    ///
+    /// This is the merchant's `/admin/additional` setting, NOT a host styling preference: read it
+    /// from `sdkConfig.extensions["show_stock"]?.value` and convert it through
+    /// `LBShowStock.normalized(_:)` — the single entry point that decides what a malformed or absent
+    /// value means, so all four platforms agree on that boundary. The container never reads
+    /// `sdkConfig.extensions` itself (`extensions` is an opaque raw bag the SDK MUST NOT interpret;
+    /// reading + injecting is the host's job).
+    ///
+    /// ⚠️ Unlike `titleScroll`, the backend contract does NOT declare a default for `show_stock`
+    /// (it「直接取商家該欄位的值」). The `true` default here is justified by「既有畫面不變」only —
+    /// do NOT restate it as "the backend default is 1".
+    ///
+    /// ⚠️ `false` hides only the remaining-stock COUNT. It is not an availability switch: the
+    /// 「已售完」treatment and the restock sheet's「尚無庫存」are unaffected, and on a sold-out
+    /// product this flag is a no-op (the caption is already hidden).
+    public var showStock: Bool = true
+
     /// Fired when an IN-PLACE switch (hot-pick / watch-next) changes the shown
     /// video, with the NEW video id (R3), so a host can keep its own "current video" state
     /// in sync (e.g. a minimized preview shows the right video). Default `nil`.
@@ -507,6 +545,9 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         // Host-config viewer-count visibility gate (rb-ios-hide-viewer-count-config): a per-shell
         // constant, set once here from `config.showViewerCount` (not template-derived).
         coordinator.model?.showViewerCount = config.showViewerCount
+        // Backend / merchant title-marquee capability gate (rb-ios-video-title-scroll): likewise a
+        // per-shell constant, set once here from `config.titleScroll` (not template-derived).
+        coordinator.model?.titleScroll = config.titleScroll
         // Swipe-navigation in-place switch → report `onVideoSwitched` (swipe-video-switched-notify),
         // parity with the onWatchNext / onPickHot paths so a host-bound video mirror (the minimized
         // floating preview card's `video`) tracks the shown video after a swipe. Update cover AND
@@ -530,6 +571,9 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         // self-corrects once fired.
         coordinator.model?.onLiveStatusChange = { live in config.onLiveStatusChange?(live) }
         coordinator.productModel = ProductSheetsModel(template: template)
+        // Backend / merchant remaining-stock-caption gate (rb-ios-show-stock-caption-toggle):
+        // likewise a per-shell constant, set once here from `config.showStock` (not template-derived).
+        coordinator.productModel?.showStock = config.showStock
         coordinator.feedModel = FeedWinModel(template: template)
         coordinator.momentsModel = MomentsModel(template: template)
         coordinator.composerController = ChatComposerController()

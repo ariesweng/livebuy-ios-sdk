@@ -62,6 +62,14 @@ public final class PlayerShellModel: ObservableObject {
     /// it is set once at build time and never mutates at runtime. `PlayerShellView` feeds it
     /// to `PlayerHeaderBarView`; `false` hides the viewer count even while live / replay.
     public var showViewerCount: Bool = true
+    /// Backend / merchant-driven title-marquee capability gate (rb-ios-video-title-scroll). NOT a
+    /// template-derived value — a per-shell constant sourced from `LivebuyPlayerConfig.titleScroll`
+    /// (default `true`, itself normalized by the host from `extensions.video_title_scroll` via
+    /// `LBVideoTitleScroll.normalized(_:)`), so it is a plain stored property (not `@Published`):
+    /// set once at build time, never mutated at runtime — exactly like `showViewerCount` above.
+    /// `PlayerShellView` feeds it to `PlayerHeaderBarView`; `false` stops the title from
+    /// marquee-scrolling WITHOUT hiding it and WITHOUT changing its line height.
+    public var titleScroll: Bool = true
     /// Subscribe badge state (`DefaultPlayerHeaderState.isSubscribed`).
     @Published public private(set) var isSubscribed: Bool
     /// Share action context URL (`DefaultPlayerHeaderState.shareUrl`).
@@ -320,6 +328,7 @@ public final class PlayerShellModel: ObservableObject {
         viewerCount: Int = 0,
         viewerCountVisible: Bool = true,
         showViewerCount: Bool = true,
+        titleScroll: Bool = true,
         isSubscribed: Bool = false,
         shareUrl: String = "",
         railItems: [LBSideRailItem] = PlayerShellModel.defaultRailItems,
@@ -362,6 +371,7 @@ public final class PlayerShellModel: ObservableObject {
         self.viewerCount = viewerCount
         self.viewerCountVisible = viewerCountVisible
         self.showViewerCount = showViewerCount
+        self.titleScroll = titleScroll
         self.isSubscribed = isSubscribed
         self.shareUrl = shareUrl
         self.railItems = railItems

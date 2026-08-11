@@ -82,7 +82,7 @@ public final class LivebuyUI {
     /// Symmetric with `playerTemplate(for:)`. Use this to bind the host UI to the
     /// widget's host-bindable content view-model — `template.content.current`
     /// (`videos` / `mode` / `currentPage` / `lastPage` / `liveVideo` /
-    /// `widgetColor` / `widgetBgcolor`) — so a host / reference-ui can draw
+    /// `widgetColor` / `widgetBgcolor` / `productCard`) — so a host / reference-ui can draw
     /// `widgets.jsx` (`LBPCarousel` / `LBPVideoShop` / `LBPFloatingWidget` /
     /// `LBPMinimizedWidget`). Register `template.onChange` to be notified (main
     /// thread) whenever the widget content changes and re-read it.

@@ -8,10 +8,12 @@ import LivebuyUI
 //   § "Reference-UI 主題解析合併序 sdkConfig.theme > host options > minimal palette"
 // Design: rb-ios-scaffold design.md D-E.
 //
-// This is the reference-ui (pixel layer) resolved theme. It is INDEPENDENT of
-// core's `widget_color` / `widget_bgcolor` (web-embed colors, raw passthrough) —
-// those two are a SEPARATE concern carried verbatim by core; reference-ui MUST
-// NOT interpret them here (D-E).
+// This is the reference-ui (pixel layer) resolved theme, produced WITHOUT any
+// knowledge of core's `widget_color` / `widget_bgcolor` — this type and its
+// resolver MUST NOT interpret them. The three widget surfaces overlay those two
+// onto a resolved value afterwards via `ReferenceUIWidgetEmbedTheme.derive`
+// (rb-ios-widget-embed-colors); the player / sheets / floating widget keep the
+// underived theme.
 //
 // The minimal-palette fallback values are sourced from the design reference
 // `design/templates/minimal/*.jsx` (see `ReferenceUIThemePalette.minimal`).

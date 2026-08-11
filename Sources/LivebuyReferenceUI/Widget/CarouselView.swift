@@ -52,12 +52,19 @@ import LivebuyUI
 // title; this surface only arranges a row of them under a header.
 //
 // One-way data flow: this surface reads ONLY its passed-in `model` (the read-only
-// `videos` mirror) + the `title` / `subtitle` / `cardWidth` inputs; it never
-// reaches back into `DefaultWidgetTemplate`, holds NO second copy of state, and
-// MUST NOT interpret `widgetColor` / `widgetBgcolor` for the native theme (those
-// are a SEPARATE raw-passthrough track — the theme comes ONLY from
-// `ReferenceUITheme`). It renders correctly with `onTapVideo` nil (so demo /
+// `videos` mirror + the two embed colors) and the `title` / `subtitle` /
+// `cardWidth` inputs; it never reaches back into `DefaultWidgetTemplate` and holds
+// NO second copy of state. It renders correctly with `onTapVideo` nil (so demo /
 // snapshot tests construct it action-free).
+//
+// EMBED COLORS (rb-ios-widget-embed-colors): this IS one of the three widget
+// surfaces that interpret `widgetColor` / `widgetBgcolor` — see the `theme`
+// computed property below, which overlays them onto the caller-supplied
+// `resolvedTheme` via `ReferenceUIWidgetEmbedTheme.derive`. The scope is strictly
+// this surface: `ReferenceUIThemeResolver` still never sees these two values, and
+// the player / sheets / floating widget keep the underived theme. `widget_color`
+// is visible here (the header title / subtitle / footer read `theme.text`);
+// `widget_bgcolor` is NOT — this body paints no background (design D4 note).
 //
 // iOS-14-safe SwiftUI only. `VStack` / `HStack` / `Text` / `Button` /
 // `Image(systemName:)` / `.kerning` are all iOS-13+. NO `AsyncImage` / `.task` /
@@ -74,9 +81,24 @@ public struct CarouselView: View {
     /// (the card-row source). Observed so a live template update re-renders.
     @ObservedObject public var model: WidgetModel
 
-    /// The resolved reference-ui theme. The header title uses `theme.text`, the
-    /// subtitle a dim variant, and the「查看更多 ›」link `theme.accent`.
-    public let theme: ReferenceUITheme
+    /// The theme AS SUPPLIED by the caller (`ReferenceUIThemeResolver` output),
+    /// before this surface overlays the `/sdk/widget` embed colors. Read `theme`,
+    /// not this — every paint site goes through the derived value.
+    private let resolvedTheme: ReferenceUITheme
+
+    /// The theme this surface actually paints with. The header title uses
+    /// `theme.text`, the subtitle a dim variant, and the「查看更多 ›」link
+    /// `theme.accent`.
+    ///
+    /// Derived per render from `resolvedTheme` + the model's `widgetColor` /
+    /// `widgetBgcolor` (`widget-embed-colors`). Computed rather than stored so a
+    /// live `/sdk/widget` update re-derives; when nothing is configured this is
+    /// EQUAL to `resolvedTheme`, keeping existing snapshots byte-identical.
+    public var theme: ReferenceUITheme {
+        ReferenceUIWidgetEmbedTheme.derive(from: resolvedTheme,
+                                           widgetColor: model.widgetColor,
+                                           widgetBgcolor: model.widgetBgcolor)
+    }
 
     /// Section title (heavy, leading). Defaults to the design's「精選影片」. An empty
     /// title AND a nil subtitle hide the entire header row (mirrors widgets.jsx 208).
@@ -110,7 +132,7 @@ public struct CarouselView: View {
         onTapVideo: ((LBVideoItem) -> Void)? = nil
     ) {
         self.model = model
-        self.theme = theme
+        self.resolvedTheme = theme
         self.title = title
         self.subtitle = subtitle
         self.cardWidth = cardWidth
@@ -189,7 +211,12 @@ public struct CarouselView: View {
     /// blank-render trap). `.overlay(_:alignment:)` / `.fixedSize` / `.hidden` are
     /// all iOS-13+.
     private var cardWindow: some View {
-        CarouselCardView(item: cards[0], theme: theme, width: cardWidth)
+        // The MEASURING card must carry the SAME `product_card` value as the real
+        // cards in the strip below: in `below` mode a card is `belowRowHeight` + the
+        // stack spacing taller, and a measuring card left on `inside` would size the
+        // window too short and clip the product row (rb-ios-widget-product-card-modes).
+        CarouselCardView(item: cards[0], theme: theme, width: cardWidth,
+                         productCard: model.productCard)
             .hidden()
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(

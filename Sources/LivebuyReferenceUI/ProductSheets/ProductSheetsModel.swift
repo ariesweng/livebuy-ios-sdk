@@ -134,6 +134,19 @@ public final class ProductSheetsModel: ObservableObject {
     /// locked stepper / variant). Orthogonal to `addToCartFailed` / `addToCartNeedsLogin`.
     @Published public private(set) var addToCartInFlight: Bool
 
+    /// Backend / merchant-driven REMAINING-STOCK-COUNT gate (rb-ios-show-stock-caption-toggle).
+    /// NOT a template-derived snapshot — a per-shell constant sourced from
+    /// `LivebuyPlayerConfig.showStock` (default `true`, itself normalized by the host from
+    /// `extensions.show_stock` via `LBShowStock.normalized(_:)`), so it is a plain stored property
+    /// (not `@Published`): set once at build time, never mutated at runtime, and `refresh(from:)`
+    /// MUST NOT touch it. Exactly the shape `PlayerShellModel.showViewerCount` / `.titleScroll` use.
+    ///
+    /// `ProductSheetsOverlayView` feeds it to BOTH sheet surfaces that draw the「只剩庫存 N 組」
+    /// caption (the `.detail` `ProductDetailSheetView` and the `.addToCart` `AddToCartSheetView`);
+    /// the `.notifyRestock` branch deliberately does NOT receive it (its「尚無庫存」is a sold-out
+    /// state caption, unrelated to this setting).
+    public var showStock: Bool = true
+
     // MARK: - Live binding
 
     /// The bound template, when constructed from a live player. nil for demo /
@@ -212,7 +225,10 @@ public final class ProductSheetsModel: ObservableObject {
         needsVariantSelection: Bool = false,
         addToCartFailed: Bool = false,
         addToCartNeedsLogin: Bool = false,
-        addToCartInFlight: Bool = false
+        addToCartInFlight: Bool = false,
+        // Per-shell CONFIG constant, not a template snapshot (see the property's doc). Kept last so
+        // every existing labelled call site is source-compatible.
+        showStock: Bool = true
     ) {
         self.products = products
         self.introducingProductId = introducingProductId
@@ -228,6 +244,7 @@ public final class ProductSheetsModel: ObservableObject {
         self.addToCartFailed = addToCartFailed
         self.addToCartNeedsLogin = addToCartNeedsLogin
         self.addToCartInFlight = addToCartInFlight
+        self.showStock = showStock
     }
 
     deinit {

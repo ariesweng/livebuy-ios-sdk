@@ -433,12 +433,12 @@ public struct ProductSheetsOverlayView: View {
         }
         // Detail / restock sheet (surfaces 3+4) — migrated from the system `.sheet(item:)`
         // to the shared SheetKit `.lbBottomSheet(item:)` (sheetkit-migrate): SAME item-driven
-        // presentation + `soldOut` split (`presentedSheet(for:)`), now with the shared dim
+        // presentation + `soldOut` split (`presentedSheet(for:actionMode:)`), now with the shared dim
         // scrim + grab handle + drag-to-dismiss + content-sized height (iOS-14/15 height
         // control) instead of the system sheet. `onDismiss` clears the local mirror; the
         // template still owns detail open/close (the `syncPresentation` mirror below).
         .lbBottomSheet(theme: theme, item: $presentingDetail, onDismiss: { dismissDetail() }) { detail in
-            presentedSheet(for: detail)
+            presentedSheet(for: detail, actionMode: actionMode)
         }
         // Keep the presented sheet in lock-step with the model's detail snapshot:
         // the template owns detail open/close, this layer only mirrors it into the
@@ -495,8 +495,16 @@ public struct ProductSheetsOverlayView: View {
     /// Pick the sheet for `detail` by `actionMode` (via `sheetKind`): 補貨鈴鐺 → restock-notify、
     /// 加購鈕 → compact AddToCartSheetView、明細鈕 / 商品名 → full ProductDetailSheetView（售完時
     /// 自帶 CTA 禁用 + 已售完樣式）— all bind the same detail.
+    ///
+    /// `actionMode` is a PARAMETER rather than a read of the `@State` property so this branch table
+    /// — the place where per-branch inputs like `showStock` are handed over — can be exercised
+    /// directly by tests (`presentedSheetForTesting`). Under `ImageRenderer` neither `@State` nor
+    /// `onChange` is driven, so reading the property here would have made every branch untestable,
+    /// and a branch that silently forgets to forward a merchant setting is exactly the class of bug
+    /// this indirection is here to catch (rb-ios-show-stock-caption-toggle).
     @ViewBuilder
-    private func presentedSheet(for detail: LBProductDetailState) -> some View {
+    private func presentedSheet(for detail: LBProductDetailState,
+                                actionMode: ProductSheetActionMode) -> some View {
         switch Self.sheetKind(for: actionMode) {
         case .notifyRestock:
             NotifyRestockSheetView(
@@ -507,6 +515,9 @@ public struct ProductSheetsOverlayView: View {
                 // productId, and goodsTracking is keyed by goodsGpn.
                 noticeEnabled: model.noticeEnabled(forProductId: detail.productId),
                 live: live,
+                // NOTE (rb-ios-show-stock-caption-toggle): `showStock` is DELIBERATELY not passed
+                // here. This sheet's「尚無庫存」is a SOLD-OUT state caption, not the merchant's
+                // remaining-stock count — `extensions.show_stock` MUST NOT be able to hide it.
                 onToggleNotice: { model.toggleNotice(forProductId: detail.productId) },
                 onDismiss: { dismissDetail() },
                 onZoomImage: { zoomedDetail = detail })
@@ -521,6 +532,9 @@ public struct ProductSheetsOverlayView: View {
                 addToCartFailed: model.addToCartFailed,
                 addToCartInFlight: cartLoadingVisible,
                 live: live,
+                // 商家庫存文案設定（rb-ios-show-stock-caption-toggle）——精簡購買 sheet 與下面的
+                // 商品明細 sheet 共用同一段「只剩庫存 N 組」，兩個分支都 MUST 收到旗標。
+                showStock: model.showStock,
                 onSelectVariant: { groupIndex, optionIndex in
                     model.selectVariant(groupIndex: groupIndex, optionIndex: optionIndex)
                 },
@@ -551,6 +565,9 @@ public struct ProductSheetsOverlayView: View {
                 isLive: model.isLive,
                 // 商品說明（`brief`）由 products 快照以 productId 解析（問題 4，rb-ios-product-sheet-detail-polish）。
                 brief: model.brief(forProductId: detail.productId),
+                // 商家庫存文案設定（rb-ios-show-stock-caption-toggle）——與上面的 `.addToCart` 分支
+                // 共用同一段「只剩庫存 N 組」（`qtyRow` 與 `presentation` 正交），兩個分支都 MUST 傳。
+                showStock: model.showStock,
                 onSelectVariant: { groupIndex, optionIndex in
                     model.selectVariant(groupIndex: groupIndex, optionIndex: optionIndex)
                 },
@@ -565,6 +582,20 @@ public struct ProductSheetsOverlayView: View {
                 onDismiss: { dismissDetail() },
                 onZoomImage: { zoomedDetail = detail })
         }
+    }
+
+    /// Test-only hook exposing the SAME branch table `body`'s sheet presenter renders, for a chosen
+    /// `actionMode` (rb-ios-show-stock-caption-toggle). Lets tests assert, PER BRANCH, that the
+    /// container really hands the merchant's `showStock` to the sheet it builds — the failure mode
+    /// where only the branch someone happened to look at gets wired.
+    ///
+    /// MUST NOT be called from production code, and MUST keep forwarding to the very same
+    /// `presentedSheet(for:actionMode:)` — a parallel copy would decouple the assertion from what
+    /// the presenter actually builds.
+    @ViewBuilder
+    func presentedSheetForTesting(for detail: LBProductDetailState,
+                                  actionMode: ProductSheetActionMode) -> some View {
+        presentedSheet(for: detail, actionMode: actionMode)
     }
 
     // NOTE on `goodsGpn` for the restock sheet (D-5): `LBProductDetailState` mirrors

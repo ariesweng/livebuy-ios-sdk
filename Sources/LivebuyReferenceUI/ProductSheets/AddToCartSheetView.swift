@@ -34,6 +34,12 @@ public struct AddToCartSheetView: View {
     public let addToCartInFlight: Bool
     /// `false` (snapshot / demo) → gradient placeholder; `true` (runtime) → real photo.
     public let live: Bool
+    /// Backend / merchant-driven REMAINING-STOCK-COUNT gate (rb-ios-show-stock-caption-toggle) —
+    /// FORWARDED verbatim to the wrapped `ProductDetailSheetView`, which owns the actual gate
+    /// (`showsStockCaption`). This wrapper draws no stock copy of its own; it exists so the compact
+    /// 加入購物車 sheet honours the merchant's `extensions.show_stock` setting exactly like the full
+    /// 商品明細 sheet does. Default `true` → snapshot-neutral.
+    public let showStock: Bool
 
     private let onSelectVariant: ((_ groupIndex: Int, _ optionIndex: Int) -> Void)?
     private let onSetQty: ((Int) -> Void)?
@@ -56,6 +62,7 @@ public struct AddToCartSheetView: View {
         addToCartFailed: Bool,
         addToCartInFlight: Bool = false,
         live: Bool = false,
+        showStock: Bool = true,
         onSelectVariant: ((_ groupIndex: Int, _ optionIndex: Int) -> Void)? = nil,
         onSetQty: ((Int) -> Void)? = nil,
         onInc: (() -> Void)? = nil,
@@ -74,6 +81,7 @@ public struct AddToCartSheetView: View {
         self.addToCartFailed = addToCartFailed
         self.addToCartInFlight = addToCartInFlight
         self.live = live
+        self.showStock = showStock
         self.onSelectVariant = onSelectVariant
         self.onSetQty = onSetQty
         self.onInc = onInc
@@ -96,6 +104,9 @@ public struct AddToCartSheetView: View {
             addToCartInFlight: addToCartInFlight,
             presentation: .addToCart,
             live: live,
+            // 商家的庫存文案設定原樣轉發（rb-ios-show-stock-caption-toggle）——閘在被包裝的
+            // `ProductDetailSheetView.qtyRow`，本 wrapper 不自行判斷。
+            showStock: showStock,
             onSelectVariant: onSelectVariant,
             onSetQty: onSetQty,
             onInc: onInc,
@@ -117,7 +128,10 @@ public extension AddToCartSheetView {
 
     /// A deterministic demo add-to-cart sheet WITH a variant group (顏色) + in-stock qty,
     /// pre-add (no guards). Mirrors `ProductDetailSheetView.demo`'s fixtures, action-free.
-    static func demo(theme: ReferenceUITheme) -> AddToCartSheetView {
+    ///
+    /// `showStock` defaults to `true`, so an existing `demo(theme:)` call renders byte-identically
+    /// to before this parameter existed (rb-ios-show-stock-caption-toggle).
+    static func demo(theme: ReferenceUITheme, showStock: Bool = true) -> AddToCartSheetView {
         AddToCartSheetView(
             theme: theme,
             detail: ProductSheetsModel.demoDetail(),
@@ -125,7 +139,8 @@ public extension AddToCartSheetView {
             qty: ProductSheetsModel.demoQtyInStock,
             cartCount: 1,
             needsVariantSelection: false,
-            addToCartFailed: false)
+            addToCartFailed: false,
+            showStock: showStock)
     }
 }
 

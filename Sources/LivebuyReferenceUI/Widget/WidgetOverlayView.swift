@@ -6,8 +6,8 @@ import LivebuyUI
 //
 // Spec: `reference-ui-rendering/spec.md` (family-5 widget surfaces).
 // Design: rb-ios-widget design.md §"渲染計畫" + §"守住的不變式" +
-//          `design/templates/minimal/widgets.jsx` (LBPCarousel / LBPVideoShop /
-//          LBPFloatingWidget) + `sdk-components.jsx` (LBPMinimizedWidget).
+//          `design/templates/minimal/widgets.jsx` (LBPCarousel / LBPVideoShop) +
+//          `sdk-components.jsx` (LBPFloatingWidget / LBPMinimizedWidget).
 //
 // The top-level family-5 container. It reads a `WidgetModel` (republished from a
 // live `DefaultWidgetTemplate` or constructed deterministically) and renders the
@@ -105,9 +105,14 @@ import LivebuyUI
 // Rules every surface agent honours:
 //   • A surface reads ONLY its passed-in `model` / values — it MUST NOT reach back
 //     into `DefaultWidgetTemplate` or hold a second copy of state (one-way data
-//     flow). It MUST NOT interpret `widgetColor` / `widgetBgcolor` for the native
-//     theme (those are a SEPARATE raw-passthrough track — theme comes ONLY from
-//     `ReferenceUITheme`).
+//     flow). THIS container MUST NOT interpret `widgetColor` / `widgetBgcolor` —
+//     it hands the underived `theme` down unchanged. The three embedded surfaces
+//     (`CarouselView` / `ScrollableCarouselView` / `VideoShopGridView`) derive
+//     their own painted theme from it internally via
+//     `ReferenceUIWidgetEmbedTheme.derive` (rb-ios-widget-embed-colors), so the
+//     derivation covers BOTH entry paths (this container and `LivebuyWidget`)
+//     without either of them knowing about it. `FloatingWidgetView` is
+//     deliberately excluded.
 //   • Card / live-card tap → `onTapVideo(item)` (forwarded host-wired). Floating /
 //     minimized close → `onClose`. Minimized tap → `onExpand`. Grid bottom →
 //     `onLoadMore`. NO core simulate* / template intent calls here.
