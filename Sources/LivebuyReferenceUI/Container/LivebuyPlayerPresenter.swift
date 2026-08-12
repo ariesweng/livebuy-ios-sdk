@@ -14,11 +14,13 @@ import LivebuyUI
 // host re-implements the in-app floating preview itself.
 //
 // This modifier PROMOTES that wiring into the package: `someHostView.livebuyPlayer(video:
-// $presented)` gives a host a full-screen turnkey player that collapses to a bottom-right
-// `FloatingWidgetView` on minimize — in ONE line. It composes ONLY existing pieces
-// (`LivebuyPlayer` + the family-5 `FloatingWidgetView`); it adds NO view-model, NO pixels,
-// and does NOT change `LivebuyPlayer`. Dependency direction stays one-way
-// `reference-ui → template → core`.
+// $presented)` gives a host a full-screen turnkey player that collapses to a floating
+// `FloatingWidgetView` on minimize — in ONE line. The resting corner defaults to bottom-right
+// and, since rb-ios-floating-widget-position, can be switched to bottom-left via the `position`
+// parameter (host-injected raw `extensions.floating_setting.position`). It composes ONLY
+// existing pieces (`LivebuyPlayer` + the family-5 `FloatingWidgetView` + the sibling
+// `LivebuyLiveEntry`'s `LBFloatingEntryPosition`); it adds NO view-model, NO pixels, and does
+// NOT change `LivebuyPlayer`. Dependency direction stays one-way `reference-ui → template → core`.
 
 /// The presentation phase of a collapsible player, derived purely from the host binding +
 /// the minimized flag (extracted for unit testing — internal-testability).
@@ -27,7 +29,8 @@ public enum CollapsiblePlayerPhase: Equatable {
     case closed
     /// Full-screen player presented.
     case full
-    /// Collapsed to the bottom-right floating preview.
+    /// Collapsed to the floating preview (resting corner driven by `position`, default
+    /// bottom-right).
     case floating
 }
 
@@ -86,39 +89,56 @@ func shouldAutoRestoreOnBindingChange(
 }
 
 /// Clamp the floating preview card's committed-plus-live drag offset so the card can be
-/// dragged to reposition but never pushed off-screen. The card is anchored bottom-right
-/// (`alignment: .bottomTrailing` + `bottomTrailingInset` padding), so its resting offset is
-/// `.zero`: it cannot move further right / down (that would go off-screen → upper bound 0),
-/// and it can move left / up only until the card's far edge reaches the opposite inset
-/// (lower bound, negative). Extracted as a pure function (internal-testability) so the drag
-/// bounds are unit-testable without UIKit gesture plumbing.
+/// dragged to reposition but never pushed off-screen. The card is anchored at the resting
+/// corner given by `position` (bottom-right by default: `alignment: .bottomTrailing` +
+/// `inset` padding; bottom-left when `position == .leftBottom`), so its resting offset is
+/// `.zero`. At the bottom-right anchor it cannot move further right / down (that would go
+/// off-screen → upper bound 0) and can move left / up only until the card's far edge reaches
+/// the opposite inset (lower bound, negative) — `x`/`y` ∈ `[-span, 0]`. At the bottom-left
+/// anchor the same geometry is mirrored horizontally — `x` ∈ `[0, span]` (it rests at the left
+/// edge, so it can only move right); `y` is unchanged (both anchors rest at the bottom).
+/// Extracted as a pure function (internal-testability) so the drag bounds are unit-testable
+/// without UIKit gesture plumbing. Geometrically mirrors the sibling `LivebuyLiveEntry`'s
+/// `lbLiveEntryClampOffset(...position:)` (rb-ios-floating-widget-position) — same `span`
+/// formula, same two-anchor shape — kept as a separate function per-container rather than
+/// extracted into a shared module (see design.md D3 for why).
 ///
 /// - Parameters:
 ///   - committed: the already-accumulated offset (committed on the previous drag end).
 ///   - translation: the live drag translation being applied this gesture.
 ///   - cardSize: the floating card's rendered size.
 ///   - containerSize: the presenter overlay container's size.
-///   - inset: the bottom-trailing resting padding (matches the overlay padding).
+///   - inset: the resting padding (matches the overlay padding) — `width` applies to whichever
+///     edge `position` anchors to (trailing for `.rightBottom`, leading for `.leftBottom`).
+///   - position: the resting corner. DEFAULT `.rightBottom` — existing call sites and existing
+///     tests are byte-for-byte unaffected by this parameter's addition.
 /// - Returns: the clamped `committed + translation` offset.
 public func clampFloatingOffset(
     committed: CGSize,
     translation: CGSize,
     cardSize: CGSize,
     containerSize: CGSize,
-    inset: CGSize
+    inset: CGSize,
+    position: LBFloatingEntryPosition = .rightBottom
 ) -> CGSize {
     let desiredX = committed.width + translation.width
     let desiredY = committed.height + translation.height
 
-    // Anchored bottom-right: x/y == 0 is the resting position (hard upper bound — can't go
-    // further off the right/bottom edge). The most-negative offset keeps the card's far
-    // (left/top) edge inside the container: the card occupies `cardSize` plus `inset` from
-    // the right/bottom, so it can travel left/up by `containerSize - cardSize - inset`.
-    let minX = min(0, -(containerSize.width - cardSize.width - inset.width))
-    let minY = min(0, -(containerSize.height - cardSize.height - inset.height))
+    // Shared "how far can the card travel" magnitude for both anchors: the card occupies
+    // `cardSize` plus `inset` from its resting edge, so it can travel by
+    // `containerSize - cardSize - inset` before its far edge would exit the container.
+    // `max(0, …)` absorbs the degenerate case (card + inset larger than the container) by
+    // clamping the span to zero — both anchors then resolve to "can't move" rather than a
+    // sign flip.
+    let spanX = max(0, containerSize.width - cardSize.width - inset.width)
+    let spanY = max(0, containerSize.height - cardSize.height - inset.height)
 
-    let clampedX = max(minX, min(0, desiredX))
-    let clampedY = max(minY, min(0, desiredY))
+    let clampedX: CGFloat
+    switch position {
+    case .rightBottom: clampedX = max(-spanX, min(0, desiredX))
+    case .leftBottom:  clampedX = min(spanX, max(0, desiredX))
+    }
+    let clampedY = max(-spanY, min(0, desiredY))
     return CGSize(width: clampedX, height: clampedY)
 }
 
@@ -148,7 +168,8 @@ func floatingCardDisplayItem(_ video: LBVideoItem, isLive: Bool) -> LBVideoItem 
 }
 
 /// Presents the turnkey `LivebuyPlayer` full-screen for the bound `video`, with a built-in
-/// minimize→bottom-right floating preview. Attach with `View.livebuyPlayer(video:…)`.
+/// minimize→floating preview (resting corner defaults to bottom-right, switchable to bottom-left
+/// via `position`). Attach with `View.livebuyPlayer(video:…)`.
 public struct LivebuyPlayerPresenter: ViewModifier {
 
     /// The host's session source of truth: non-nil → present; nil → fully closed. The
@@ -165,13 +186,26 @@ public struct LivebuyPlayerPresenter: ViewModifier {
     /// `sdkConfig.theme > host options > minimal palette` order `LivebuyPlayer` uses.
     let themeOverride: ReferenceUITheme?
 
+    /// The floating preview card's initial resting corner — the **raw** wire value the host
+    /// reads from `POST /sdk/config`'s `data.extensions.floating_setting.position` and passes
+    /// straight through (iOS `extensions` values are `AnyEquatable`, need one `.value` unwrap —
+    /// see the `sdk-config` capability). DEFAULT `nil` → normalizes to the bottom-right corner,
+    /// i.e. this presenter's existing resting position, so **existing host call sites need zero
+    /// changes and keep their existing behaviour** (including the existing snapshot baseline).
+    /// The presenter MUST NOT read `sdkConfig.extensions` itself and MUST NOT interpret backend
+    /// semantics — the same boundary the sibling drop-in `LivebuyLiveEntry` already enforces for
+    /// its own `config.position`. Normalization reuses `LivebuyLiveEntry.swift`'s existing public
+    /// `LBFloatingEntryPosition` / `normalized(_:)` (rb-ios-floating-widget-position) — this type
+    /// is NOT redefined here, so the two floating surfaces share one fallback boundary.
+    let position: String?
+
     /// Full vs floating. `video == nil` is fully closed (this flag is only meaningful while
     /// a session exists). Reset on close.
     @State private var isMinimized: Bool = false
 
     /// The accumulated drag offset of the floating preview, committed on each drag end.
-    /// `.zero` is the bottom-right resting position. Reset on close (so the next session
-    /// re-opens at the default corner).
+    /// `.zero` is the resting position at the `resolvedPosition` corner (bottom-right by
+    /// default). Reset on close (so the next session re-opens at the default corner).
     @State private var committedOffset: CGSize = .zero
 
     /// The live drag translation while a drag is in progress (added to `committedOffset`).
@@ -209,9 +243,10 @@ public struct LivebuyPlayerPresenter: ViewModifier {
             // RESUME, not a fresh `load`. (The prior `fullScreenCover` dismissed on minimize,
             // releasing the VC and restarting playback on restore.)
             .overlay(playerLayer)
-            // Bottom-right floating preview while minimized. A full-bleed `GeometryReader`
-            // layer anchors the card bottom-right and applies the (clamped) drag offset, so
-            // the user can drag it anywhere on screen. iOS-14-safe overlay form.
+            // Floating preview while minimized, anchored at the `resolvedPosition` corner
+            // (default bottom-right). A full-bleed `GeometryReader` layer anchors the card at
+            // that corner and applies the (clamped) drag offset, so the user can drag it
+            // anywhere on screen. iOS-14-safe overlay form.
             .overlay(floatingPreviewLayer)
             // A newly-bound video (different id) while minimized → close the floating preview
             // and re-present full-screen for the new video (e.g. tapping another carousel
@@ -331,12 +366,24 @@ public struct LivebuyPlayerPresenter: ViewModifier {
         return c
     }
 
-    /// Resting bottom-right padding of the floating card (matches the historical anchor —
-    /// keeps the default position pixel-identical so snapshot baselines are unchanged).
+    /// Resting bottom-right (or bottom-left, see `resolvedPosition`) padding of the floating
+    /// card. The bottom-right value matches the historical anchor — keeps the default position
+    /// pixel-identical so snapshot baselines are unchanged.
     private static let floatingInset = CGSize(width: 12, height: 24)
 
-    /// Full-bleed layer that anchors the floating preview card bottom-right and applies the
-    /// (clamped) drag offset. A `GeometryReader` provides the container size for clamping.
+    /// The normalized resting corner — the **only** place `LBFloatingEntryPosition.normalized(_:)`
+    /// is called from this type. `floatingPreviewLayer` / `floatingCard(_:)` / `dragGesture(...)`
+    /// MUST read this computed property rather than comparing `position` (the raw string) directly.
+    private var resolvedPosition: LBFloatingEntryPosition { .normalized(position) }
+
+    /// Test-only read window (internal-testability; NOT public, host apps never see this): lets a
+    /// unit test read the resolved resting corner off a freshly-constructed presenter without
+    /// mounting SwiftUI — the same shape as `LivebuyLiveEntry.appearedForTesting`.
+    var resolvedPositionForTesting: LBFloatingEntryPosition { resolvedPosition }
+
+    /// Full-bleed layer that anchors the floating preview card at the `resolvedPosition` corner
+    /// and applies the (clamped) drag offset. A `GeometryReader` provides the container size for
+    /// clamping.
     @ViewBuilder
     private var floatingPreviewLayer: some View {
         if isMinimized, let v = video {
@@ -345,8 +392,11 @@ public struct LivebuyPlayerPresenter: ViewModifier {
                     .offset(
                         x: committedOffset.width + dragTranslation.width,
                         y: committedOffset.height + dragTranslation.height)
-                    // Anchor the card bottom-right; the offset moves it from that resting spot.
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    // Anchor the card at the resolved resting corner; the offset moves it from
+                    // that resting spot.
+                    .frame(
+                        maxWidth: .infinity, maxHeight: .infinity,
+                        alignment: resolvedPosition == .leftBottom ? .bottomLeading : .bottomTrailing)
                     // `.highPriorityGesture` (NOT `.simultaneousGesture`): once the drag is
                     // RECOGNIZED (movement ≥ `minimumDistance: 8`) it OWNS the touch sequence, so
                     // releasing after a reposition does NOT also fire the card's restore tap / the
@@ -389,7 +439,7 @@ public struct LivebuyPlayerPresenter: ViewModifier {
                 }
             })
         return config.design.floatingPlayerCard(context)
-            .padding(.trailing, Self.floatingInset.width)
+            .padding(resolvedPosition == .leftBottom ? .leading : .trailing, Self.floatingInset.width)
             .padding(.bottom, Self.floatingInset.height)
             .background(
                 GeometryReader { proxy in
@@ -414,7 +464,8 @@ public struct LivebuyPlayerPresenter: ViewModifier {
                     translation: value.translation,
                     cardSize: floatingCardSize,
                     containerSize: containerSize,
-                    inset: Self.floatingInset)
+                    inset: Self.floatingInset,
+                    position: resolvedPosition)
                 dragTranslation = .zero
             }
     }
@@ -440,7 +491,8 @@ private struct FloatingCardSizeKey: PreferenceKey {
 
 public extension View {
     /// Present the turnkey `LivebuyPlayer` full-screen for the bound `video`, with a
-    /// built-in minimize→bottom-right floating preview (`FloatingWidgetView`). ONE line:
+    /// built-in minimize→floating preview (`FloatingWidgetView`, resting corner defaults to
+    /// bottom-right and is switchable via `position`). ONE line:
     ///
     ///     someHostView.livebuyPlayer(video: $presentedVideo, config: cfg)
     ///
@@ -458,11 +510,19 @@ public extension View {
     /// player VC stays alive across minimize/restore, so playback continues uninterrupted; it is
     /// NOT a fresh `load` / re-present. The floating card is a minimized card representation,
     /// not OS PiP.
+    ///
+    /// `position` is the **raw** wire value the host reads from `POST /sdk/config`'s
+    /// `data.extensions.floating_setting.position` (`"left_bottom"` / `"right_bottom"`) and
+    /// passes straight through — DEFAULT `nil` normalizes to the existing bottom-right resting
+    /// corner, so existing call sites need zero changes. This SDK does not read `sdkConfig`
+    /// itself (rb-ios-floating-widget-position); see `LivebuyPlayerPresenter.position`.
     func livebuyPlayer(
         video: Binding<LBVideoItem?>,
         config: LivebuyPlayerConfig = LivebuyPlayerConfig(),
-        theme: ReferenceUITheme? = nil
+        theme: ReferenceUITheme? = nil,
+        position: String? = nil
     ) -> some View {
-        modifier(LivebuyPlayerPresenter(video: video, config: config, themeOverride: theme))
+        modifier(LivebuyPlayerPresenter(
+            video: video, config: config, themeOverride: theme, position: position))
     }
 }

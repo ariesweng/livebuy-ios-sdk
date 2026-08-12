@@ -57,14 +57,16 @@ import LivebuyUI
 // NO second copy of state. It renders correctly with `onTapVideo` nil (so demo /
 // snapshot tests construct it action-free).
 //
-// EMBED COLORS (rb-ios-widget-embed-colors): this IS one of the three widget
-// surfaces that interpret `widgetColor` / `widgetBgcolor` — see the `theme`
-// computed property below, which overlays them onto the caller-supplied
-// `resolvedTheme` via `ReferenceUIWidgetEmbedTheme.derive`. The scope is strictly
-// this surface: `ReferenceUIThemeResolver` still never sees these two values, and
-// the player / sheets / floating widget keep the underived theme. `widget_color`
-// is visible here (the header title / subtitle / footer read `theme.text`);
-// `widget_bgcolor` is NOT — this body paints no background (design D4 note).
+// EMBED COLORS (rb-ios-widget-embed-colors, background painting added by
+// rb-ios-carousel-bgcolor): this IS one of the three widget surfaces that
+// interpret `widgetColor` / `widgetBgcolor` — see the `theme` computed property
+// below, which overlays them onto the caller-supplied `resolvedTheme` via
+// `ReferenceUIWidgetEmbedTheme.derive`. The scope is strictly this surface:
+// `ReferenceUIThemeResolver` still never sees these two values, and the player /
+// sheets / floating widget keep the underived theme. `widget_color` is visible
+// here (the header title / subtitle / footer read `theme.text`); `widget_bgcolor`
+// is ALSO visible — the root `VStack` paints `theme.background`, mirroring
+// `VideoShopGridView`'s existing `.background(theme.background)`.
 //
 // iOS-14-safe SwiftUI only. `VStack` / `HStack` / `Text` / `Button` /
 // `Image(systemName:)` / `.kerning` are all iOS-13+. NO `AsyncImage` / `.task` /
@@ -154,6 +156,7 @@ public struct CarouselView: View {
             cardRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.background)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.widgetCarousel)
     }

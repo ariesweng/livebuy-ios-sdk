@@ -5,6 +5,25 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.0] - 2026-08-12
+
+> **Minor.** 兩項 reference-ui 新增設定面，皆 additive，無移除、無破壞性變更。**iOS + Android
+> 兩端 lockstep**；React Native / Flutter 不在此列車（見
+> [`livebuy-android-sdk/CHANGELOG.md`](../livebuy-android-sdk/CHANGELOG.md#460---2026-08-12)
+> 的 Android 對照段）。
+
+### Added
+
+- **`View.livebuyPlayer(video:config:theme:position:)` 新增 `position: String?` 參數**
+  （DEFAULT `nil` → 右下角，即既有落點）。縮小後出現的懸浮預覽卡先前恆固定右下角，現在依此
+  參數比照「現正直播」入口（`LivebuyLiveEntryConfig.position`）換邊——複用同一套
+  `LBFloatingEntryPosition.normalized(_:)` 正規化邏輯（逐字等於 `"left_bottom"` 才是左下，其餘
+  一律右下），拖曳夾限邊界同步隨落點換邊。未注入時渲染與現況逐位元組相同。
+- **`CarouselView`（輪播 widget）根容器補畫 `widget_bgcolor` 衍生後的背景色**，比照既有
+  `VideoShopGridView` 語意：合法 hex 覆寫背景；缺值 / 空字串 / 不可解析維持既有背景不變，不
+  引入新預設色。`widget_color`（文字色反轉）與背景色可同時獨立生效。既有未設定情境的 golden
+  維持 byte-identical。
+
 ## [4.5.0] - 2026-08-12
 
 > **Minor — 一條 BREAKING 移除，但實務衝擊視為零（見下方說明）。** 本版新增一批 reference-ui 視覺

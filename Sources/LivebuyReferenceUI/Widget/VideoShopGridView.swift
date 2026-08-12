@@ -67,9 +67,10 @@ import LivebuyUI
 // computed property below, which overlays them onto the caller-supplied
 // `resolvedTheme` via `ReferenceUIWidgetEmbedTheme.derive`. The scope is strictly
 // this surface: `ReferenceUIThemeResolver` still never sees these two values, and
-// the player / sheets / floating widget keep the underived theme. This is the ONE
-// widget surface whose body paints `theme.background`, so it is where
-// `widget_bgcolor` is actually visible (design D4 note).
+// the player / sheets / floating widget keep the underived theme. This surface's
+// body paints `theme.background` directly, so `widget_bgcolor` is visible here —
+// `CarouselView` also paints it (rb-ios-carousel-bgcolor); this is no longer the
+// ONE surface that does.
 //
 // iOS-14-safe SwiftUI only. `VStack` / `HStack` / `Text` / `Button` /
 // `Image(systemName:)` / `RoundedRectangle` are all iOS-13+. No `.task` /
@@ -98,10 +99,11 @@ public struct VideoShopGridView: View {
     /// paint with their own theme-driven title color (via `CarouselCardView`).
     ///
     /// Derived per render from `resolvedTheme` + the model's `widgetColor` /
-    /// `widgetBgcolor` (`widget-embed-colors`). This is the ONE widget surface whose
-    /// body paints `theme.background` directly, so `widget_bgcolor` is visible here.
-    /// When nothing is configured this is EQUAL to `resolvedTheme`, keeping existing
-    /// snapshots byte-identical.
+    /// `widgetBgcolor` (`widget-embed-colors`). This surface's body paints
+    /// `theme.background` directly, so `widget_bgcolor` is visible here —
+    /// `CarouselView` also paints it (rb-ios-carousel-bgcolor). When nothing is
+    /// configured this is EQUAL to `resolvedTheme`, keeping existing snapshots
+    /// byte-identical.
     public var theme: ReferenceUITheme {
         ReferenceUIWidgetEmbedTheme.derive(from: resolvedTheme,
                                            widgetColor: model.widgetColor,
