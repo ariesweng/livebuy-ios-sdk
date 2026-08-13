@@ -29,10 +29,18 @@ import LivebuyUI
 //     lesson; a wrapper snapshot would be a stable blank false-green, so
 //     wrappers are covered by BEHAVIOR tests instead and MUST NOT get a
 //     baseline).
-//   • ZERO NEW PIXELS: the body composes the existing snapshot-baselined
+//   • ZERO NEW PIXEL CONTENT: the body composes the existing snapshot-baselined
 //     sub-surfaces (`CarouselHeaderView` / `CarouselRowView`) plus layout
-//     modifiers ONLY — no new Text / Image / shape / fill. Visual correctness
-//     stays pinned by the sub-surfaces' own baselines.
+//     modifiers — no new Text / Image / shape. ONE narrow, explicit exception
+//     (rb-ios-scrollable-carousel-bgcolor): the root container paints
+//     `.background(theme.background)`, mirroring `CarouselView` /
+//     `VideoShopGridView`'s existing `widget_bgcolor` fill. This is NOT a new
+//     design element — `theme` is the SAME derived value already piped into
+//     the sub-surfaces below (their text / accent colors), just consumed a
+//     second time as a fill. Visual correctness beyond that one fill stays
+//     pinned by the sub-surfaces' own baselines; the fill itself cannot be
+//     baselined (wrapper tier, see above) and is covered by a BEHAVIOR test
+//     that samples the actual rendered pixel color instead.
 //   • Interactions pass through UNTOUCHED as host-wired closures (nil → inert,
 //     demo-constructible). `onSeeMore` goes STRAIGHT to the host (no
 //     `videos.first` proxy — this is the host's real see-all entry point).
@@ -48,11 +56,14 @@ import LivebuyUI
 //
 // iOS-14-safe SwiftUI only (`ScrollView(showsIndicators:)` is iOS-13+).
 
-/// The drop-in scrolling carousel (wrapper tier — zero new pixels): the
-/// `CarouselHeaderView` FIXED above a wrapper-owned
-/// `ScrollView(.horizontal, showsIndicators: false)` around a `CarouselRowView`
-/// rendering ALL `model.videos`. Host wires `onSeeMore` / `onTapVideo`; nil
-/// closures render an inert demo form. Never snapshot-baselined — behavior-tested.
+/// The drop-in scrolling carousel (wrapper tier): the `CarouselHeaderView`
+/// FIXED above a wrapper-owned `ScrollView(.horizontal, showsIndicators: false)`
+/// around a `CarouselRowView` rendering ALL `model.videos`, with the root
+/// container painting `theme.background` (`widget_bgcolor`,
+/// rb-ios-scrollable-carousel-bgcolor — the one narrow exception to the
+/// zero-new-pixel-content rule, see the header comment). Host wires
+/// `onSeeMore` / `onTapVideo`; nil closures render an inert demo form. Never
+/// snapshot-baselined — behavior-tested.
 public struct ScrollableCarouselView: View {
 
     /// The read-only widget content snapshot, passed through to the sub-surfaces.
@@ -136,6 +147,15 @@ public struct ScrollableCarouselView: View {
                     onTapVideo: onTapVideo)
             }
         }
+        // `widget_bgcolor` fill (rb-ios-scrollable-carousel-bgcolor), mirroring
+        // `CarouselView`'s modifier order (frame THEN background) so the fill
+        // covers the full proposed width, not just the content's intrinsic
+        // width — explicit rather than relying on the header's `Spacer` /
+        // the horizontal `ScrollView` already being width-flexible. See the
+        // header comment above for why this one fill is not a wrapper-tier
+        // pixel-content violation.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.background)
     }
 }
 

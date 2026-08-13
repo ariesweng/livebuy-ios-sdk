@@ -5,6 +5,23 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.1] - 2026-08-13
+
+> **Patch.** 補齊一個既有背景繪製語意的缺口，無新增符號、無破壞性變更。**iOS + Android
+> 兩端 lockstep**；React Native / Flutter 不在此列車（見
+> [`livebuy-android-sdk/CHANGELOG.md`](../livebuy-android-sdk/CHANGELOG.md#461---2026-08-13)
+> 的 Android 對照段）。
+
+### Fixed
+
+- **`ScrollableCarouselView`（turnkey 全量水平捲動輪播，`LivebuyWidget` drop-in 容器實際渲染的
+  表面）根容器補畫 `widget_bgcolor` 衍生後的背景色**，比照既有「窗口式」`CarouselView`（進階
+  host escape hatch）與 `VideoShopGridView` 語意：合法 hex 覆寫背景；缺值 / 空字串 / 不可解析
+  維持既有背景不變，不引入新預設色。`widget_color`（文字色反轉）與背景色可同時獨立生效。這是
+  v4.6.0 讓「窗口式」`CarouselView` 補畫背景時刻意排除的缺口（該表面是 wrapper tier，內部擁有
+  `ScrollView`，不能取得 golden PNG baseline，改用像素取樣行為測試驗收）——本版補上後，drop-in
+  容器實際渲染的輪播 widget 才真正會顯示商家設定的背景色。
+
 ## [4.6.0] - 2026-08-12
 
 > **Minor.** 兩項 reference-ui 新增設定面，皆 additive，無移除、無破壞性變更。**iOS + Android
