@@ -1267,6 +1267,49 @@ public struct PlayerShellView: View {
     /// （往左縮短）避讓浮動袋，浮動袋本身不動（rb-ios-vod-now-introducing-no-bag-overlap）。
     private static let floatingBagClearance: CGFloat = 68
 
+    // MARK: - CC caption overlay gate (rb-ios-replay-caption-overlay-fix)
+    //
+    // BUG: the real VTT/CC caption (`CaptionOverlayView`, fed by `effectiveCaption`) used to be
+    // gated on `!usesLiveChrome` (`!isLive && !isFinishedLiveReplay`) — i.e. it only ever rendered
+    // in the pure-VOD branch. A finished-live REPLAY (`isFinishedLiveReplay == true`) falls into
+    // the `usesLiveChrome == true` branch, which instead renders the completely different,
+    // host-supplied STATIC `LBLiveHostCaption` (see `PlayerShellModel`'s GAP NOTE — there is no
+    // public host-caption view-model, and no `PlayerShellView` call site ever feeds it real data
+    // in production) — so toggling CC during a replay flipped `model.subtitleEnabled` but no
+    // caption text ever appeared. Fix: gate on `!isLive` instead, which covers pure VOD AND
+    // finished-live replay; only a GENUINELY live broadcast in progress (which also has no
+    // `subtitle_url` in practice) suppresses it.
+
+    /// PURE: whether the VTT/CC caption overlay (`CaptionOverlayView`) SHOULD render for the given
+    /// snapshot of flags. Unit-testable without rendering a view (mirrors the
+    /// `showsPlaybackProgressBar` pure-function precedent above).
+    static func showsCaptionOverlay(isLive: Bool, subtitleEnabled: Bool, hasCaption: Bool,
+                                     isScrubbing: Bool, cleanMode: Bool) -> Bool {
+        !isLive && subtitleEnabled && hasCaption && !isScrubbing && !cleanMode
+    }
+
+    /// VOD 字幕來源（`effectiveCaption`，rb-ios-subtitle-vtt-caption-display）：host 明確傳入的
+    /// `captionText`（既有參數）優先；為空才 fallback 到 `VTTSubtitleParser.activeCue(model
+    /// .subtitleCues, at: model.position)?.text ?? ""`。Hoisted to a computed property
+    /// (rb-ios-replay-caption-overlay-fix) so BOTH the pure-VOD branch AND the live-chrome/replay
+    /// branch can share the exact same caption-text resolution — previously this was a `let`
+    /// local only to the VOD branch.
+    private var effectiveCaption: String {
+        captionText.isEmpty
+            ? (VTTSubtitleParser.activeCue(model.subtitleCues, at: model.position)?.text ?? "")
+            : captionText
+    }
+
+    /// Whether `CaptionOverlayView` should currently render, for the live model snapshot. Shared
+    /// by the VOD branch (unconditionally `!model.isLive == true` there already, so behavior is
+    /// unchanged / baseline-neutral) and the live-chrome branch (where it now resolves `true` for
+    /// a finished-live replay, `false` for a genuine live broadcast in progress).
+    private var showsCaptionOverlay: Bool {
+        Self.showsCaptionOverlay(isLive: model.isLive, subtitleEnabled: model.subtitleEnabled,
+                                 hasCaption: !effectiveCaption.isEmpty, isScrubbing: isScrubbing,
+                                 cleanMode: cleanMode)
+    }
+
     public var body: some View {
         ZStack {
             // The video area sits behind everything (host supplies the actual
@@ -1395,6 +1438,13 @@ public struct PlayerShellView: View {
                     // (placeholder suppressed) — same gate as the shop logo / VOD card
                     // (live-pinned-card-image-radius). Snapshot/demo keeps the placeholder.
                     live: !paintsBackgroundPlaceholder,
+                    // rb-ios-replay-caption-overlay-fix: the REAL VTT/CC caption (distinct from
+                    // the host-supplied static `LBLiveHostCaption` below) — non-empty only for a
+                    // finished-live REPLAY with CC on (never for a genuine live broadcast in
+                    // progress; `showsCaptionOverlay` already folds in `isScrubbing` / `cleanMode`,
+                    // the latter re-checked internally by `LiveOverlayChromeView` too, matching its
+                    // `announceText` / `hostCaption` convention).
+                    subtitleCaption: showsCaptionOverlay ? effectiveCaption : "",
                     // Host-suppressible: a host that has already shown the hint once
                     // passes showGestureHints: false (it owns the persisted flag).
                     showGestureHints: showGestureHints,
@@ -1439,10 +1489,12 @@ public struct PlayerShellView: View {
                     // `captionText`（既有參數）優先，維持既有 host-override 行為 100% 不變；
                     // `captionText` 為空才 fallback 到 `model.subtitleCues`（turnkey 容器抓取 +
                     // 解析 `channel.subtitle_url` 灌入）在目前 `model.position` 命中的 cue 文字。
-                    let effectiveCaption = captionText.isEmpty
-                        ? (VTTSubtitleParser.activeCue(model.subtitleCues, at: model.position)?.text ?? "")
-                        : captionText
-                    if model.subtitleEnabled && !effectiveCaption.isEmpty && !isScrubbing && !cleanMode {
+                    // rb-ios-replay-caption-overlay-fix: `effectiveCaption` / `showsCaptionOverlay`
+                    // hoisted to shared computed properties above (were a local `let` + inline
+                    // condition here) so the live-chrome/replay branch can reuse the exact same
+                    // resolution — behavior here is unchanged (`model.isLive == false` is already
+                    // implied by being in this branch at all).
+                    if showsCaptionOverlay {
                         CaptionOverlayView(theme: theme, text: effectiveCaption)
                             .padding(.bottom, 8 + scrubChromeLiftIfExpanded)
                     }
@@ -1580,6 +1632,7 @@ public struct PlayerShellView: View {
                             bagCount: model.bagCount,
                             heartBurstTick: model.heartBurstTick,
                             muted: model.muted,
+                            subtitleEnabled: model.subtitleEnabled,
                             onTapItem: { kind in
                                 // The rail surfaces a tap intent; for the info kinds
                                 // the shell can forward presentation-only navigation.
@@ -1918,6 +1971,9 @@ public struct PlayerShellView: View {
             // `cleanModeForTesting` 預先 seed 的情境）就拿到正確初值（rb-ios-clean-mode-hide-
             // chat-feed）。
             onCleanModeChange?(cleanMode)
+            // 初值背景 prefetch 商品照片（`.onChange` 不會為初值觸發，rb-ios-product-image-
+            // loading-polish）——見下方 `.onChange(of: allProductIdsForPrefetch)`。
+            prefetchIntroducibleProductImages()
         }
         .onChange(of: model.isLive) { _ in
             onIsLiveChange?(usesLiveChrome)
@@ -1937,6 +1993,13 @@ public struct PlayerShellView: View {
         .onChange(of: model.announceText) { text in
             onHasAnnounceChange?(!text.isEmpty)
         }
+        // 商品照片背景 prefetch（rb-ios-product-image-loading-polish）：`model.allProducts`
+        // （完整未篩選清單）變化時重新 prefetch——`LBProduct` 非 `Equatable`，`.onChange(of:)`
+        // 追蹤這個 derived 的 `[String]` id 陣列，觸發後仍讀取當下的 `model.allProducts`。初值由
+        // 上方 `.onAppear` 觸發（`.onChange` 不會為初值觸發）。
+        .onChange(of: allProductIdsForPrefetch) { _ in
+            prefetchIntroducibleProductImages()
+        }
         // App 進背景（含觸發系統自動 PiP）時，若正在拖曳進度條，`DragGesture` 沒有「被系統中斷」
         // 的回呼可掛（`.onEnded` 永遠不會收到 `touchesCancelled`），視同放開手指走既有
         // `handleScrubEnded()` 路徑，避免從背景/PiP 返回後拖曳讀數卡在展開態
@@ -1946,6 +2009,33 @@ public struct PlayerShellView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.playerShell)
+    }
+
+    /// Equatable proxy for `model.allProducts` (rb-ios-product-image-loading-polish) —
+    /// `LBProduct` itself is not `Equatable` (see `DefaultMomentStates.swift`'s
+    /// `handleProducts` doc comment), and `.onChange(of:)` requires an `Equatable` value to
+    /// detect real changes. `prefetchIntroducibleProductImages()` always re-reads the LIVE
+    /// `model.allProducts` (not this id array), so an id-stable-but-photo-changed edge case
+    /// still resolves the current photo URL.
+    private var allProductIdsForPrefetch: [String] { model.allProducts.map(\.id) }
+
+    /// Background-prefetch every product's lead photo (`photos.first ?? pic`) into
+    /// `ReferenceUIImageCache` as soon as the FULL, unfiltered product list is known — NOT
+    /// gated on whether the product is CURRENTLY in the now-introducing / narrating window
+    /// (`model.vodActiveProducts` / `model.livePinnedProducts`, both filtered SUBSETS of
+    /// `model.allProducts`). The full catalog is already on-device well before any individual
+    /// product's `[beginTime,endTime)` window opens or its `narrate_status` flips, so
+    /// prefetching against the FULL list — not the already-time/narrate-filtered ones — is
+    /// what actually gets ahead of the placeholder flash (rb-ios-product-image-loading-
+    /// polish). Because `vodActiveProducts` / `liveActiveProducts` are both subsets of THIS
+    /// same list, one loop here covers both the VOD now-introducing carousel and the LIVE
+    /// pinned-card carousel — no second, LIVE-specific prefetch path needed. Fire-and-forget;
+    /// never touches `@State` / SwiftUI — safe to call from `.onAppear` / `.onChange`.
+    private func prefetchIntroducibleProductImages() {
+        for product in model.allProducts {
+            guard let url = MiniCartView.imageURL(product.photos.first ?? product.pic) else { continue }
+            ReferenceUIImagePrefetch.prefetch(url: url)
+        }
     }
 
     /// 訂閱 tap 的統一分派（header 頭像徽章 + VideoInfoPanel 訂閱 pill 共用一份 → 決策一致）：容器

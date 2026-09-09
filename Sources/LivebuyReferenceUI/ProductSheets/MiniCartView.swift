@@ -180,8 +180,8 @@ public struct MiniCartView: View {
         ZStack {
             LinearGradient(
                 gradient: Gradient(colors: [
-                    Color(hex: "#FFD7A8") ?? .orange,
-                    Color(hex: "#E27D5A") ?? .orange,
+                    ReferenceUIProductPlaceholderPalette.top,
+                    ReferenceUIProductPlaceholderPalette.bottom,
                 ]),
                 startPoint: .topLeading, endPoint: .bottomTrailing)
             Text(Self.monogram(for: peek.name))

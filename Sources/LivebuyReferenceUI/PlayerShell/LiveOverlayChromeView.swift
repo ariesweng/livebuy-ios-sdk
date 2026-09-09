@@ -92,6 +92,17 @@ public struct LiveOverlayChromeView: View {
     /// host-supplied STATIC string. Empty → the caption overlay is omitted.
     public let hostCaption: String
 
+    /// The REAL VTT/CC caption text (`rb-ios-replay-caption-overlay-fix`) — resolved by
+    /// `PlayerShellView.effectiveCaption` / gated by `PlayerShellView.showsCaptionOverlay`
+    /// (non-empty only during a finished-live REPLAY with CC on; a genuine live broadcast in
+    /// progress always feeds `""`). This is a COMPLETELY DIFFERENT mechanism from `hostCaption`
+    /// above (`LBLiveHostCaption`, host-supplied static copy with no public data source) — the
+    /// two SHALL be able to coexist: this renders as a `CaptionOverlayView` pill directly ABOVE
+    /// the announce/pinned-card row (leading-aligned, 8pt gap), while `hostCaption` renders
+    /// centered mid-screen (~46% height) — no shared screen real-estate. Empty (default) → the
+    /// overlay is omitted; every existing call site is pixel-neutral.
+    public let subtitleCaption: String
+
     /// Whether to draw the static gesture-hint pills (`LBPGestureHint`). Pure
     /// presentation copy — no view-model binding.
     public let showGestureHints: Bool
@@ -158,6 +169,7 @@ public struct LiveOverlayChromeView: View {
                 bottomInset: CGFloat = 0,
                 live: Bool = false,
                 hostCaption: String = "",
+                subtitleCaption: String = "",
                 showGestureHints: Bool = true,
                 showsHoldPauseHint: Bool = true,
                 isLive: Bool = true,
@@ -172,6 +184,7 @@ public struct LiveOverlayChromeView: View {
         self.bottomInset = bottomInset
         self.live = live
         self.hostCaption = hostCaption
+        self.subtitleCaption = subtitleCaption
         self.showGestureHints = showGestureHints
         self.showsHoldPauseHint = showsHoldPauseHint
         self.isLive = isLive
@@ -238,6 +251,23 @@ public struct LiveOverlayChromeView: View {
             // pinned card `right:8 bottom:64 width:100` (R31, was `width:132`).
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
+                // Real VTT/CC caption (rb-ios-replay-caption-overlay-fix) — leading-aligned,
+                // stacked directly ABOVE the announce/pinned-card row below (SwiftUI lays out
+                // this VStack's children top-to-bottom, so it self-adjusts to the row's height —
+                // no manual pixel offset needed to avoid overlapping the (taller) pinned card).
+                // Hidden in `cleanMode` — same internal gate as `announceText` / `hostCaption`
+                // below (the CALLER already resolves this to `""` in that case too, see
+                // `PlayerShellView.showsCaptionOverlay`; this is defense-in-depth for any other
+                // direct caller / test, mirroring `testLiveOverlayChromeView_cleanModeHides...`).
+                if !subtitleCaption.isEmpty && !cleanMode {
+                    HStack(spacing: 0) {
+                        CaptionOverlayView(theme: theme, text: subtitleCaption)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 8)
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 8)
+                }
                 HStack(alignment: .bottom, spacing: 8) {
                     if !announceText.isEmpty && !cleanMode {
                         // Tappable → host-wired navigation that opens the VideoInfoPanel notice
@@ -345,14 +375,18 @@ public struct LiveOverlayChromeView: View {
     /// `rb-ios-live-announce-banner-recolor`, design-contract R30).
     private var announceBanner: some View {
         HStack(spacing: 8) {
-            // Red icon badge (`#F03246`, 22×22, radius 5).
+            // Red icon badge (`#F03246`, 22×22, radius 5). Icon is a hand-drawn
+            // custom vector path (`MegaphoneGlyph`, FontAwesome bullhorn silhouette,
+            // `design/shared/icons.jsx` `Icons.megaphone`), NOT a system SF Symbol —
+            // rb-ios-live-announce-bullhorn-icon, replacing the earlier placeholder
+            // `Image(systemName: "megaphone.fill")` which never matched the design's
+            // actual bullhorn shape. 13pt (was 11pt) aligns the visual size with the
+            // Android/RN/Flutter sibling changes and the design itself.
             RoundedRectangle(cornerRadius: 5)
                 .fill(Self.announceBadgeColor)
                 .frame(width: 22, height: 22)
                 .overlay(
-                    Image(systemName: "megaphone.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white)
+                    MegaphoneGlyph(size: 13, color: .white)
                 )
 
             // Announce copy — 2-line clamped text (`LBLiveAnnounce`

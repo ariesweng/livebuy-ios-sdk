@@ -61,6 +61,13 @@ public struct OperationRailView: View {
     /// the rail; carried so the surface matches the documented initializer shape.
     public let muted: Bool
 
+    /// Whether the subtitle (CC) track is currently enabled (`PlayerShellModel.subtitleEnabled`,
+    /// `DefaultPlaybackProgressState`-derived — NOT a `DefaultOperationRail` field, shared the
+    /// same way `muted` is shared with the header). Drives the `.subtitle` pill's `active` fill
+    /// state (`isActivePill`, rb-ios-cc-icon-active-fill-state) — white background + accent glyph
+    /// when `true`, matching the design's `railBtn(icon, ccOn, onCC)`.
+    public let subtitleEnabled: Bool
+
     /// Tap intent for a side-rail kind. The rail does NOT own the action — the
     /// shell / host forwards to the matching core `simulate*` (D-4). Default nil
     /// so demo / snapshot instances construct action-free.
@@ -72,6 +79,7 @@ public struct OperationRailView: View {
         bagCount: Int,
         heartBurstTick: Int,
         muted: Bool,
+        subtitleEnabled: Bool,
         onTapItem: ((LBSideRailKind) -> Void)? = nil
     ) {
         self.theme = theme
@@ -79,6 +87,7 @@ public struct OperationRailView: View {
         self.bagCount = bagCount
         self.heartBurstTick = heartBurstTick
         self.muted = muted
+        self.subtitleEnabled = subtitleEnabled
         self.onTapItem = onTapItem
     }
 
@@ -124,14 +133,17 @@ public struct OperationRailView: View {
         items.first(where: { $0.kind == kind })?.enabled == true
     }
 
-    /// A standard round pill (`LBPSideRail` `railBtn`): 40×40, fully-rounded,
-    /// translucent dark fill, white glyph. `active` (white fill + accent glyph)
-    /// is not currently fed for any kind, so pills render in the inactive style.
+    /// A standard round pill (`LBPSideRail` `railBtn`): 40×40, fully-rounded. Wears one of two
+    /// fill states per `isActivePill` (design `railBtn(icon, active, onClick)`, rb-ios-cc-icon-
+    /// active-fill-state): `active` → white background + `theme.accent` glyph; inactive (the
+    /// default for every kind except an enabled `.subtitle`) → translucent dark fill
+    /// (`Self.pillBackground`) + white glyph.
     private func pillButton(for kind: LBSideRailKind) -> some View {
-        Button(action: { onTapItem?(kind) }) {
+        let active = Self.isActivePill(kind: kind, subtitleEnabled: subtitleEnabled)
+        return Button(action: { onTapItem?(kind) }) {
             ZStack {
                 Circle()
-                    .fill(Self.pillBackground)
+                    .fill(active ? Color.white : Self.pillBackground)
                 // Share uses the hand-drawn `ShareGlyph` (design `Icons.share` three-node share);
                 // serviceLink uses the hand-drawn `ContactGlyph` (design `Icons.contact` dual
                 // speech-bubble + question-mark, rb-ios-icon-parity); subtitle uses the hand-drawn
@@ -139,13 +151,15 @@ public struct OperationRailView: View {
                 // rb-ios-cc-icon-design-align); every other kind keeps its SF Symbol
                 // (rb-ios-share-icon-design-align). The aligned VOD rail only ever draws these
                 // three kinds (`presentationOrder`), so the `else` branch below is unreachable in
-                // production but kept total for the wider view-model kind set.
+                // production but kept total for the wider view-model kind set. `active` only ever
+                // applies to `.subtitle` (`isActivePill`) — `.share` / `.serviceLink` glyphs stay
+                // white regardless, matching the design's `railBtn(icon, false, ...)` for both.
                 if kind == .share {
                     ShareGlyph(size: Self.pillGlyphSize, color: .white)
                 } else if kind == .serviceLink {
                     ContactGlyph(size: Self.pillGlyphSize, color: .white)
                 } else if kind == .subtitle {
-                    CcGlyph(size: Self.pillGlyphSize, color: .white)
+                    CcGlyph(size: Self.pillGlyphSize, color: active ? theme.accent : .white)
                 } else {
                     Image(systemName: Self.symbolName(for: kind))
                         .font(.system(size: Self.pillGlyphSize, weight: .semibold))
@@ -156,6 +170,17 @@ public struct OperationRailView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityIdentifier(Self.accessibilityID(for: kind))
+    }
+
+    /// PURE FUNCTION: which pills wear the design's "active" fill (white background + accent
+    /// glyph, `LBPSideRail` `railBtn(icon, active, onClick)`, `design/templates/minimal/
+    /// sdk-components.jsx:766-786`). Only `.subtitle` (CC) currently binds `active` to a real
+    /// state (`subtitleEnabled`, i.e. the design's `ccOn`) — `.share` / `.serviceLink` are
+    /// hardwired `active == false` in the design (`railBtn(<Icons.share.../>, false, onShare)` /
+    /// `railBtn(<Icons.contact.../>, false, onContact)`) and stay in the inactive style
+    /// regardless of any state. No side effects — safe to unit test directly.
+    static func isActivePill(kind: LBSideRailKind, subtitleEnabled: Bool) -> Bool {
+        kind == .subtitle && subtitleEnabled
     }
 
     /// TEST-ONLY: exposes the exact per-kind pill subtree `pillButton(for:)` renders (including
@@ -231,7 +256,8 @@ struct OperationRailView_Previews: PreviewProvider {
             items: PlayerShellModel.defaultRailItems,
             bagCount: 3,
             heartBurstTick: 0,
-            muted: true)
+            muted: true,
+            subtitleEnabled: false)
             .padding()
             .background(Color.black)
             .previewLayout(.sizeThatFits)

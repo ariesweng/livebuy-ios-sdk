@@ -2,57 +2,87 @@ import SwiftUI
 import LivebuySDK
 import LivebuyUI
 
-// MARK: - EndScreenView — family-4 player moment sub-view 2 (END / auto-next)
+// MARK: - EndScreenView — family-4 player moment sub-view 2 (END / auto-next, LIVE-only)
 //
 // Spec: `reference-ui-rendering/spec.md` (family-4 moments, full-screen END moment)
 // Design: rb-ios-moments design.md §2 +
-//          `design/templates/minimal/moments.jsx` `LBPEndScreen` (lines 266-364) +
-//          `LBPHotCard` (226-264).
+//          `design/templates/minimal/moments.jsx` `LBPEndScreen` / `EndStage` /
+//          `EndScreenArtboard` (design R41 / D7, commit `c480363ad`,
+//          `docs/reference-ui/...` — see `rb-ios-endscreen-live-empty-state`).
 //
-// The full-screen END moment shown when the video finishes. It is the second of
-// the three family-4 moment sub-views composed by `MomentsOverlayView`, and it
-// implements the agreed SUB-VIEW INPUT PATTERN documented verbatim in
-// `MomentsOverlayView.swift`:
+// 2026-09 REDESIGN (`rb-ios-endscreen-live-empty-state`): EndScreen is now
+// LIVE-ONLY and has exactly TWO variants — the previous 「熱門變體」(a card wall of
+// hot recommendations, shown whenever `next` was empty) AND the older
+// 「目前沒有推薦影片」bare-title fallback are BOTH RETIRED, replaced by ONE new empty
+// state: a big「直播已結束」title + a「直播時長：HH:MM:SS」line + a full-width「查看
+// 購物車」CTA. A VOD (non-live) video ending with no queued `next` no longer enters
+// this view at ALL — the CONTAINER (`MomentsOverlayView`, via
+// `shouldCloseInsteadOfEndScreen`) closes the player directly instead; that decision
+// is made ONE LAYER UP, out of this view's scope (this view is never even
+// constructed in that case). The countdown variant (`next` non-empty) is UNCHANGED
+// by this redesign except for the shared scrim color (see VISUAL LANGUAGE below).
+//
+// It is the second of the family-4 moment sub-views composed by
+// `MomentsOverlayView`, and it implements the agreed SUB-VIEW INPUT PATTERN
+// documented verbatim in `MomentsOverlayView.swift`:
 //
 //   1. `theme: ReferenceUITheme`            — FIRST positional argument, always.
 //   2. bound SNAPSHOT VALUES (BY VALUE from `MomentsModel`, never the model /
 //      template):
 //      • `countdown: LBEndScreenCountdown?` — non-nil ⇔ 倒數變體; `{ remain, total }`
-//        drives the ring progress (`remain / total`). nil ⇔ 熱門變體.
+//        drives the ring progress (`remain / total`). nil ⇔ 空狀態變體.
 //      • `next: [LBNavItem]`                 — watch-next targets; `next.first` is the
 //        倒數變體 preview card source (`cover` / `title?` / `shopName` /
-//        `duration:Int`). Empty `next` also forces the 熱門變體.
-//      • `hot: [LBHotItem]`                  — 熱門變體 set; rendered as `LBPHotCard`s
-//        in a PLAIN `HStack`/`VStack` FIXED SMALL set (`cover` / `title` /
-//        `duration:String` already-formatted). NEVER lazy / scroll.
+//        `duration:Int`). Empty `next` also forces the 空狀態變體.
+//      • `liveDuration: String`              — ALREADY-FORMATTED live-duration text
+//        (e.g. `"01:23:45"`) for the 空狀態變體's「直播時長：」line. Empty (the
+//        current production reality — no upstream data source is wired yet, see
+//        design.md「Known limitation」) renders the design's documented fallback
+//        `"--:--:--"`. This layer does NOT compute / derive it.
 //   3. action closures (LAST, each `= nil`):
 //      • `onWatchNext: (() -> Void)?`        — 倒數變體「立即觀看」CTA. Forwards to the
 //        container's host-wired `onWatchNext` → host → core load(next videoId).
 //        This layer NEVER loads / advances itself.
-//      • `onPickHot: ((LBHotItem) -> Void)?` — 熱門變體 card tap. Forwards the tapped
-//        `LBHotItem` to the container's host-wired `onPickHot` → host → core
-//        load(hot.id). This layer NEVER switches videos itself.
 //      • `onCancel: (() -> Void)?`           — 倒數變體「取消」exit. Forwards to the
-//        container's host-wired `onCancel` → host (dismiss / stay).
+//        container's host-wired `onCancel` → host, which now CLOSES the whole
+//        player session (the 熱門變體 fallback「取消」used to reveal no longer
+//        exists — see `LivebuyPlayer.swift` `makeOverlayContext`'s `onCancel`
+//        default: `cancelAutoNext()` + the SAME dismiss resolution `onDismiss`
+//        uses). This layer only forwards the tap; it does NOT decide what closing
+//        means.
+//      • `onViewCart: (() -> Void)?`         — 空狀態變體「查看購物車」CTA. Forwards to
+//        the container's host-wired `onViewCart` (wired by `PlayerOverlayRootView`
+//        to the SAME `onOpenProductList` action the LIVE bottom bar's bag button
+//        uses — there is no deeper "jump straight to the cart" seam available at
+//        this assembly point; see design.md「onViewCart wiring」). This layer NEVER
+//        opens the product list itself.
 //
-// VARIANT GATING (mirrors `LBPEndScreen`'s `showCountdown` — moments.jsx line 268):
+// VARIANT GATING (mirrors `LBPEndScreen`'s `isEmpty` — moments.jsx `EndStage`):
 //   • 倒數變體 — `countdown != nil` AND `!next.isEmpty`: big `next.first` preview
 //     card + a countdown RING (auto-advance-to-next) + 立即觀看 / 取消.
-//   • 熱門變體 — `countdown == nil` OR `next.isEmpty`: 為你推薦 header + a PLAIN
-//     `HStack` row of `LBPHotCard`s, each tap → `onPickHot`.
+//   • 空狀態變體 — `countdown == nil` OR `next.isEmpty`: 「直播已結束」title +
+//     「直播時長：…」line + a full-width「查看購物車」CTA (reuses the exact button
+//     style `ProductListView.cartCTA` already established —
+//     `CartFillGlyph` + `theme.cornerRadius` + `theme.accent` fill).
 //
 // One-way data flow: this sub-view reads ONLY its passed-in values; it never
 // reaches back into `MomentsModel` / `DefaultPlayerTemplate`, holds NO second copy
-// of countdown / next / hot, and NEVER drives the auto-next countdown itself (core
+// of countdown / next, and NEVER drives the auto-next countdown itself (core
 // owns the tick — the ring is PURE PRESENTATION of the snapshot `remain` / `total`).
 // It renders correctly with all actions nil (so demo / snapshot tests construct it
 // action-free).
 //
-// VISUAL LANGUAGE: a full-bleed dark scrim (`rgba(8,8,12,0.8)`) with white text /
-// glyphs (the moment composites over the ended video — design §2). The literal dark
-// scrim + white-on-dark decorative colors are FIXED design colors lifted from
-// `LBPEndScreen` via `Color(hex:)` (consistent with the family-2/3 surfaces'
-// surface-token approach); `theme.accent` paints the「立即觀看」CTA + the ring trim.
+// VISUAL LANGUAGE: a full-bleed dark scrim — `rgba(50,50,50,0.64)`, NO blur
+// (`rb-ios-endscreen-live-empty-state`; was `rgba(8,8,12,0.8)`, also never blurred
+// on iOS — SwiftUI has no cheap backdrop-blur-over-video primitive, so this layer
+// never attempted the design's separate `blur(2px)` — a pre-existing, unrelated
+// gap) — with white text / glyphs (the moment composites over the ended video —
+// design §2). This scrim is SHARED by BOTH variants (one `ZStack` layer under
+// `body`), so this redesign changes the countdown variant's background too. The
+// literal dark scrim + white-on-dark decorative colors are FIXED design colors
+// lifted from `LBPEndScreen` via `Color(hex:)` (consistent with the family-2/3
+// surfaces' surface-token approach); `theme.accent` paints the「立即觀看」/「查看
+// 購物車」CTAs + the ring trim.
 //
 // iOS-14-safe SwiftUI only. `ZStack` / `VStack` / `HStack` / `Circle().trim` /
 // `RoundedRectangle` / `Text` / `Button` / `Image(systemName:)` are all iOS-13+.
@@ -62,15 +92,16 @@ import LivebuyUI
 //
 // ⚠️ NO ScrollView / LazyVStack / LazyHStack / LazyVGrid in rendered content — the
 // reference-ui snapshot path (`ImageRenderer`) renders those BLANK (the verified
-// family-3 lesson). The 熱門 list is a PLAIN `HStack` of a FIXED SMALL set.
+// family-3 lesson). Neither variant needs one any more (the 熱門 hstack is gone).
 
 /// The family-4 full-screen END moment. In the 倒數變體 (`countdown != nil` &&
 /// `!next.isEmpty`) it draws a big `next.first` preview card with a centered
 /// countdown RING (`remain / total`) representing the auto-advance-to-next
-/// countdown, plus 立即觀看 (`onWatchNext`) / 取消 (`onCancel`). In the 熱門變體
-/// (`countdown == nil` || `next.isEmpty`) it draws a 為你推薦 header + a PLAIN
-/// `HStack` of `LBPHotCard`s (`onPickHot`). All actions are host-wired forwarders;
-/// this layer never loads / advances / picks itself.
+/// countdown, plus 立即觀看 (`onWatchNext`) / 取消 (`onCancel`, now closes the whole
+/// session — see `LivebuyPlayer.swift`). In the 空狀態變體 (`countdown == nil` ||
+/// `next.isEmpty`) it draws a「直播已結束」title + a「直播時長：…」line + a
+/// full-width「查看購物車」CTA (`onViewCart`). All actions are host-wired forwarders;
+/// this layer never loads / advances / opens the cart itself.
 public struct EndScreenView: View {
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
@@ -81,18 +112,15 @@ public struct EndScreenView: View {
     public let countdown: LBEndScreenCountdown?
 
     /// Watch-next targets (`DefaultEndScreenState.next`). `next.first` is the 倒數
-    /// 變體 preview card source. Empty also forces the 熱門變體. Read-only.
+    /// 變體 preview card source. Empty also forces the 空狀態變體. Read-only.
     public let next: [LBNavItem]
 
-    /// 熱門推薦 set (`DefaultEndScreenState.hot`). Rendered as a FIXED SMALL PLAIN
-    /// `HStack` of `LBPHotCard`s. `duration` is an ALREADY-FORMATTED string. Read-only.
-    public let hot: [LBHotItem]
-
-    /// Whether this is the no-countdown LIVE-ENDED state (`endScreenVisible && countdown == nil`,
-    /// i.e. live ended with no next). Adds the「直播已結束」rule-flanked title above the 熱門
-    /// header (D2 / end-screen-no-countdown #6c). Default `false` → existing 熱門變體 demos /
-    /// snapshots render unchanged. No countdown, no auto-advance.
-    public let liveEnded: Bool
+    /// ALREADY-FORMATTED live-duration text for the 空狀態變體's「直播時長：」line
+    /// (e.g. `"01:23:45"`). Empty (default — the current production reality: no
+    /// upstream signal is wired yet) renders the design's documented fallback
+    /// `"--:--:--"` (`Self.liveDurationLine(_:)`). This layer does NOT compute /
+    /// derive a duration itself. `rb-ios-endscreen-live-empty-state`.
+    public let liveDuration: String
 
     /// Runtime media gate (mirrors `CarouselCardView.live`). `false` (the default —
     /// every demo / snapshot / preview construction) → the recommended / next-video
@@ -109,52 +137,48 @@ public struct EndScreenView: View {
     /// loads / advances itself.
     private let onWatchNext: (() -> Void)?
 
-    /// 熱門變體 card tap → host-wired `onPickHot(item)` → host → core load(hot.id).
-    /// nil for demo / snapshot instances. This layer NEVER switches videos itself.
-    private let onPickHot: ((LBHotItem) -> Void)?
-
-    /// 倒數變體「取消」exit → host-wired `onCancel` → host (dismiss / stay). nil for
-    /// demo / snapshot instances.
+    /// 倒數變體「取消」exit → host-wired `onCancel` → host, which now closes the
+    /// whole player session (`LivebuyPlayer.swift` `makeOverlayContext`'s default:
+    /// `player.cancelAutoNext()` + the SAME dismiss resolution `onDismiss` uses).
+    /// nil for demo / snapshot instances. This layer only forwards the tap.
     private let onCancel: (() -> Void)?
 
-    /// LOCAL presentation-only 熱門推薦 window index (page). Purely a view-state cursor
-    /// over `hot` for the「換一批」pill — it slides the FIXED SMALL set to the next page
-    /// of `maxHotCards` recommendations WITHOUT loading / switching any video. Default
-    /// `0` → shows `hot.prefix(maxHotCards)` (the existing behavior → baseline
-    /// byte-identical). NOT part of `init` — never bound from the view-model / core.
-    @State private var hotPage: Int = 0
+    /// 空狀態變體「查看購物車」CTA → host-wired `onViewCart` → host (wired by
+    /// `PlayerOverlayRootView` to the SAME `onOpenProductList` action the LIVE
+    /// bottom bar's bag button uses). nil for demo / snapshot instances. This layer
+    /// NEVER opens the product list itself.
+    private let onViewCart: (() -> Void)?
 
     public init(
         theme: ReferenceUITheme,
         countdown: LBEndScreenCountdown?,
         next: [LBNavItem],
-        hot: [LBHotItem],
-        liveEnded: Bool = false,
+        liveDuration: String = "",
         live: Bool = false,
         onWatchNext: (() -> Void)? = nil,
-        onPickHot: ((LBHotItem) -> Void)? = nil,
-        onCancel: (() -> Void)? = nil
+        onCancel: (() -> Void)? = nil,
+        onViewCart: (() -> Void)? = nil
     ) {
         self.theme = theme
         self.countdown = countdown
         self.next = next
-        self.hot = hot
-        self.liveEnded = liveEnded
+        self.liveDuration = liveDuration
         self.live = live
         self.onWatchNext = onWatchNext
-        self.onPickHot = onPickHot
         self.onCancel = onCancel
+        self.onViewCart = onViewCart
     }
 
     /// Whether the 倒數變體 is active — `countdown != nil` AND a preview target
-    /// exists (mirrors `LBPEndScreen`'s `showCountdown`, moments.jsx line 268).
+    /// exists (mirrors `LBPEndScreen`'s `showCountdown`, moments.jsx `EndStage`).
     private var showCountdown: Bool {
         countdown != nil && !next.isEmpty
     }
 
     public var body: some View {
         ZStack {
-            // Full-bleed dark scrim (LBPEndScreen `rgba(8,8,12,0.8)`). The moment
+            // Full-bleed dark scrim (LBPEndScreen `rgba(50,50,50,0.64)`, no blur —
+            // rb-ios-endscreen-live-empty-state). Shared by BOTH variants. The moment
             // composites over the ended video — a fixed design color, not theme bg.
             Self.scrim
                 .edgesIgnoringSafeArea(.all)
@@ -162,7 +186,7 @@ public struct EndScreenView: View {
             if showCountdown {
                 countdownVariant
             } else {
-                hotVariant
+                emptyVariant
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -242,7 +266,7 @@ public struct EndScreenView: View {
             .fill(Color.black)
     }
 
-    /// Live-gated preview-card media of `next.first` — mirrors `hotMedia` /
+    /// Live-gated preview-card media of `next.first` — mirrors
     /// `CarouselCardView.mediaThumbnail`: `live` && `preview` → looping preview over the
     /// placeholder; else `live` && `cover` → static still over the placeholder; else the
     /// placeholder alone. Empty `preview` (the backend's current default) falls through
@@ -361,257 +385,69 @@ public struct EndScreenView: View {
         .frame(maxWidth: 320)
     }
 
-    // MARK: - 熱門變體 (為你推薦 header + PLAIN HStack of LBPHotCards)
+    // MARK: - 空狀態變體 (「直播已結束」title + 直播時長 line + 查看購物車 CTA)
     //
-    // Mirrors `LBPEndScreen`'s 熱門 branch (moments.jsx 340-361): a「為你推薦」title
-    // + a「換一批」pill, then the `hot` cards. The design uses a 2-col grid in a
-    // scroll; the reference-ui surface renders a FIXED SMALL set (`maxHotCards` = 3)
-    // in a PLAIN `HStack` (NEVER lazy / scroll — `ImageRenderer` renders those blank).
-    //
-    // 「換一批」= LOCAL RECOMMENDATION-WINDOW ROLL (NOT a video open). The backend
-    // `hot` list has no upper bound (often > 3) and is fetched once at channel load;
-    // core has NO refetch-hot API and the backend has NO reshuffle endpoint. So the
-    // pill rolls a purely-presentational window (`hotPage`) over the already-loaded
-    // `hot` — showing the next page of `maxHotCards` recommendations — and MUST NOT
-    // load / switch any video. The design's pill is a refresh-arrow no-op stub
-    // (`moments.jsx:295-306`, demo wires `onPickHot={() => {}}`, `:957` — it never
-    // opened a video); all four reference-ui platforms previously mis-forwarded it to
-    // `onPickHot(hot.first)` (a four-platform proxy bug — Android / RN / Flutter are
-    // each a follow-up). Only the 熱門卡 itself opens a video (`onPickHot(item)`); the
-    // pill is now decoupled from it. When `hot.count <= 3` (a single page, nothing to
-    // roll) the pill is INERT (its action no-ops via a `pageCount > 1` guard) — kept
-    // rendered UNCHANGED so the baseline stays byte-identical. (Not `.disabled()`: that
-    // dims the pill in the `ImageRenderer` snapshot path; not hidden: that removes it.)
+    // Mirrors `LBPEndScreen`'s `isEmpty` branch (moments.jsx `EndStage`,
+    // `rb-ios-endscreen-live-empty-state`, replacing the retired 熱門變體 card wall
+    // AND the older bare-title fallback with ONE new empty state): a big title, a
+    // live-duration line, and a full-width cart CTA — no recommendations, no
+    // scroll, no per-item interaction.
 
-    private var hotVariant: some View {
-        VStack(spacing: 0) {
-            // D2 (end-screen-no-countdown): live ended with no next → 「直播已結束」收尾標題
-            // (rule-flanked, like the countdown variant's「影片結束」) above 為你推薦.
-            if liveEnded {
-                liveEndedRule
-                    .padding(.bottom, 14)
-            }
-            hotHeader
-            hotRow
+    private var emptyVariant: some View {
+        VStack(spacing: 36) {
             Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
 
-    /// 「— 直播已結束 —」rule-flanked caption for the no-countdown live-ended end screen
-    /// (D2). Mirrors `endedRule` but with the live-ended copy (design moments.jsx 熱門變體).
-    private var liveEndedRule: some View {
-        HStack(spacing: 8) {
-            Rectangle().fill(Self.onDarkFaint).frame(width: 18, height: 1)
-            Text(Self.liveEndedLabel)
-                .font(.system(size: 12 * theme.fontScale, weight: .semibold))
-                .foregroundColor(Self.onDarkDim)
-                .kerning(1)
-            Rectangle().fill(Self.onDarkFaint).frame(width: 18, height: 1)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    /// 為你推薦 title + 換一批 pill (LBPEndScreen 343-355). The「換一批」pill is a LOCAL
-    /// recommendation-window roll — it advances `hotPage` to the next page of
-    /// `maxHotCards` cards over the already-loaded `hot`, and NEVER opens / switches a
-    /// video (it does NOT call `onPickHot`). Inert (no-op via a `pageCount > 1` guard)
-    /// when there is only one page (`pageCount <= 1`, i.e. `hot.count <= 3`), kept
-    /// rendered UNCHANGED so the baseline stays byte-identical (not `.disabled()`,
-    /// which dims the pill in the snapshot path).
-    private var hotHeader: some View {
-        HStack {
-            Text(Self.recommendTitle)
-                .font(.system(size: 18 * theme.fontScale, weight: .heavy))
-                .foregroundColor(.white)
-            Spacer(minLength: 0)
-            Button(action: {
-                // LOCAL window roll ONLY — advance to the next page of recommendations.
-                // No `onPickHot`, no `player.load` — the pill NEVER opens a video.
-                // Single page (`pageCount <= 1`, i.e. hot.count <= 3) → INERT no-op
-                // (nothing to roll → avoids the invalid interaction). Implemented as a
-                // guard rather than `.disabled()` because `.disabled()` DIMS the pill in
-                // the `ImageRenderer` snapshot path (verified — it changed the
-                // `end-screen-live-ended-hot` / `-no-hot` baselines), and the pill must
-                // stay byte-identical to the existing baseline.
-                guard pageCount > 1 else { return }
-                hotPage = (hotPage + 1) % pageCount
-            }) {
-                HStack(spacing: 5) {
-                    ArrowClockwiseGlyph(size: 12, color: .white)
-                    Text(Self.shuffleLabel)
-                        .font(.system(size: 12 * theme.fontScale, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 999)
-                        .fill(Self.onDarkFill))
-            }
-            .buttonStyle(PlainButtonStyle())
-            .accessibilityIdentifier(LBAccessibilityID.momentEndReshuffle)
-        }
-        .padding(.bottom, 12)
-    }
-
-    /// A PLAIN `HStack` of `LBPHotCard`s — a FIXED SMALL set (first N), NEVER a
-    /// lazy / scroll container (the `ImageRenderer` blank-render trap). Each card
-    /// taps to `onPickHot(item)`.
-    @ViewBuilder
-    private var hotRow: some View {
-        if hot.isEmpty {
-            // Empty-state line (no hot recommendations).
-            HStack {
-                Spacer(minLength: 0)
-                Text(Self.emptyHotLabel)
-                    .font(.system(size: 13 * theme.fontScale))
-                    .foregroundColor(Self.onDarkFaintText)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 40)
-        } else {
-            HStack(alignment: .top, spacing: 12) {
-                ForEach(Array(hotCards.enumerated()), id: \.element.id) { index, item in
-                    hotCard(item)
-                        .accessibilityIdentifier(LBAccessibilityID.momentHotCard(index))
-                }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(LBAccessibilityID.momentEndHotRow)
-        }
-    }
-
-    /// The FIXED SMALL hot set actually rendered — the current `hotPage` window of
-    /// `maxHotCards` cards over `hot` (a PLAIN `HStack`, bounded, snapshot-stable).
-    /// `hotPage == 0` (the default) ⇒ `hot.prefix(maxHotCards)` (existing behavior →
-    /// baseline byte-identical).
-    private var hotCards: [LBHotItem] {
-        Self.hotWindow(hot, page: hotPage)
-    }
-
-    /// Number of `maxHotCards`-sized recommendation pages over `hot` (ceil division).
-    /// `1` (or `0` when empty) ⇒ nothing to roll ⇒ the「換一批」pill is disabled.
-    private var pageCount: Int {
-        Self.pageCount(forHotCount: hot.count)
-    }
-
-    /// One 熱門卡 (LBPHotCard, moments.jsx 226-264): a 9:16 cover with a duration
-    /// pill (top-left) + a centered play affordance, then a 2-line title. `duration`
-    /// is rendered VERBATIM (it is an already-formatted string, NOT seconds). The cover
-    /// area is `live`-gated real media (preview loop → static cover → placeholder).
-    private func hotCard(_ item: LBHotItem) -> some View {
-        Button(action: { onPickHot?(item) }) {
-            VStack(alignment: .leading, spacing: 7) {
-                ZStack(alignment: .topLeading) {
-                    // 9:16 media: `live`-gated real cover / preview over the black
-                    // placeholder (mirrors CarouselCardView.mediaThumbnail). `live == false`
-                    // → placeholder only (snapshot byte-identical).
-                    hotMedia(item)
-                    // Centered play affordance (`rgba(0,0,0,0.5)` circle + play glyph).
-                    centeredPlay
-                    // Duration pill (top-left, monospace, `rgba(0,0,0,0.55)`).
-                    durationPill(item.duration)
-                        .padding(6)
-                }
-                .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                Text(item.title)
-                    .font(.system(size: 12 * theme.fontScale, weight: .semibold))
+            VStack(spacing: 14) {
+                Text(Self.liveEndedTitle)
+                    .font(.system(size: 30 * theme.fontScale, weight: .heavy))
                     .foregroundColor(.white)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .buttonStyle(PlainButtonStyle())
-        .frame(maxWidth: .infinity)
-    }
+                    .kerning(-0.2)
 
-    /// The 12-radius black cover placeholder (the existing baseline fill) — the base
-    /// layer of a hot card thumbnail, and the `live == false` / empty-URL fallback.
-    private var hotCoverPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .fill(Color.black)
-    }
-
-    /// Live-gated hot-card media — mirrors `previewMedia` /
-    /// `CarouselCardView.mediaThumbnail`: `live` && `preview` → looping preview over the
-    /// placeholder; else `live` && `cover` → static still over the placeholder; else the
-    /// placeholder alone. Empty `preview` (the backend's current default) falls through
-    /// to `cover`; empty `cover` falls through to the placeholder. `live == false` →
-    /// placeholder only (never constructs a runtime media view → snapshot byte-identical).
-    @ViewBuilder
-    private func hotMedia(_ item: LBHotItem) -> some View {
-        if live, let url = Self.nonEmptyURL(item.preview) {
-            ZStack {
-                hotCoverPlaceholder
-                LoopingVideoView(url: url)
+                Text(Self.liveDurationLine(liveDuration))
+                    .font(.system(size: 15.5 * theme.fontScale))
+                    .foregroundColor(Color.white.opacity(0.85))
             }
-        } else if live, let url = Self.nonEmptyURL(item.cover) {
-            ZStack {
-                hotCoverPlaceholder
-                RemoteStillImageView(url: url)
-            }
-        } else {
-            hotCoverPlaceholder
-        }
-    }
+            .multilineTextAlignment(.center)
+            .shadow(color: Color.black.opacity(0.4), radius: 10, x: 0, y: 2)
 
-    /// Centered play affordance over a hot card cover (LBPHotCard 242-249).
-    private var centeredPlay: some View {
-        ZStack {
-            Circle().fill(Color.black.opacity(0.5))
-            Image(systemName: "play.fill")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.white)
+            viewCartButton
+
+            Spacer(minLength: 0)
         }
-        .frame(width: 32, height: 32)
+        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Duration pill (LBPHotCard 232-241) — play glyph + the verbatim duration
-    /// string over a translucent dark capsule.
-    private func durationPill(_ duration: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "play.fill")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundColor(.white)
-            Text(duration)
-                .font(.system(size: 10 * theme.fontScale, weight: .semibold))
-                .foregroundColor(.white)
+    /// 查看購物車 CTA (LBPEndScreen `EndStage`'s empty branch) — reuses the EXACT
+    /// button style already established at `ProductListView.cartCTA` (`CartFillGlyph`
+    /// + `theme.cornerRadius` + `theme.accent` fill), so this footer reads as the
+    /// same cart affordance the product list already uses.
+    private var viewCartButton: some View {
+        Button(action: { onViewCart?() }) {
+            HStack(spacing: 10) {
+                CartFillGlyph(size: 20, color: .white)
+                Text(Self.viewCartLabel)
+                    .font(.system(size: 16 * theme.fontScale, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: theme.cornerRadius)
+                    .fill(theme.accent))
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(
-            RoundedRectangle(cornerRadius: 999)
-                .fill(Color.black.opacity(0.55)))
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.momentEndViewCart)
     }
 
     // MARK: - Helpers
 
-    /// Number of `maxHotCards`-sized recommendation pages over `hotCount` items (ceil
-    /// division). `hotCount <= 0 → 0`; otherwise `ceil(hotCount / maxHotCards)`
-    /// (e.g. 3 → 1, 4 → 2, 6 → 2, 7 → 3). Pure — no view state.
-    static func pageCount(forHotCount count: Int) -> Int {
-        guard count > 0 else { return 0 }
-        return (count + maxHotCards - 1) / maxHotCards
-    }
-
-    /// The `maxHotCards`-sized window of `hot` at `page` (the「換一批」recommendation
-    /// window). `page == 0` (or any out-of-range / negative `page`) SAFELY falls back
-    /// to `Array(hot.prefix(maxHotCards))` — the existing behavior → baseline
-    /// byte-identical; otherwise `hot[page*maxHotCards ..< min(+maxHotCards, count)]`.
-    /// Pure — never crashes on a stale / out-of-range `page`.
-    static func hotWindow(_ hot: [LBHotItem], page: Int) -> [LBHotItem] {
-        let start = page * maxHotCards
-        guard page > 0, start < hot.count else {
-            return Array(hot.prefix(maxHotCards))
-        }
-        return Array(hot[start ..< min(start + maxHotCards, hot.count)])
+    /// The「直播時長：…」line (LBPEndScreen `EndStage`'s empty branch: `` `直播時長：${
+    /// (liveInfo && liveInfo.duration) || '--:--:--'}` ``). Empty `duration` (the
+    /// current production reality — no upstream signal is wired yet) renders the
+    /// design's documented fallback `"--:--:--"`. Pure — no view state.
+    static func liveDurationLine(_ duration: String) -> String {
+        "\(liveDurationPrefix)\(duration.isEmpty ? fallbackDuration : duration)"
     }
 
     /// Format `Int` seconds → `mm:ss` (for `LBNavItem.duration`, which IS seconds —
@@ -623,8 +459,8 @@ public struct EndScreenView: View {
 
     /// A trimmed non-empty URL, or nil (empty string → absent). Mirrors
     /// `CarouselCardView.previewURL` / `coverURL`, so an empty `preview` (the backend's
-    /// current default for `hot[]` / `next[]`) falls through to `cover`, and an empty
-    /// `cover` falls through to the black placeholder (no broken image, no crash).
+    /// current default for `next[]`) falls through to `cover`, and an empty `cover`
+    /// falls through to the black placeholder (no broken image, no crash).
     static func nonEmptyURL(_ raw: String) -> URL? {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return s.isEmpty ? nil : URL(string: s)
@@ -633,12 +469,13 @@ public struct EndScreenView: View {
     // MARK: - Decorative design tokens (literal moments.jsx hex via Color(hex:))
     //
     // accent comes from the resolved theme; these are FIXED decorative colors lifted
-    // verbatim from `LBPEndScreen` / `LBPHotCard` (the dark-scrim moment is white-on
-    // -dark regardless of the host theme background — design §2). Kept consistent
+    // verbatim from `LBPEndScreen` (the dark-scrim moment is white-on-dark
+    // regardless of the host theme background — design §2). Kept consistent
     // with the family-2/3 surfaces' surface-token approach (Color(hex:) literals).
 
-    /// Full-bleed scrim (`rgba(8,8,12,0.8)`).
-    static let scrim = (Color(hex: "#08080C") ?? Color.black).opacity(0.8)
+    /// Full-bleed scrim (`rgba(50,50,50,0.64)`, no blur — `rb-ios-endscreen-live-
+    /// empty-state`; was `rgba(8,8,12,0.8)`).
+    static let scrim = (Color(hex: "#323232") ?? Color.black).opacity(0.64)
     /// Faint on-dark rule line (`rgba(255,255,255,0.3)`).
     static let onDarkFaint = Color.white.opacity(0.3)
     /// Dim on-dark caption (`rgba(255,255,255,0.6)`).
@@ -652,73 +489,58 @@ public struct EndScreenView: View {
     /// Ring track (`rgba(255,255,255,0.28)`).
     static let ringTrack = Color.white.opacity(0.28)
 
-    /// FIXED SMALL hot set cap — a PLAIN HStack of a bounded N (NEVER lazy / scroll).
-    static let maxHotCards = 3
-
     // MARK: - Fixed localized copy (static presentation strings)
 
     static let endedLabel = "影片結束"
-    static let liveEndedLabel = "直播已結束"
+    static let liveEndedTitle = "直播已結束"
+    static let liveDurationPrefix = "直播時長："
+    static let fallbackDuration = "--:--:--"
     static let autoPlayLabel = "%d 秒後自動播放下一支"
     static let untitledNext = "下一支影片"
     static let cancelLabel = "取消"
     static let watchNextLabel = "立即觀看"
-    static let recommendTitle = "為你推薦"
-    static let shuffleLabel = "換一批"
-    static let emptyHotLabel = "目前沒有推薦影片"
+    static let viewCartLabel = "查看購物車"
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)
 //
-// Deterministic END moments (倒數變體 + 熱門變體) so previews / the snapshot test
+// Deterministic END moments (倒數變體 + 空狀態變體) so previews / the snapshot test
 // render the moment's "happy path" without a live player. Built via the skeleton's
-// documented demo recipe (`MomentsModel.demoNavItem` / `demoHotItem` /
-// `demoHotSet` / `LBEndScreenCountdown(remain:total:)` — all VERIFIED public inits
-// reachable from `LivebuyReferenceUI`).
+// documented demo recipe (`MomentsModel.demoNavItem` /
+// `LBEndScreenCountdown(remain:total:)` — VERIFIED public inits reachable from
+// `LivebuyReferenceUI`).
 
 public extension EndScreenView {
 
     /// A deterministic 倒數變體 demo: an active countdown (`remain 3 / total 5`) + one
-    /// watch-next preview target + a small 熱門 set, action-free. Mirrors
-    /// `MomentsModel.demoEndCountdown`'s fixture.
+    /// watch-next preview target, action-free. Mirrors `MomentsModel.demoEndCountdown`'s
+    /// fixture.
     static func demoCountdown(theme: ReferenceUITheme) -> EndScreenView {
         EndScreenView(
             theme: theme,
             countdown: LBEndScreenCountdown(remain: 3, total: 5),
-            next: [MomentsModel.demoNavItem()],
-            hot: MomentsModel.demoHotSet)
+            next: [MomentsModel.demoNavItem()])
     }
 
-    /// A deterministic 熱門變體 demo: NO countdown, empty watch-next, a FIXED SMALL
-    /// 熱門 set (3 cards), action-free. Mirrors `MomentsModel.demoEndHotOnly`.
-    static func demoHot(theme: ReferenceUITheme) -> EndScreenView {
+    /// A deterministic 空狀態變體 demo (`rb-ios-endscreen-live-empty-state`): NO
+    /// countdown, empty watch-next, NO `liveDuration` — renders the design's
+    /// documented「--:--:--」fallback (the current production reality: no upstream
+    /// live-duration signal is wired yet).
+    static func demoEmpty(theme: ReferenceUITheme) -> EndScreenView {
+        EndScreenView(
+            theme: theme,
+            countdown: nil,
+            next: [])
+    }
+
+    /// A deterministic 空狀態變體 demo WITH a populated `liveDuration`, exercising the
+    /// non-fallback rendering path of「直播時長：…」.
+    static func demoEmptyWithDuration(theme: ReferenceUITheme, liveDuration: String = "01:23:45") -> EndScreenView {
         EndScreenView(
             theme: theme,
             countdown: nil,
             next: [],
-            hot: MomentsModel.demoHotSet)
-    }
-
-    /// A deterministic no-countdown LIVE-ENDED demo (end-screen-no-countdown #6c):
-    /// 「直播已結束」title + a FIXED SMALL 熱門 set, NO countdown / NO auto-advance.
-    static func demoLiveEnded(theme: ReferenceUITheme) -> EndScreenView {
-        EndScreenView(
-            theme: theme,
-            countdown: nil,
-            next: [],
-            hot: MomentsModel.demoHotSet,
-            liveEnded: true)
-    }
-
-    /// A deterministic no-countdown LIVE-ENDED demo with NO hot — just the
-    /// 「直播已結束」title (live ended with neither next nor hot).
-    static func demoLiveEndedNoHot(theme: ReferenceUITheme) -> EndScreenView {
-        EndScreenView(
-            theme: theme,
-            countdown: nil,
-            next: [],
-            hot: [],
-            liveEnded: true)
+            liveDuration: liveDuration)
     }
 }
 
@@ -731,9 +553,13 @@ struct EndScreenView_Previews: PreviewProvider {
             EndScreenView.demoCountdown(theme: theme)
                 .previewDisplayName("countdown · ring + preview")
 
-            // 熱門變體 — 為你推薦 header + plain HStack of LBPHotCards.
-            EndScreenView.demoHot(theme: theme)
-                .previewDisplayName("hot · recommendation row")
+            // 空狀態變體 —「直播已結束」title + 直播時長 (fallback) + 查看購物車 CTA.
+            EndScreenView.demoEmpty(theme: theme)
+                .previewDisplayName("empty · fallback duration")
+
+            // 空狀態變體 — with a populated liveDuration.
+            EndScreenView.demoEmptyWithDuration(theme: theme)
+                .previewDisplayName("empty · populated duration")
         }
         .frame(width: 393, height: 852)
         .previewLayout(.sizeThatFits)

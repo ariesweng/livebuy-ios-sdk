@@ -181,6 +181,10 @@ final class LivebuyLiveEntryController: ObservableObject {
     private let pollInterval: TimeInterval
     /// 注入的 fetch 副作用（預設 `Livebuy.fetchLatestLive(id:)`）。
     private let fetch: (String) async throws -> LBVideoItem?
+    /// ios-live-now-poll-fetch-cache：唯讀、短 TTL 的跨 controller fetch 快取。預設 `.shared`；
+    /// 真的驅動 `pollLoop()` 跑（透過 `start()`）的測試 MUST 注入私有 `LiveNowFetchCache()`
+    /// instance 以與 `.shared`、與其他測試隔離——見 `LiveNowFetchCache.swift` 檔頭。
+    private let cache: LiveNowFetchCache
 
     /// 最後套用的直播 id——偵測「新一場」以重置 `dismissed`。
     private var lastLiveId: String?
@@ -190,12 +194,17 @@ final class LivebuyLiveEntryController: ObservableObject {
 
     private var pollTask: Task<Void, Never>?
     private var liveEndObserver: NSObjectProtocol?
+    /// ios-live-now-poll-fetch-cache：只有本 instance 的第一輪輪詢才會讀 `cache`；之後每一輪皆
+    /// 無條件真實 fetch。不在 `pollLoop` 的 `catch` 分支設定，讓快重試那一輪仍有機會查快取。
+    private var hasAppliedFirstRound = false
 
     init(shopId: String,
          pollInterval: TimeInterval = 30,
+         cache: LiveNowFetchCache = .shared,
          fetch: @escaping (String) async throws -> LBVideoItem? = { try await Livebuy.fetchLatestLive(id: $0) }) {
         self.shopId = shopId
         self.pollInterval = pollInterval
+        self.cache = cache
         self.fetch = fetch
         self.theme = ReferenceUIThemeResolver.resolve(
             coreTheme: (try? Livebuy.sdkConfig())?.theme, hostOptions: nil)
@@ -218,10 +227,23 @@ final class LivebuyLiveEntryController: ObservableObject {
 
     /// `do/catch`（非 `try?`）區分「無直播」（nil → 清空入口）與「請求失敗 / 尚未
     /// configure」（throw → 保留狀態、3s 快重試）。成功則 `pollInterval`（預設 30s）穩定節奏。
+    ///
+    /// ios-live-now-poll-fetch-cache：只有 `!hasAppliedFirstRound` 這一輪才會先查 `cache`——命中
+    /// 就直接用（跳過真實 `fetch`），沒命中才真的 `fetch` 再寫回 `cache`。不論走哪條路，這輪跑完
+    /// （成功）後 `hasAppliedFirstRound` 恆設 `true`，之後每一輪都無條件真實 `fetch`（仍持續寫回
+    /// `cache` 供其他 controller 受益）。`catch` 分支不設 `hasAppliedFirstRound`，讓快重試那一輪
+    /// 仍有機會查快取。
     private func pollLoop() async {
         while !Task.isCancelled {
             do {
-                let video = try await fetch(shopId)
+                let video: LBVideoItem?
+                if !hasAppliedFirstRound, case .hit(let cached) = cache.cached(shopId: shopId) {
+                    video = cached
+                } else {
+                    video = try await fetch(shopId)
+                    cache.record(shopId: shopId, video: video)
+                }
+                hasAppliedFirstRound = true
                 let gated = lbLiveEntryGate(video)
                 await MainActor.run { self.apply(gated) }
                 try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
@@ -444,11 +466,17 @@ public struct LivebuyLiveEntry: View {
     /// `body`（透過 `UIHostingController` 走一輪真的 SwiftUI render pass），而不是直接呼叫
     /// controller 方法——這是唯一能證明 `.onAppear` 真的被 SwiftUI 觸發的方式
     /// （live-entry-onappear-poll-start-fix regression coverage）。
+    ///
+    /// `cacheForTesting`（ios-live-now-poll-fetch-cache）：預設 `.shared`；任何真的驅動
+    /// `.onAppear` → `start()` → `pollLoop()` 跑的測試 SHOULD 傳入私有 `LiveNowFetchCache()`
+    /// instance，避免跟其他測試共用 `.shared` 對同一 shopId 的快取互相汙染。NOT 暴露在上面的
+    /// public `init(shopId:config:)`——正常 host 只用 `.shared`。
     init(shopId: String,
          config: LivebuyLiveEntryConfig = LivebuyLiveEntryConfig(),
+         cacheForTesting: LiveNowFetchCache = .shared,
          fetchForTesting: @escaping (String) async throws -> LBVideoItem?) {
         _controller = StateObject(wrappedValue: LivebuyLiveEntryController(
-            shopId: shopId, pollInterval: config.pollInterval, fetch: fetchForTesting))
+            shopId: shopId, pollInterval: config.pollInterval, cache: cacheForTesting, fetch: fetchForTesting))
         _appeared = State(initialValue: lbLiveEntryInitialAppeared(timing: config.timing))
         self.config = config
     }

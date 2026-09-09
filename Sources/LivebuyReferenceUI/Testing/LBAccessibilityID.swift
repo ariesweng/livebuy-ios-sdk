@@ -251,9 +251,11 @@ public enum LBAccessibilityID {
     public static let momentEnd = "lb_moment_end"
     public static let momentEndWatch = "lb_moment_end_watch"
     public static let momentEndCancel = "lb_moment_end_cancel"
-    public static let momentEndReshuffle = "lb_moment_end_reshuffle"
-    public static let momentEndHotRow = "lb_moment_end_hot_row"
-    public static func momentHotCard(_ index: Int) -> String { "lb_moment_hot_card_\(index)" }
+    // NOTE: `momentEndReshuffle` / `momentEndHotRow` / `momentHotCard(_:)` (the retired 熱門
+    // variant's「換一批」pill / card row / per-card ids) were removed
+    // (`rb-ios-endscreen-live-empty-state`) — EndScreen's non-countdown branch is now the
+    // 空狀態變體, which has no per-item list. See `momentEndViewCart` below.
+    public static let momentEndViewCart = "lb_moment_end_view_cart"
     public static let momentStart = "lb_moment_start"
     public static let momentStartSkip = "lb_moment_start_skip"
     public static let momentLoading = "lb_moment_loading"

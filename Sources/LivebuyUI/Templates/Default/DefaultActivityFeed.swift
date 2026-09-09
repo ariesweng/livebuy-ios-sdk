@@ -54,11 +54,18 @@ public struct LBFeedItem: Equatable {
 
     public let kind: Kind
     public let text: String
-    /// Present only for `.chat` rows — the message author's nickname (backend
-    /// `LBPushMsg.name` / `LBComment.name`). `nil` for every other kind and for
-    /// chat with no usable name (blank → normalized to nil by `appendChat`). The
-    /// reference-ui renders it as the chat-row nickname; nil → text-only fallback
+    /// Present for `.chat` rows — the message author's nickname (backend
+    /// `LBPushMsg.name` / `LBComment.name`). `nil` for `.activity` / `.productSale`
+    /// and for chat with no usable name (blank → normalized to nil by `appendChat`).
+    /// The reference-ui renders it as the chat-row nickname; nil → text-only fallback
     /// (chat-nickname-display).
+    ///
+    /// Also present for `.eventJoin` rows — the streamer name carried by that
+    /// specific event-begin push (`LBPushMsg.name`, threaded in by
+    /// `appendEventJoin(name:)`). This is a **pure passthrough**: unlike `.chat`,
+    /// it is NOT blank-to-nil normalized (`event-join-streamer-name-template`).
+    /// Distinct from the header-level, whole-session `hostName` (= `channel.shop.name`,
+    /// the merchant name) — the two MUST NOT be conflated.
     public let userName: String?
 
     // MARK: - Chat role metadata (chat-message-taxonomy ⑤, 群組① 真正的聊天)
@@ -252,8 +259,15 @@ public final class DefaultActivityFeed {
     /// Surface a core event-begin push as an INDEPENDENT event-join feed item
     /// (host draws `LBEventJoinLine`). `joined` starts false. event-END pushes
     /// MUST NOT reach here — they stay plain `.chat` rows (see `handlePush`).
-    public func appendEventJoin(eid: Int, keyword: String, text: String = "") {
-        append(LBFeedItem(kind: .eventJoin, text: text, eid: eid, keyword: keyword, joined: false))
+    ///
+    /// `name` is the streamer name carried by THIS push (`LBPushMsg.name`) — a
+    /// pure passthrough into `LBFeedItem.userName` (NOT blank-to-nil normalized,
+    /// unlike `appendChat`; see `event-join-streamer-name-template` design).
+    /// Defaults to `nil` so every existing call site stays source- and
+    /// behavior-compatible.
+    public func appendEventJoin(eid: Int, keyword: String, text: String = "", name: String? = nil) {
+        append(LBFeedItem(kind: .eventJoin, text: text, userName: name,
+                          eid: eid, keyword: keyword, joined: false))
     }
 
     /// Template-optimistic join mark: flip every still-unjoined event-join item

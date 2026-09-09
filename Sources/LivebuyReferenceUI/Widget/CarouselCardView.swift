@@ -616,8 +616,8 @@ public struct CarouselCardView: View {
             .fill(
                 LinearGradient(
                     gradient: Gradient(colors: [
-                        Color(hex: "#FFD7A8") ?? .orange,
-                        Color(hex: "#E27D5A") ?? .orange,
+                        ReferenceUIProductPlaceholderPalette.top,
+                        ReferenceUIProductPlaceholderPalette.bottom,
                     ]),
                     startPoint: .topLeading, endPoint: .bottomTrailing))
             .frame(width: size, height: size)
@@ -1201,6 +1201,41 @@ final class PreviewPlaybackController {
 /// scratch (placeholder flicker). Mirrors the host's `RemoteImageCache`. iOS-14-safe.
 enum ReferenceUIImageCache {
     static let shared = NSCache<NSURL, UIImage>()
+
+    /// Decode `data` as an image and store it in `shared` under `url`. Returns the decoded
+    /// image, or `nil` (no cache write) when `data` is missing / undecodable. SINGLE choke
+    /// point for the decode+cache-write step — used by BOTH `RemoteStillImageView
+    /// .Coordinator.load`'s network-completion path AND `ReferenceUIImagePrefetch.prefetch`
+    /// (rb-ios-product-image-loading-polish), so the two call sites can never drift on
+    /// decode/cache semantics. `internal` (not `private`) so `@testable import` test files can
+    /// exercise it directly with in-memory `Data`, no network round trip needed.
+    @discardableResult
+    static func decodeAndStore(_ data: Data?, for url: URL) -> UIImage? {
+        guard let data = data, let image = UIImage(data: data) else { return nil }
+        shared.setObject(image, forKey: url as NSURL)
+        return image
+    }
+}
+
+/// Shared placeholder gradient tokens for PRODUCT PHOTO chips (loading / no-photo /
+/// snapshot-deterministic state) — `CarouselCardView`'s widget product thumb,
+/// `ProductZoomOverlayView`, `MiniCartView`, `ProductDetailSheetView`'s gallery placeholder.
+/// Neutral grey (`rb-ios-product-image-loading-polish` — was a warm orange gradient;
+/// user-reported it flashed distractingly on the mini-cart peek's first paint before the real
+/// photo arrived). Both stops are DARKER than the corresponding old orange stops (`#FFD7A8`
+/// L≈221.6 → `#C7C7CC` L≈199.5; `#E27D5A` L≈151.3 → `#8E8E93` L≈142.6, `L =
+/// 0.299R+0.587G+0.114B`), so the existing white monogram text overlaid on 3 of the 4 call
+/// sites keeps AT LEAST as much contrast as before — see `ProductImageLoadingPolishTests`.
+/// `#C7C7CC` already appears elsewhere in this module (`LiveOverlayChromeView.swift`);
+/// `#8E8E93` is iOS's well-known system grey. Deliberately EXCLUDES
+/// `VideoInfoPanelView`'s shop-logo/`shopName` monogram chip, which happens to reuse the SAME
+/// old orange pair but is a different semantic surface (merchant branding, not a product
+/// photo) — left untouched by this change.
+enum ReferenceUIProductPlaceholderPalette {
+    static let topHex = "#C7C7CC"
+    static let bottomHex = "#8E8E93"
+    static var top: Color { Color(hex: topHex) ?? .gray }
+    static var bottom: Color { Color(hex: bottomHex) ?? .gray }
 }
 
 /// A `UIImageView` that reports NO intrinsic content size. Plain `UIImageView`
@@ -1229,6 +1264,20 @@ struct RemoteStillImageView: UIViewRepresentable {
     /// (none of which pass this) is byte-identical (rb-ios-product-detail-main-image-scale-down-
     /// letterbox).
     var onImageLoaded: ((CGSize) -> Void)? = nil
+
+    /// Applies `image` to `imageView` with a short cross-dissolve fade (`rb-ios-product-image-
+    /// loading-polish`, 150–200ms, default 180ms) — the NETWORK-completion path's transition.
+    /// `UIView.transition(...)` (NOT SwiftUI's `.transition(.opacity)`, which does not apply to
+    /// this `UIViewRepresentable`'s internal `UIImageView` content swap) is the idiomatic UIKit
+    /// mechanism for animating an image-view content change. `internal` (not `private`) so it is
+    /// directly unit-testable with a bare `UIImageView` — no network round trip needed. NOT used
+    /// by the cache-hit path (`load`'s early-return branch below), which stays a synchronous,
+    /// unanimated assignment.
+    static func applyWithFade(_ image: UIImage, to imageView: UIImageView, duration: TimeInterval = 0.18) {
+        UIView.transition(with: imageView, duration: duration, options: .transitionCrossDissolve) {
+            imageView.image = image
+        }
+    }
 
     func makeUIView(context: Context) -> UIImageView {
         // `FlexibleImageView` reports NO intrinsic content size, so a full-bleed host
@@ -1293,13 +1342,17 @@ struct RemoteStillImageView: UIViewRepresentable {
                 return
             }
             let t = URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-                guard let data = data, let image = UIImage(data: data) else { return }
-                ReferenceUIImageCache.shared.setObject(image, forKey: url as NSURL)
+                // Single decode+cache-write choke point, shared with `ReferenceUIImagePrefetch
+                // .prefetch` (rb-ios-product-image-loading-polish) — the two paths can never
+                // drift on decode/cache semantics.
+                guard let image = ReferenceUIImageCache.decodeAndStore(data, for: url) else { return }
                 DispatchQueue.main.async {
                     // Re-check currency: a late completion for a NOW-stale URL (the cell
                     // was recycled to a different product) MUST NOT overwrite the image.
                     guard self?.loadedURL == url else { return }
-                    imageView.image = image
+                    // Network-completion path fades in (rb-ios-product-image-loading-polish) —
+                    // the cache-hit branch above stays a synchronous, unanimated assignment.
+                    RemoteStillImageView.applyWithFade(image, to: imageView)
                     // `image.size` is already POINTS (scale-corrected) — do NOT divide by
                     // `UIScreen.main.scale` again (rb-ios-product-detail-main-image-scale-down-
                     // letterbox D1).
@@ -1311,6 +1364,41 @@ struct RemoteStillImageView: UIViewRepresentable {
         }
 
         deinit { task?.cancel() }
+    }
+}
+
+/// Fire-and-forget background prefetch (`rb-ios-product-image-loading-polish`) — call ahead of
+/// a product entering the now-introducing / narrating window so its image is already decoded
+/// and cached (`ReferenceUIImageCache.shared`) by the time `RemoteStillImageView.Coordinator
+/// .load` needs it (cache-hit path — synchronous, no placeholder flash). Read-only cache warm;
+/// NEVER touches any `UIImageView` / SwiftUI `@State`. `internal` (not `private`) so it — and
+/// its dedicated test — can be called directly from `PlayerShellView` (a different file, same
+/// module) and from test files via `@testable import`.
+enum ReferenceUIImagePrefetch {
+    /// URLs with an in-flight prefetch request, guarded by `lock` — the `URLSession` completion
+    /// can fire on a background queue, and a caller (`PlayerShellView`) may invoke `prefetch`
+    /// again for the SAME url before the first request completes (e.g. a repeated 5s products
+    /// poll re-handing the same list) — dedup so that re-invocation is a cheap no-op, not a
+    /// second network round trip.
+    private static var inFlight = Set<URL>()
+    private static let lock = NSLock()
+
+    static func prefetch(url rawURL: URL) {
+        // Same http→https upgrade point `Coordinator.load` uses, so the cache key this warms
+        // is the SAME key a later `Coordinator.load` cache lookup will check.
+        let url = rawURL.lbHTTPSUpgraded
+        guard ReferenceUIImageCache.shared.object(forKey: url as NSURL) == nil else { return }
+        lock.lock()
+        guard !inFlight.contains(url) else { lock.unlock(); return }
+        inFlight.insert(url)
+        lock.unlock()
+        let task = URLSession.shared.dataTask(with: url) { data, _, _ in
+            _ = ReferenceUIImageCache.decodeAndStore(data, for: url)
+            lock.lock()
+            inFlight.remove(url)
+            lock.unlock()
+        }
+        task.resume()
     }
 }
 

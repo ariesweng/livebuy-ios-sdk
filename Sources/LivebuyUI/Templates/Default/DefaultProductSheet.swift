@@ -365,6 +365,16 @@ public final class DefaultVariantPicker {
         onMutation?()
     }
 
+    /// Reset to no-product state (teardown / video-switch,
+    /// ios-product-sheet-stack-video-switch-reset-template) — mirrors `reset(for:)`
+    /// but with no product to re-seed from: `specifications` is cleared directly
+    /// (it is not part of `LBVariantState`, so `applyIfChanged` alone would not
+    /// touch it). Diff-then-notify via the existing `applyIfChanged` path.
+    func clear() {
+        specifications = []
+        applyIfChanged(LBVariantState(groups: [], selection: [:], selectedSpec: nil, selectedSpecificationId: nil))
+    }
+
     /// PURE resolver (testable in isolation): returns the matching `LBSpec` ONLY
     /// when EVERY group has a chosen option AND a spec whose `name` matches all
     /// chosen option values (via `specNameMatches`, see below) exists. Returns nil
@@ -528,6 +538,13 @@ public final class DefaultQtyStepper {
         self.min = min
         self.max = max
         onMutation?()
+    }
+
+    /// Reset to this class's own construction-time defaults (teardown /
+    /// video-switch, ios-product-sheet-stack-video-switch-reset-template).
+    /// Diff-then-notify via the existing `applyIfChanged(qty:min:max:)` path.
+    func clear() {
+        applyIfChanged(qty: 1, min: 1, max: 0)
     }
 }
 

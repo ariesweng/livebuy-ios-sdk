@@ -473,15 +473,26 @@ struct PlayerOverlayRootView: View {
                 model: momentsModel,
                 theme: theme,
                 // Real video surface (placeholder bg suppressed) → the end-screen
-                // recommended / next-video cards load real cover / preview media;
+                // next-video preview card loads real cover / preview media;
                 // standalone / snapshot keeps deterministic placeholders (same flag the
                 // product sheets / start-screen surfaces use).
                 live: !paintsBackgroundPlaceholder,
+                // EndScreen is now LIVE-ONLY (rb-ios-endscreen-live-empty-state): reuse
+                // this root's OWN reactive isLive mirror (`isLiveMode`, already fed by
+                // `PlayerShellView.onIsLiveChange` — see its declaration above) instead of
+                // reading `shellModel.isLive` directly (a plain, non-observed `let` at
+                // this level would not trigger a re-render on change).
+                isLiveChannel: isLiveMode,
                 onWatchNext: onWatchNext,
                 onPickHot: onPickHot,
                 onCancel: onCancel,
                 onRetry: onRetry,
-                onDismiss: onDismiss)
+                onDismiss: onDismiss,
+                // 空狀態變體「查看購物車」CTA → the SAME `onOpenProductList` action the
+                // LIVE bottom bar's bag button uses (no deeper "jump straight to the
+                // cart" seam exists at this assembly point — rb-ios-endscreen-live-
+                // empty-state design.md「onViewCart wiring」).
+                onViewCart: onOpenProductList)
 
             // Start lifecycle (loading / buffering / splash) — a PLAYER-SHELL surface,
             // NOT a moment (rb-ios-start-screen-out-of-moments). Composed topmost so the

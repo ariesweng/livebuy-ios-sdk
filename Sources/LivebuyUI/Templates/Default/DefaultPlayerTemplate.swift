@@ -1442,7 +1442,10 @@ public final class DefaultPlayerTemplate {
         // begin/end 由 `push.ek` isset 與否自然分流：isset → keyword 非空 → CTA；unset → `""` → 純公告。
         if push.kind == .event, let eid = push.eid, eid > 0 {
             let keyword = Self.eventJoinKeyword(for: push)
-            activityFeed.appendEventJoin(eid: eid, keyword: keyword, text: push.text)
+            // event-join-streamer-name-template: thread this push's own streamer name
+            // (push.name) into the feed item's userName — distinct from the header's
+            // whole-session hostName (= channel.shop.name).
+            activityFeed.appendEventJoin(eid: eid, keyword: keyword, text: push.text, name: push.name)
             return
         }
         switch push.kind {
@@ -1643,6 +1646,18 @@ public final class DefaultPlayerTemplate {
             // 換片抵達端立即套用顯示覆寫（隱藏 or 還原快取），最多存活到下一輪輪詢
             // （`handlePollReceived` 呼叫 `clearSwitchOverride()`）——video-switch bridge design.md D1/D2。
             activeEvent.applySwitchOverride(videoId: to)
+            // 重置商品 sheet-stack 五個 view-model（ios-product-sheet-stack-video-switch-reset
+            // -template）：離開的影片若還開著商品明細 sheet、選了規格/數量，換片後 MUST NOT 殘留——
+            // 否則使用者在舊 sheet 上按「加入購物車」會送出舊影片情境的商品資料（資料正確性風險，
+            // 不只是視覺殘留）。Parity RN `DefaultTemplate.clear()`（五個皆清）；Android 目前只清四個
+            // （缺 variantPicker，見該 change proposal.md Platform Scope 記錄的既有落差）。這五個
+            // view-model 的 `onMutation` 早已接到 `notifyChange()`（見 init 的 sheet-stack coalescing
+            // 接線），因此會自動併入本批次唯一的 coalesced onChange，不需要額外處理。
+            productSheet.clearDetail()
+            variantPicker.clear()
+            qtyStepper.clear()
+            miniCart.dismissMiniCart()
+            cartCTA.resetForSession()
         }
     }
 

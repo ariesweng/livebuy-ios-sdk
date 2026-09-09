@@ -5,6 +5,49 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.17.0] - 2026-09-10
+
+> **Minor.** 自 `4.16.0` 以來累積 69 個 commit（iOS 14 個獨立行為，另 1 個支援性 baseline
+> 重生 commit，另 2 個 Example demo app 修復不計入本檔）。主軸是現正直播 pill turnkey 化＋
+> 輪詢短 TTL 快取、EndScreen 直播結束畫面重新設計（design R41）、直播公告橫幅圖示改 bullhorn
+> 向量、聊天室「最新訊息」pill 改白底 accent 字、CC 字幕 icon 啟用 active 填色態，以及一系列
+> 使用者實機回報後的修復。**含 1 項 ⚠️ BREAKING（僅 iOS）**——比照
+> v4.5.0/v4.8.0/v4.9.0/v4.11.0/v4.13.0/v4.14.0/v4.15.0/v4.16.0 先例，整輪仍判定 minor。完整
+> 敘述見 [`docs/release-notes/v4.17.0.md`](../docs/release-notes/v4.17.0.md)。
+
+### Added
+
+- **`LivebuySDK.currentShopId() -> String?`**（core）：`configure()` 最後一次呼叫帶入 shopId
+  的唯讀回讀，仿照既有 `currentFbc()`/`currentFbp()` 回讀對。
+- **現正直播 pill／浮動入口輪詢加一層唯讀短 TTL（5 秒）快取**（reference-ui），省下切換瞬間
+  的重複 API call。
+- **CC 字幕 icon 啟用時改 active 填色態**（reference-ui）。
+- **直播模式點商品縮圖跳過關閉商品列表抽屜**（reference-ui）。
+- **聊天室加入活動列改顯示訊息自帶主播名**（template + reference-ui）。
+- **商品照片載入體驗優化**：提早 prefetch + 淡入轉場 + 佔位色改中性灰階（reference-ui）。
+
+### Changed
+
+- **聊天室「最新訊息」pill 改白底 accent 字**（背景/前景色源角色互換，reference-ui）。
+- **EndScreen 直播結束畫面重新設計**（design R41）：移除熱門推薦變體卡牆，改為直播限定的
+  倒數／無推薦兩態極簡空狀態。
+- **直播公告橫幅圖示改為自訂 bullhorn 向量路徑**，取代原本系統 SF Symbol 暫代品。
+- **⚠️ BREAKING（僅 iOS）— `LivebuyPlayerConfig` 現正直播 pill 預設改為開啟並自動帶入
+  shopId**：新增 `showsLiveNowPill: Bool = true`（預設 on），`shopId == nil` 時改用
+  `LivebuySDK.currentShopId()` 自動解析。任何已 `configure(shopId:)` 且未手動設定
+  `LivebuyPlayerConfig.shopId` 的 host，升級後會開始看到這顆 pill；想維持舊行為設
+  `showsLiveNowPill = false`。純行為預設值翻轉，無 API 簽章破壞。
+
+### Fixed
+
+- **`PollManager` 丟棄換片時飛行中的過期 poll 回應**（core），修復切換直播時聊天室短暫顯示
+  前一場快取訊息。
+- **換片時補齊商品明細 sheet-stack 五個 view-model 重置**（template：`variantPicker` /
+  `qtyStepper` / `miniCart` / `cartCTA` / `productSheet`）。
+- **商品明細切換「更多商品」推薦商品時，捲動位置重置回最上方**（reference-ui）。
+- **已結束直播回放改用嚴格 `isLive` 排除，讓真正 VTT/CC 字幕可顯示**（reference-ui）。
+- **觀眾留言暱稱冒號改回白色，不再誤套暱稱粉色**（reference-ui）。
+
 ## [4.16.0] - 2026-09-09
 
 > **Minor.** 自 `4.15.0` 以來累積 109 個 commit（iOS 17 個獨立行為，另 2 個為既有功能的

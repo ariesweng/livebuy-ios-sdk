@@ -652,9 +652,21 @@ public struct ProductSheetsOverlayView: View {
     /// (`ProductRowOverlay.isReplayNeverIntroduced`) has no real intro time to jump to — the tap
     /// is a complete no-op (neither seek nor dismiss), rather than misleadingly seeking to
     /// position 0 and closing the drawer as if something happened.
+    ///
+    /// EXCEPTION (rb-ios-product-sheet-keep-open-on-live-seek): in `.live` (actively-live) mode,
+    /// the seek forward still fires (kept for call-contract consistency — core's `seek` is a
+    /// no-op against an actively-live stream anyway, there is no future to scrub to), but the
+    /// drawer is deliberately NOT dismissed. Live has no narrating host walking the viewer
+    /// through the catalog, so the product-list sheet SHOULD stay open across a thumbnail tap
+    /// (user report: closing it here just loses their place with nothing to show for it, unlike
+    /// VOD/replay where the seek produces a visible jump worth surfacing).
     private func seekToProductIntro(_ product: LBProduct) {
         if model.rowMode == .replay,
            ProductRowOverlay.isReplayNeverIntroduced(beginTime: product.beginTime, endTime: product.endTime) {
+            return
+        }
+        if model.rowMode == .live {
+            onSeekToProductIntro?(product)
             return
         }
         withAnimation { model.listPresented = false }

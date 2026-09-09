@@ -166,8 +166,8 @@ public struct ProductZoomOverlayView: View {
         ZStack {
             LinearGradient(
                 gradient: Gradient(colors: [
-                    Color(hex: "#FFD7A8") ?? .orange,
-                    Color(hex: "#E27D5A") ?? .orange,
+                    ReferenceUIProductPlaceholderPalette.top,
+                    ReferenceUIProductPlaceholderPalette.bottom,
                 ]),
                 startPoint: .topLeading, endPoint: .bottomTrailing)
             Text(ProductDetailSheetView.monogram(for: detail.name))

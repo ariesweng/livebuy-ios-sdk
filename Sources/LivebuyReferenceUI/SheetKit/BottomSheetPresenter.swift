@@ -122,6 +122,19 @@ private func sheetHeightReader<K: PreferenceKey>(
 //     `VStack { header; body; footer }` — content-sized, NO ScrollView (ImageRenderer renders
 //     ScrollView blank). This is byte-identical to the leaf's prior flat `VStack`, so baselines
 //     stay unchanged.
+//
+// Scroll-position reset on content swap (rb-ios-recommendation-switch-scroll-reset): the
+// production `ScrollView` above is wrapped in a `ScrollViewReader` with a fixed-identity
+// zero-height top anchor placed just before `bodyContent()`. `scrollResetKey` (below) is `nil`
+// for every pre-existing call site (`VideoInfoPanelView` / `ProductListView` /
+// `NotifyRestockSheetView`), so `.onChange` never fires there and this is byte-identical to the
+// prior bare `ScrollView { bodyContent() }`. `ProductDetailSheetView` is the one caller that
+// passes a non-nil key (`detail.productId`) — when the SAME sheet instance swaps in a different
+// product (a "更多商品" recommendation-card tap re-feeding `detail` into the same
+// `.lbBottomSheet(item:)` presentation, rb-ios-recommendation-nav-simplify), the key changes and
+// the body jumps back to the top instead of keeping the PREVIOUS product's scroll offset — a
+// `UIScrollView` content offset is intrinsic to the scroll view, not the content, so it never
+// resets on its own just because the content's data changed underneath it.
 struct LBSheetScaffold<Header: View, BodyContent: View, Footer: View>: View {
     @Environment(\.lbSheetHeightUncapped) private var uncapped
     /// Live drag-resize override (rb-ios-sheetkit-resize-dismiss-unify), set by
@@ -149,6 +162,28 @@ struct LBSheetScaffold<Header: View, BodyContent: View, Footer: View>: View {
     /// reachable by dragging the handle up, not any leaf's static default. Ignored when
     /// `fillToCap == true` (that branch always uses `0.4`).
     var capFraction: CGFloat = 0.5
+
+    /// Identity the production `ScrollView` resets its scroll position on (`nil`, the default,
+    /// never resets — rb-ios-recommendation-switch-scroll-reset). Every pre-existing call site
+    /// (`VideoInfoPanelView` / `ProductListView` / `NotifyRestockSheetView`) leaves this `nil`, so
+    /// `.onChange(of:)` below never fires and behavior is byte-identical to before this key
+    /// existed. `ProductDetailSheetView` passes `AnyHashable(detail.productId)` — the ONE existing
+    /// mechanism that swaps this scaffold's `bodyContent()` data on an already-mounted instance
+    /// (a "更多商品" recommendation-card tap re-feeding a DIFFERENT product's `LBProductDetailState`
+    /// into the same `.lbBottomSheet(item:)` presentation). `productId` (not the whole `detail`)
+    /// is deliberate: an in-place data refresh of the SAME product (e.g. a poll updating stock/
+    /// price) MUST NOT reset the user's scroll position — only an actual product switch should.
+    var scrollResetKey: AnyHashable? = nil
+
+    /// Fixed identity for the zero-height top anchor `scrollResetKey`'s `.onChange` scrolls to.
+    /// A `static` computed property (Swift does not allow a `static let` STORED property on a
+    /// generic type like `LBSheetScaffold<Header, BodyContent, Footer>`) — cheap to recompute,
+    /// evaluated at most once per body render. `private static` (not per-instance) is safe: every
+    /// `LBSheetScaffold` presentation owns its own `ScrollViewReader`/`ScrollView` pair, so this
+    /// identity is never visible to — or able to collide with — another on-screen scaffold's
+    /// anchor, nor with any business-content `.id()` inside `bodyContent()` (this string is
+    /// namespaced and never exposed outside this file).
+    private static var scrollTopAnchorID: String { "lb-sheet-scaffold-scroll-top" }
 
     @ViewBuilder var header: () -> Header
     @ViewBuilder var bodyContent: () -> BodyContent
@@ -200,12 +235,26 @@ struct LBSheetScaffold<Header: View, BodyContent: View, Footer: View>: View {
         } else {
             VStack(spacing: 0) {
                 header().background(sheetHeightReader(SheetHeaderHeightKey.self, active: !isResizing))
-                ScrollView {
-                    bodyContent().background(sheetHeightReader(SheetContentHeightKey.self, active: !isResizing))
+                // `ScrollViewReader` + a zero-height top anchor (rb-ios-recommendation-switch-
+                // scroll-reset): lets `scrollResetKey`'s `.onChange` below jump the scroll
+                // position back to the top when the caller swaps in different content (see the
+                // struct-level doc comment). The anchor sits OUTSIDE `bodyContent()` itself (not
+                // injected into it), so it adds zero height and does not disturb
+                // `SheetContentHeightKey`'s existing measurement of `bodyContent()` alone.
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: 0).id(Self.scrollTopAnchorID)
+                            bodyContent().background(sheetHeightReader(SheetContentHeightKey.self, active: !isResizing))
+                        }
+                    }
+                    // `effectiveFillToCap`（`fillToCap` 或使用者已拖曳出高度覆寫）：固定填滿到 bodyMax
+                    // （content 頂部對齊、下方留白 / 超出捲動）→ sheet 固定 = cap。否則 content-sized（既有行為）。
+                    .frame(height: effectiveFillToCap ? bodyMax : (bodyH <= 0 ? bodyMax : min(bodyH, bodyMax)))
+                    .onChange(of: scrollResetKey) { _ in
+                        proxy.scrollTo(Self.scrollTopAnchorID, anchor: .top)
+                    }
                 }
-                // `effectiveFillToCap`（`fillToCap` 或使用者已拖曳出高度覆寫）：固定填滿到 bodyMax
-                // （content 頂部對齊、下方留白 / 超出捲動）→ sheet 固定 = cap。否則 content-sized（既有行為）。
-                .frame(height: effectiveFillToCap ? bodyMax : (bodyH <= 0 ? bodyMax : min(bodyH, bodyMax)))
                 footer().background(sheetHeightReader(SheetFooterHeightKey.self, active: !isResizing))
             }
             // Anti-jitter freeze (rb-ios-sheetkit-resize-dismiss-unify, hardened by

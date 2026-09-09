@@ -540,7 +540,18 @@ public struct ProductDetailSheetView: View {
         // 同一個預設值。`0.9`（90%）現為全部 5 個 bottom sheet 共用的拖曳調高上限
         // （`BottomSheetChrome.resizeCeilingFraction`），使用者主動往上拖到頂才會看到，不再是
         // `.detail` 開啟就看到的靜態值。
-        LBSheetScaffold(fillToCap: presentation == .addToCart) {
+        // `scrollResetKey: AnyHashable(detail.productId)` (rb-ios-recommendation-switch-scroll-
+        // reset): resets the shared scaffold's scroll position to the top whenever a "更多商品"
+        // recommendation-card tap swaps THIS presentation's `detail` for a different product
+        // (`detail.productId` changes) — the container re-feeds the new product into the SAME
+        // `.lbBottomSheet(item:)` instance (`rb-ios-recommendation-nav-simplify`), so nothing else
+        // would otherwise reset the `ScrollView`'s carried-over offset. An in-place refresh of the
+        // SAME product (e.g. a poll updating stock/price) keeps `productId` unchanged and MUST NOT
+        // reset scroll — see `LBSheetScaffold.scrollResetKey`'s doc comment for why `productId`
+        // (not the whole `detail`) is the key. Covers both `.detail` and `.addToCart` — they share
+        // this one call site.
+        LBSheetScaffold(fillToCap: presentation == .addToCart,
+                         scrollResetKey: AnyHashable(detail.productId)) {
             header
         } bodyContent: {
             // `.addToCart` and `.detail` no longer share one flat body: `.detail`'s body is
@@ -889,8 +900,8 @@ public struct ProductDetailSheetView: View {
             } else {
                 LinearGradient(
                     gradient: Gradient(colors: [
-                        Color(hex: "#FFD7A8") ?? .orange,
-                        Color(hex: "#E27D5A") ?? .orange,
+                        ReferenceUIProductPlaceholderPalette.top,
+                        ReferenceUIProductPlaceholderPalette.bottom,
                     ]),
                     startPoint: .topLeading, endPoint: .bottomTrailing)
                 Text(Self.monogram(for: detail.name))

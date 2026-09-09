@@ -103,18 +103,33 @@ public struct ChatFeedView: View {
     /// timing or the gesture race that flips `autoStick`. Scrollable variant only.
     @State private var atBottom: Bool = true
 
+    /// The designated initializer, PLUS a test-only trailing parameter,
+    /// `initialAtBottomForTesting`, that seeds `atBottom`'s INITIAL `@State` value (same
+    /// `*ForTesting` seam pattern as `LivebuyPlayerPresenter.isMinimizedForTesting` —
+    /// `docs/unit-test-discipline.md` §3). DEFAULT `true` (= current "at bottom, pill
+    /// hidden" behavior) keeps every existing call site byte-for-byte unaffected.
+    ///
+    /// WHY THIS EXISTS (`rb-ios-chat-pill-color-align`): `atBottom` is private `@State`
+    /// driven by real scroll position with no read window, and this package's test target
+    /// has no ViewInspector / gesture-simulation infra to actually scroll a `ScrollView` in
+    /// the deterministic `ImageRenderer` snapshot path. Seeding the INITIAL `@State` value
+    /// at construction — before SwiftUI ever mounts the view — lets a snapshot test render
+    /// `returnToLatestPill` in its visible state through a REAL SwiftUI render pass, entirely
+    /// via this package's public/testable surface, no private-state reflection needed.
     public init(theme: ReferenceUITheme,
                 items: [LBFeedItem],
                 hostScrollable: Bool = false,
                 pinned: LBPinnedMessage? = nil,
                 hostName: String = "",
-                onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)? = nil) {
+                onJoinEvent: ((_ eid: Int, _ keyword: String) -> Void)? = nil,
+                initialAtBottomForTesting: Bool = true) {
         self.theme = theme
         self.items = items
         self.hostScrollable = hostScrollable
         self.pinned = pinned
         self.hostName = hostName
         self.onJoinEvent = onJoinEvent
+        self._atBottom = State(initialValue: initialAtBottomForTesting)
     }
 
     public var body: some View {
@@ -319,11 +334,18 @@ public struct ChatFeedView: View {
         }
     }
 
-    /// Accent "↓ 最新訊息" pill — visible only when the user is scrolled AWAY from the
-    /// bottom (`atBottom == false`, real scroll position); tapping returns to the newest
-    /// row and re-sticks. Driving this off scroll position (not `autoStick`) keeps it
-    /// hidden for an empty / short feed, so a switch-swipe race can no longer leave it
-    /// stuck on the next video.
+    /// White-background / accent-foreground "↓ 最新訊息" pill (`rb-ios-chat-pill-color-align`)
+    /// — visible only when the user is scrolled AWAY from the bottom (`atBottom == false`,
+    /// real scroll position); tapping returns to the newest row and re-sticks. Driving this
+    /// off scroll position (not `autoStick`) keeps it hidden for an empty / short feed, so a
+    /// switch-swipe race can no longer leave it stuck on the next video.
+    ///
+    /// Color scheme (`rb-ios-chat-pill-color-align`): background `Color.white`, text +
+    /// `ArrowDownGlyph` both `theme.accent` — a role SWAP of the prior `theme.accent`-background
+    /// / white-foreground scheme (same color source, `theme.accent`, just moved to the opposite
+    /// role), not a new hardcoded color. Position (`.overlay(alignment: .bottom)`, already
+    /// horizontally centered), padding, corner radius, font size, and trigger timing are
+    /// unchanged.
     @ViewBuilder
     private func returnToLatestPill(proxy: ScrollViewProxy) -> some View {
         if !atBottom {
@@ -334,14 +356,14 @@ public struct ChatFeedView: View {
                 }
             }) {
                 HStack(spacing: 4) {
-                    ArrowDownGlyph(size: 10, color: .white)
+                    ArrowDownGlyph(size: 10, color: theme.accent)
                     Text(Self.returnToLatestLabel)
                         .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(theme.accent)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Capsule().fill(theme.accent))
+                .background(Capsule().fill(Color.white))
             }
             .buttonStyle(.plain)
             .padding(.bottom, 6)
@@ -363,6 +385,19 @@ public struct ChatFeedView: View {
         }
     }
 
+    /// `.eventJoin` 列顯示的主播名 resolve 邏輯（`rb-ios-event-join-streamer-name`）：優先用
+    /// 該則訊息自己的 `item.userName`（`LBFeedItem.userName`，由前置 view-model 層 change
+    /// `event-join-streamer-name-template` 經 `push.name` 寫入）；`item.userName` 為 `nil` 或
+    /// 空字串（**用 `.isEmpty` 判斷，不能只判斷 `== nil`**——`push.name` 生產路徑上是必填、
+    /// strict-decoded 欄位，缺值更常見的形態是 `Optional("")` 而非 `nil`；只判斷 `== nil` 會讓
+    /// 空字串被誤判為「有名字」而顯示空白 badge）才 fallback 至舊有的整場共用 `hostName`
+    /// （← `FeedWinModel.hostName`，`rb-ios-loading-announce-restyle`）；兩者皆空 → 回傳空字串，
+    /// 維持既有「不畫名字列」行為不變（見 `LBEventJoinLineRow.bubble` 的 `if !userName.isEmpty`
+    /// gate）。純函式、無 `self` 依賴 — 依 `docs/unit-test-discipline.md` 抽出以便直接單元測試。
+    static func resolvedEventJoinUserName(item: LBFeedItem, hostName: String) -> String {
+        (item.userName?.isEmpty == false) ? item.userName! : hostName
+    }
+
     /// Dispatch a feed item to its row renderer by `kind`.
     @ViewBuilder
     private func row(for item: LBFeedItem) -> some View {
@@ -374,9 +409,7 @@ public struct ChatFeedView: View {
             LBEventJoinLineRow(
                 theme: theme,
                 text: item.text,
-                // 主播名（純顯示，rb-ios-loading-announce-restyle）：`ChatFeedView.hostName` ←
-                // `FeedWinModel.hostName`；空字串（未接 model 的呼叫端）→ 不畫名字列。
-                userName: hostName,
+                userName: Self.resolvedEventJoinUserName(item: item, hostName: hostName),
                 // 後端「ek isset 才顯示 CTA」：keyword 非空 → 加入活動 CTA；空（活動結束 / goods 未含
                 // 該 event，template 帶入 "")→ 純活動公告無 CTA（問題 1）。
                 hasCTA: !(item.keyword ?? "").isEmpty,
@@ -800,12 +833,29 @@ struct LBChatLineRow: View {
     /// vertically centered" — see `guestBubbleTextVerticalOffset` below for the
     /// re-measurement this fix triggered.
     ///
-    /// The nickname / colon color is fixed pink `#FBB0B7` (`Self.guestRoleNameColor`,
+    /// The NICKNAME color is fixed pink `#FBB0B7` (`Self.guestRoleNameColor`,
     /// `rb-ios-chat-audience-bubble-pink-nickname-full-lines`) — **replaces** the prior
     /// translucent white `.white.opacity(0.72)`. This reuses the SAME color constant
     /// already applied to the "non-host but still role-styled" nickname in `roleBubble`
     /// (see its doc comment above `guestRoleNameColor`) — the two call sites now share one
     /// source of value, not two definitions that happen to match.
+    ///
+    /// The COLON is white (`rb-ios-chat-audience-nickname-colon-color-fix`) — **not** the
+    /// nickname's pink. `pink-nickname-full-lines` landed this whole block by giving BOTH
+    /// the nickname `Text` AND the colon `Text` the same `.foregroundColor(guestRoleNameColor)`,
+    /// mis-reading `moments.jsx`'s `LBChatLine` as one shared style. Re-checking the actual
+    /// markup (lines ~429-452) shows the nickname and colon are two INDEPENDENT `<span>`s:
+    /// `<span style={{ color: '#FBB0B7' }}>{m.user}</span>` next to a sibling
+    /// `<span style={{ color: '#fff' }}>：</span>` — the colon's color never varies with
+    /// `isHost`, it is always the shared white span. Only the FONT SIZE (`11.5 *
+    /// theme.fontScale`) is legitimately shared across nickname / colon / body (all three
+    /// inherit `ACT_BUBBLE`'s `fontSize: 11.5`); the color is not. This mirrors
+    /// `roleBubble`'s own colon (`hasRole == true` path, a few lines below), which has
+    /// always been an independent `.foregroundColor(.white)` and was never affected by the
+    /// `pink-nickname-full-lines` bug — that fix scope was `bubbleText` only. Font WEIGHT is
+    /// intentionally left at `.semibold` here (unchanged) rather than aligned to
+    /// `roleBubble`'s `.regular` colon: the design markup doesn't spell out a weight
+    /// distinction, so this fix's scope is color only, not a weight realignment.
     private var bubbleText: Text {
         let body = Text(text)
             .font(.system(size: 11.5 * theme.fontScale, weight: .regular))
@@ -816,7 +866,7 @@ struct LBChatLineRow: View {
             .foregroundColor(Self.guestRoleNameColor)
             + Text("：")
                 .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
-                .foregroundColor(Self.guestRoleNameColor)
+                .foregroundColor(.white)
             + body
     }
 
@@ -880,11 +930,14 @@ struct LBChatLineRow: View {
 struct LBEventJoinLineRow: View {
     let theme: ReferenceUITheme
     let text: String
-    /// 主播名稱（`ChatFeedView.hostName` ← `FeedWinModel.hostName` ← `DefaultPlayerTemplate
-    /// .header.hostName`），純顯示 — 對齊 `LBChatLineRow.roleBubble` 的 accent 名牌版型
-    /// （`rb-ios-chat-message-line-restyle`，design R30）。空字串（未綁定 `FeedWinModel` 的
-    /// 呼叫端，如各 snapshot test 直接建構 `ChatFeedView` 未帶 `hostName`）→ 不畫名字列，不
-    /// 影響其餘版型 / CTA gating。
+    /// 主播名稱，純顯示 — 對齊 `LBChatLineRow.roleBubble` 的 accent 名牌版型
+    /// （`rb-ios-chat-message-line-restyle`，design R30）。呼叫端（`ChatFeedView.row(for:)`）
+    /// 自 `rb-ios-event-join-streamer-name` 起優先餵入該則訊息自己的 `LBFeedItem.userName`，
+    /// 缺值時才 fallback 至整場共用的 `ChatFeedView.hostName` ← `FeedWinModel.hostName` ←
+    /// `DefaultPlayerTemplate.header.hostName`（此 struct 本身不知道兩者的差異，仍只是單純
+    /// 接收一個已 resolve 好的 `String`）。空字串（兩個來源皆缺值，如未綁定 `FeedWinModel` 的
+    /// 呼叫端、各 snapshot test 直接建構 `ChatFeedView` 未帶 `hostName` 也未帶 `item.userName`）
+    /// → 不畫名字列，不影響其餘版型 / CTA gating。
     let userName: String
     /// keyword 非空 → 畫 CTA（後端「`ek` isset 才顯示 CTA」契約，問題 1）；空 → 純活動公告
     /// （活動已結束 / goods `event[]` 未含該 event → template 帶入 keyword ""），不畫 CTA / 已參加 chip。

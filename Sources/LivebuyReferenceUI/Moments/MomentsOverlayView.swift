@@ -110,10 +110,10 @@ import LivebuyUI
 //       theme: ReferenceUITheme,
 //       countdown: LBEndScreenCountdown?,           // non-nil → 倒數變體
 //       next: [LBNavItem],                          // watch-next targets (next.first = preview)
-//       hot: [LBHotItem],                           // 熱門變體 set (FIXED SMALL — plain HStack/VStack)
+//       liveDuration: String = "",                  // 空狀態變體「直播時長：」line (formatted)
 //       onWatchNext: (() -> Void)? = nil,           // → onWatchNext (host-wired)
-//       onPickHot: ((LBHotItem) -> Void)? = nil,    // → onPickHot   (host-wired)
-//       onCancel: (() -> Void)? = nil)              // → onCancel    (host-wired)
+//       onCancel: (() -> Void)? = nil,              // → onCancel    (host-wired; now CLOSES)
+//       onViewCart: (() -> Void)? = nil)            // → onViewCart  (host-wired)
 //
 //   ErrorScreenView(
 //       theme: ReferenceUITheme,
@@ -133,17 +133,36 @@ import LivebuyUI
 //     retry itself (core owns those — design §"守住的不變式": 只讀呈現).
 //   • `EndScreenView` 倒數變體 (`countdown != nil` && !next.isEmpty): SVG-style
 //     ring (progress = `countdown.remain / countdown.total`, centre `remain`) +
-//     `next.first` preview card + `onWatchNext` / `onCancel`. 熱門變體 (`countdown
-//     == nil` || `next` empty): `hot` as `LBHotCard`s in a PLAIN `HStack`/`VStack`
-//     FIXED SMALL set (e.g. first N) + `onPickHot`. `hot[].duration` is an
-//     ALREADY-FORMATTED string (`"38:36"`), NOT seconds — render verbatim.
+//     `next.first` preview card + `onWatchNext` / `onCancel`（取消現在會關閉整個
+//     session）. 空狀態變體 (`countdown == nil` || `next` empty, LIVE ONLY —
+//     `rb-ios-endscreen-live-empty-state`)：「直播已結束」title +「直播時長：…」line
+//     + 全寬「查看購物車」CTA (`onViewCart`)。舊「熱門變體」卡牆已退役——`LBHotItem` /
+//     `onPickHot` 不再轉發給這個 sub-view（`MomentsOverlayView.onPickHot` 為了 wire
+//     相容仍留在本容器自己的 init 上，但現在未使用 / inert，見下方）。
 //   • `ErrorScreenView` 依 `kind` 切換人話文案 (NO raw code): `.stream`「播放發生
 //     問題」(重試 onRetry + 返回 onDismiss) / `.notFound`「找不到影片」(僅 onDismiss,
 //     no retry) / `.outdated`「請更新版本」(前往更新 / onDismiss, no retry). `phase`
 //     is always `.failed`. retry is core's job — the CTA only FORWARDS onRetry.
 //   • iOS-14-safe SwiftUI only; any >14 API guarded with `@available` /
 //     `if #available` inside the sub-view. ⚠️ NO ScrollView / Lazy* in rendered
-//     content (the 熱門 list especially — plain HStack/VStack, fixed small set).
+//     content.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// EndScreen IS NOW LIVE-ONLY (`rb-ios-endscreen-live-empty-state`)
+// ─────────────────────────────────────────────────────────────────────────────
+// A VOD (non-live) video ending with NO queued `next` no longer shows the END
+// moment at all — the RETIRED 熱門變體 used to fill that gap; without it there is
+// nothing meaningful to show, so the player CLOSES directly instead. THIS
+// CONTAINER decides that (the `isLiveChannel` input below + the pure function
+// `shouldCloseInsteadOfEndScreen`), NOT `EndScreenView` — `EndScreenView` is never
+// even constructed for that case. A VOD ending WITH a queued `next` is UNCHANGED /
+// out of scope (this path does not currently occur — see design.md).
+// `isLiveChannel` is DISTINCT from `live` above: `live` gates whether the
+// end-screen preview card loads REAL media vs. a placeholder; `isLiveChannel` is
+// the channel's LIVE-vs-VOD classification (mirrors `PlayerShellModel.isLive`,
+// threaded in by the container as its own reactive `isLiveMode` mirror — see
+// `MinimalDesign.swift`). Do not conflate the two.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The family-4 full-screen player moment container. Conditionally shows the
@@ -162,49 +181,78 @@ public struct MomentsOverlayView: View {
 
     /// Runtime media gate threaded into `EndScreenView` (default `false` → snapshot /
     /// demo construct action-free with placeholder-only cards). `true` (host runtime) →
-    /// the end-screen recommended / next-video cards load real `cover` / `preview`
-    /// media. Wired by the container as `!paintsBackgroundPlaceholder` (the SAME flag the
-    /// product sheets / start-screen surfaces use). Only the end-screen cards consume it;
-    /// the error moment has no media.
+    /// the end-screen next-video preview card loads real `cover` / `preview` media.
+    /// Wired by the container as `!paintsBackgroundPlaceholder` (the SAME flag the
+    /// product sheets / start-screen surfaces use). NOT the channel's live/VOD status
+    /// — see `isLiveChannel` below; do not conflate the two.
     public let live: Bool
+
+    /// The channel's LIVE-vs-VOD classification (mirrors `PlayerShellModel.isLive`).
+    /// Drives `shouldCloseInsteadOfEndScreen` (`rb-ios-endscreen-live-empty-state`):
+    /// EndScreen is now LIVE-ONLY, so a VOD (`false`) ending with no queued `next`
+    /// closes the player instead of showing the end moment. Threaded by the
+    /// container from its own reactive `isLiveMode` mirror (see `MinimalDesign.swift`
+    /// `PlayerOverlayRootView`) — NOT from `model` (this container does not own a
+    /// live/VOD signal of its own; `MomentsModel` has none). DISTINCT from `live`
+    /// above (media-loading gate); do not conflate the two.
+    public let isLiveChannel: Bool
 
     // MARK: - Host-wired action closures (design §"守住的不變式": host-wired exit)
     //
     // No template / player moment INTENT exists to forward to — these are wired
     // by the HOST to the core player exits it owns (skipStart / load(next) /
-    // load(hot.id) / re-load / dismiss). Each nil-defaulted; a nil closure means
-    // an inert CTA (demo / snapshot tests construct the container action-free).
+    // re-load / dismiss / open product list). Each nil-defaulted; a nil closure
+    // means an inert CTA (demo / snapshot tests construct the container action-free).
 
     /// End-screen「立即觀看」→ host → core load(next videoId).
     private let onWatchNext: (() -> Void)?
-    /// End-screen 熱門卡片 tap → host → core load(hot.id) (switch to that video).
+    /// RETIRED consumer (`rb-ios-endscreen-live-empty-state`): the 熱門變體 card wall
+    /// `EndScreenView` used to render this against no longer exists, so this closure
+    /// is no longer forwarded to `EndScreenView`. Kept on this container's own init
+    /// for WIRE STABILITY (the upstream `LivebuyPlayerConfig.onPickHot` seam and its
+    /// `PlayerOverlayContext` / `ReferenceUIDesign` threading are NOT touched by this
+    /// change — out of scope, see design.md) — a host that still sets it keeps
+    /// compiling, the closure is simply never invoked from here any more.
     private let onPickHot: ((LBHotItem) -> Void)?
-    /// End-screen「取消」/「換一批」exit → host.
+    /// End-screen「取消」exit → host, which now CLOSES the whole player session
+    /// (`LivebuyPlayer.swift` `makeOverlayContext`'s default `onCancel`: `player
+    /// .cancelAutoNext()` + the SAME dismiss resolution `onDismiss` uses). This
+    /// container only forwards the tap.
     private let onCancel: (() -> Void)?
     /// Error-screen「重試」→ host → core re-load. retry is core's job (auto 3×/3s);
     /// this layer ONLY forwards the CTA tap, NEVER retries / loads itself.
     private let onRetry: (() -> Void)?
-    /// Error / end-screen「返回」/「關閉」→ host → dismiss the moment / player.
+    /// Error / end-screen「返回」/「關閉」→ host → dismiss the moment / player. ALSO
+    /// fired (via `.onChange` below) when `shouldCloseInsteadOfEndScreen` flips true
+    /// (VOD ends with no `next` — closes instead of entering the end moment).
     private let onDismiss: (() -> Void)?
+    /// End-screen 空狀態變體「查看購物車」CTA → host (wired by `PlayerOverlayRootView`
+    /// to the SAME `onOpenProductList` action the LIVE bottom bar's bag button uses).
+    /// `rb-ios-endscreen-live-empty-state`.
+    private let onViewCart: (() -> Void)?
 
     public init(
         model: MomentsModel,
         theme: ReferenceUITheme,
         live: Bool = false,
+        isLiveChannel: Bool,
         onWatchNext: (() -> Void)? = nil,
         onPickHot: ((LBHotItem) -> Void)? = nil,
         onCancel: (() -> Void)? = nil,
         onRetry: (() -> Void)? = nil,
-        onDismiss: (() -> Void)? = nil
+        onDismiss: (() -> Void)? = nil,
+        onViewCart: (() -> Void)? = nil
     ) {
         self.model = model
         self.theme = theme
         self.live = live
+        self.isLiveChannel = isLiveChannel
         self.onWatchNext = onWatchNext
         self.onPickHot = onPickHot
         self.onCancel = onCancel
         self.onRetry = onRetry
         self.onDismiss = onDismiss
+        self.onViewCart = onViewCart
     }
 
     public var body: some View {
@@ -215,6 +263,25 @@ public struct MomentsOverlayView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.momentRoot)
+        // VOD ends with no queued `next` (`shouldCloseForVodNoNext` flips true) →
+        // close the player instead of leaving the (unrendered) end moment up.
+        // `.onChange` only fires on a genuine transition (never on initial mount),
+        // which matches this container's real lifecycle: it is mounted once per
+        // player session, BEFORE `endScreenVisible` can ever be true, so the
+        // transition is always observed (rb-ios-endscreen-live-empty-state).
+        .onChange(of: shouldCloseForVodNoNext) { shouldClose in
+            if shouldClose { onDismiss?() }
+        }
+    }
+
+    /// Whether the CURRENT snapshot should close the player instead of entering the
+    /// end moment at all — the end-screen gate (`countdown != nil || endScreenVisible`)
+    /// is active AND `Self.shouldCloseInsteadOfEndScreen` says so. Drives BOTH
+    /// `activeMoment`'s branch (never construct `EndScreenView` in this case) and the
+    /// `.onChange`-driven `onDismiss` side effect in `body` above.
+    private var shouldCloseForVodNoNext: Bool {
+        (model.countdown != nil || model.endScreenVisible)
+            && Self.shouldCloseInsteadOfEndScreen(isLiveChannel: isLiveChannel, next: model.next)
     }
 
     /// The single active moment by priority, or `EmptyView` for stable playback.
@@ -229,20 +296,24 @@ public struct MomentsOverlayView: View {
                 onRetry: { onRetry?() },
                 onDismiss: { onDismiss?() })
         } else if model.countdown != nil || model.endScreenVisible {
-            // 2. End screen. countdown != nil → 倒數變體 (auto-next). countdown == nil &&
-            //    endScreenVisible → no-countdown「直播已結束」variant (live ended with no
-            //    next: hot recommendations if any, else just the title). `hot` is passed
-            //    so the sub-view renders the 熱門 variant; `endScreenVisible` gates the title.
-            EndScreenView(
-                theme: theme,
-                countdown: model.countdown,
-                next: model.next,
-                hot: model.hot,
-                liveEnded: model.endScreenVisible && model.countdown == nil,
-                live: live,
-                onWatchNext: { onWatchNext?() },
-                onPickHot: { hot in onPickHot?(hot) },
-                onCancel: { onCancel?() })
+            if shouldCloseForVodNoNext {
+                // VOD ended with no `next` — EndScreen is LIVE-ONLY
+                // (rb-ios-endscreen-live-empty-state): nothing meaningful to show.
+                // `body`'s `.onChange` closes the player; render nothing here.
+                EmptyView()
+            } else {
+                // 2. End screen. countdown != nil → 倒數變體 (auto-next). countdown ==
+                //    nil && endScreenVisible → 空狀態變體（「直播已結束」+ 直播時長 +
+                //    查看購物車 CTA，LIVE-only；VOD-with-no-next never reaches here}.
+                EndScreenView(
+                    theme: theme,
+                    countdown: model.countdown,
+                    next: model.next,
+                    live: live,
+                    onWatchNext: { onWatchNext?() },
+                    onCancel: { onCancel?() },
+                    onViewCart: { onViewCart?() })
+            }
         } else {
             // 3. Stable playback — no moment overlay. The start lifecycle (loading /
             //    buffering / splash) is NO LONGER a moment: it is composed by the
@@ -250,6 +321,28 @@ public struct MomentsOverlayView: View {
             //    `PlayerShellModel.startPhase`), not here (rb-ios-start-screen-out-of-moments).
             EmptyView()
         }
+    }
+
+    /// Test-only read window onto `activeMoment` (`*ForTesting` naming per
+    /// `docs/unit-test-discipline.md` — mirrors the established `iconClusterForTesting`
+    /// precedent, `PlayerHeaderBarView`). Lets a Mirror-reflection test confirm which
+    /// branch renders WITHOUT touching `UIViewRepresentable.makeUIView` / actual
+    /// rendering.
+    var activeMomentForTesting: some View { activeMoment }
+
+    // MARK: - Pure decision (internal-testability)
+
+    /// Whether the end moment should be REPLACED by a direct player close
+    /// (`rb-ios-endscreen-live-empty-state`): EndScreen is LIVE-ONLY, so a VOD
+    /// (`isLiveChannel == false`) ending with no queued `next` has nothing meaningful
+    /// to show — the 熱門變體 fallback that used to fill this gap is retired. A LIVE
+    /// channel (`isLiveChannel == true`) with empty `next` is UNCHANGED — it renders
+    /// `EndScreenView`'s 空狀態變體. A VOD ending WITH a queued `next` is also
+    /// UNCHANGED / out of scope (this path does not currently occur — see design.md).
+    /// Pure — no view state, no I/O. Mirrors `resolvedEnableDirectCloseButton`'s shape
+    /// (`LivebuyPlayerPresenter.swift`).
+    static func shouldCloseInsteadOfEndScreen(isLiveChannel: Bool, next: [LBNavItem]) -> Bool {
+        !isLiveChannel && next.isEmpty
     }
 }
 
@@ -303,48 +396,17 @@ public extension MomentsModel {
             shopName: "Aurora 美妝旗艦")
     }
 
-    /// A deterministic 熱門 card. `duration` is an ALREADY-FORMATTED STRING
-    /// (`"38:36"`), NOT seconds — render verbatim.
-    static func demoHotItem(
-        id: String = "demo-vid-hot-001",
-        title: String = "夏日裸妝教學・10 分鐘上手",
-        duration: String = "38:36"
-    ) -> LBHotItem {
-        LBHotItem(
-            id: id,
-            cover: "",
-            title: title,
-            duration: duration)
-    }
-
     /// A demo END moment in the 倒數變體: an active countdown (`remain 3 / total 5`)
-    /// + one watch-next preview target + a small 熱門 set. The end-screen surface
-    /// agent uses this for the countdown-ring + preview-card fixture.
+    /// + one watch-next preview target. The end-screen surface agent uses this for
+    /// the countdown-ring + preview-card fixture. `hot` defaults to `[]` — `MomentsModel
+    /// .hot` remains populated from the live template (unchanged, template layer),
+    /// but is no longer consumed by `EndScreenView` (`rb-ios-endscreen-live-empty-state`
+    /// retired the 熱門變體 it used to feed), so this demo fixture no longer bothers
+    /// seeding it.
     static var demoEndCountdown: MomentsModel {
         MomentsModel(
             countdown: LBEndScreenCountdown(remain: 3, total: 5),
-            next: [demoNavItem()],
-            hot: demoHotSet)
-    }
-
-    /// A demo END moment in the 熱門變體: NO countdown, watch-next empty, a FIXED
-    /// SMALL 熱門 set (3 cards) for the `LBHotCard` row/grid. The end-screen surface
-    /// agent uses this for the 熱門-list fixture (PLAIN HStack/VStack, NOT lazy).
-    static var demoEndHotOnly: MomentsModel {
-        MomentsModel(
-            countdown: nil,
-            next: [],
-            hot: demoHotSet)
-    }
-
-    /// A FIXED SMALL 熱門 set (3 cards) — deterministic, snapshot-stable. Keep it
-    /// small (the 熱門 list is a PLAIN HStack/VStack of a fixed N, NEVER lazy/scroll).
-    static var demoHotSet: [LBHotItem] {
-        [
-            demoHotItem(id: "demo-vid-hot-001", title: "夏日裸妝教學・10 分鐘上手", duration: "38:36"),
-            demoHotItem(id: "demo-vid-hot-002", title: "辦公室通勤妝・防脫妝技巧", duration: "12:08"),
-            demoHotItem(id: "demo-vid-hot-003", title: "新品開箱・霧面唇釉全色號", duration: "07:45")
-        ]
+            next: [demoNavItem()])
     }
 
     // MARK: Error-moment demo fixtures

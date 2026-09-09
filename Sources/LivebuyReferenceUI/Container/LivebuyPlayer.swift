@@ -124,13 +124,21 @@ public struct LivebuyPlayerConfig {
     /// `LBVideoItem` `LiveNowPollController` had detected AT TAP TIME.
     public var onGoLive: ((LivebuyPlayerViewController, LBVideoItem) -> Void)?
 
-    /// Shop code used to poll「目前是否有另一場直播正在進行」(rb-ios-live-now-pill), driving
-    /// `LBLiveNowPill`'s presence. DEFAULT `nil` → the poller never starts and the pill never
-    /// appears — **zero extra API calls unless a host opts in**, mirroring
-    /// `LivebuyLiveEntry(shopId:)`'s existing precedent (SDK has no getter to reverse the shopId
-    /// `configure(shopId:)` was called with; the host supplies it again here). This drives a
-    /// SEPARATE `LiveNowPollController` instance from `LivebuyLiveEntry`'s — the two drop-in
-    /// surfaces stay decoupled, neither shares state nor a poll cadence with the other.
+    /// Whether the "現正直播" (go-to-live) pill turnkey-wires itself
+    /// (`ios-live-now-pill-auto-shopid-turnkey`). DEFAULT `true`: the pill's
+    /// `LiveNowPollController` self-wires to `LivebuySDK.currentShopId()` (the shop
+    /// `configure(shopId:)` was last called with) unless `shopId` below explicitly overrides it
+    /// — no host wiring required. Set `false` to disable the feature outright (no
+    /// `LiveNowPollController` polling, zero extra API calls) regardless of `shopId`.
+    public var showsLiveNowPill: Bool = true
+
+    /// EXPLICIT OVERRIDE for the shop code the "現正直播" pill (`rb-ios-live-now-pill`) polls —
+    /// only needed when you want the pill to watch a **different** shop than the one
+    /// `configure(shopId:)` was called with. DEFAULT `nil`: when `showsLiveNowPill` is `true`
+    /// (the default), the effective shop id automatically falls back to
+    /// `LivebuySDK.currentShopId()`, so most hosts never need to set this field at all. This
+    /// drives a SEPARATE `LiveNowPollController` instance from `LivebuyLiveEntry`'s — the two
+    /// drop-in surfaces stay decoupled, neither shares state nor a poll cadence with the other.
     public var shopId: String?
 
     /// Start-screen 跳過. Default: `skipStart()`.
@@ -459,6 +467,21 @@ func productShareURLString(base: String, beginTime: Int?) -> String {
     return "\(base)\(sep)t=\(t)"
 }
 
+/// 「現正直播」pill 的**有效 shopId** 解析（`ios-live-now-pill-auto-shopid-turnkey`）。Pure（無副作用），
+/// 兩個建構 `LiveNowPollController` 的呼叫點（`LivebuyPlayer.swift` 內真正啟動輪詢的建構點，與
+/// `coordinator.liveNowController` 意外為 `nil` 時的防禦性 fallback 建構點）都呼叫這同一份實作，
+/// 避免兩處分歧。
+/// - `showsLiveNowPill == false` → 恆 `nil`（poller 的 `start()` 為永久 no-op，零額外 API call，
+///   鈕永不出現），無論 `explicitShopId` 是否設定。
+/// - `showsLiveNowPill == true`（預設）→ `explicitShopId ?? configuredShopId`：host 明確覆寫的
+///   `shopId` 優先；未覆寫時 fallback 到 `configuredShopId`（呼叫端傳入
+///   `LivebuySDK.currentShopId()`，即 `configure(shopId:)` 最後一次呼叫時設定的值，`configure()`
+///   尚未完成時為 `nil`）。
+func resolvedLiveNowShopId(showsLiveNowPill: Bool, explicitShopId: String?, configuredShopId: String?) -> String? {
+    guard showsLiveNowPill else { return nil }
+    return explicitShopId ?? configuredShopId
+}
+
 /// Turnkey drop-in player. Builds a `LivebuyPlayerViewController`, attaches the Default
 /// template, composes all reference-ui surfaces into ONE hosting controller, wires each
 /// seam to `config` (defaults where unset), `load`s, and wraps in a nav controller (bar
@@ -688,11 +711,18 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         coordinator.nicknameController = NicknamePromptController()
         coordinator.loginController = LoginPromptController()
 
-        // 「現正直播」右緣半藥丸鈕 (rb-ios-live-now-pill)：一次性建立 poller（`config.shopId ==
-        // nil` → `start()` 內部永遠是 no-op，鈕永不出現、零額外 API call），`start()` 立即起輪詢
-        // ——與 `armAutoPiP` 等其他一次性生命週期接線同一慣例，`stop()` 於
-        // `teardownLifecycleObservers()` 對稱釋放。
-        let liveNowController = LiveNowPollController(shopId: config.shopId)
+        // 「現正直播」右緣半藥丸鈕 (rb-ios-live-now-pill / ios-live-now-pill-auto-shopid-turnkey)：
+        // 一次性建立 poller。有效 shopId 經 `resolvedLiveNowShopId` 解析：`config.showsLiveNowPill
+        // == false` → 恆 nil（`start()` 內部永遠是 no-op，鈕永不出現、零額外 API call）；
+        // `showsLiveNowPill == true`（預設）→ `config.shopId` 明確覆寫優先，未覆寫時 fallback 到
+        // `LivebuySDK.currentShopId()`（configure 時設定的 shop，turnkey 自動接線、host 免手動
+        // 傳 shopId）。`start()` 立即起輪詢——與 `armAutoPiP` 等其他一次性生命週期接線同一慣例，
+        // `stop()` 於 `teardownLifecycleObservers()` 對稱釋放。
+        let effectiveLiveNowShopId = resolvedLiveNowShopId(
+            showsLiveNowPill: config.showsLiveNowPill,
+            explicitShopId: config.shopId,
+            configuredShopId: Livebuy.currentShopId())
+        let liveNowController = LiveNowPollController(shopId: effectiveLiveNowShopId)
         coordinator.liveNowController = liveNowController
         liveNowController.start()
 
@@ -826,6 +856,18 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         // backend `/sdk/video` `prev` / `next`) and raises `onCloseRequest` at the backend
         // head / tail (swipe-nav-close-on-empty). The host-override seam is retained for hosts
         // wiring `PlayerShellView` directly; the turnkey container just never uses it.
+
+        // Shared dismiss resolution (rb-ios-endscreen-live-empty-state): host's
+        // `config.onDismiss` override, else the raw `player.dismiss(animated:)` UIKit
+        // dismiss. Factored out so `onCancel`'s "also close the session" behavior below
+        // reuses the EXACT SAME resolution `onDismiss` uses, instead of re-deriving it —
+        // the two MUST always agree on what "close" means for a given `LivebuyPlayerConfig`
+        // (bare `LivebuyPlayer` vs. `LivebuyPlayerPresenter`'s `composedConfig.onDismiss`
+        // override, which routes to `closeSession()`).
+        let resolvedDismiss: (LivebuyPlayerViewController) -> Void = { p in
+            if let custom = config.onDismiss { custom(p) } else { p.dismiss(animated: true) }
+        }
+
         return PlayerOverlayContext(
             shellModel: shellModel,
             productModel: productModel,
@@ -1002,8 +1044,16 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
             // `liveNow`（可能在 tap 這一刻已被下一輪輪詢換掉／清空，屬預期行為，非 race）→
             // host override 或預設 in-place 換片（`applyGoLiveSwitch`，比照 `onPickHot`；
             // fix-ios-live-now-pill-tap-and-size 問題 1 — see that function's doc comment for the
-            // regression its `onVideoSwitchedItem` fire closes）。
-            liveNowController: coordinator.liveNowController ?? LiveNowPollController(shopId: nil),
+            // regression its `onVideoSwitchedItem` fire closes）。防禦性 fallback（正常不會走到——
+            // `buildModels(template:coordinator:)` 早於本函式被呼叫，已無條件建構
+            // `coordinator.liveNowController`）改用同一個純函式 `resolvedLiveNowShopId`
+            // （ios-live-now-pill-auto-shopid-turnkey；`buildModels` 與本函式是兩個不同的
+            // `private func`，無法共用區域變數，改為兩處各自呼叫同一份純函式以保證公式一致），
+            // 避免這裡與真正啟動輪詢的建構點對 `showsLiveNowPill` 的遵守程度不一致。
+            liveNowController: coordinator.liveNowController ?? LiveNowPollController(shopId: resolvedLiveNowShopId(
+                showsLiveNowPill: config.showsLiveNowPill,
+                explicitShopId: config.shopId,
+                configuredShopId: Livebuy.currentShopId())),
             onGoLive: { [weak player, weak coordinator] in
                 guard let player = player,
                       let live = coordinator?.liveNowController?.liveNow else { return }
@@ -1077,10 +1127,21 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
                         preview: hot.preview))
                 }
             },
-            // 取消 → stop the auto-next countdown (NOT a dismiss).
+            // 取消 → stop the auto-next countdown AND close the whole session
+            // (rb-ios-endscreen-live-empty-state): the 熱門變體 fallback「取消」used to
+            // reveal is retired, so there is nothing left to fall back to — reuses
+            // `resolvedDismiss` (the SAME `config.onDismiss`-aware resolution `onDismiss`
+            // below uses), so this closes correctly for BOTH the bare `LivebuyPlayer`
+            // (raw `player.dismiss(animated:)`) AND `LivebuyPlayerPresenter` (whose
+            // `composedConfig.onDismiss` override routes to `closeSession()`).
             onCancel: { [weak player] in
                 guard let player = player else { return }
-                if let custom = config.onCancel { custom(player) } else { player.cancelAutoNext() }
+                if let custom = config.onCancel {
+                    custom(player)
+                } else {
+                    player.cancelAutoNext()
+                    resolvedDismiss(player)
+                }
             },
             // 重試 reloads what the player is actually SHOWING.
             onRetry: { [weak player, weak coordinator] in
@@ -1089,7 +1150,7 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
             },
             onDismiss: { [weak player] in
                 guard let player = player else { return }
-                if let custom = config.onDismiss { custom(player) } else { player.dismiss(animated: true) }
+                resolvedDismiss(player)
             },
             // 「更多商品」推薦格 — productId → 真實 LBProduct（core `channel.goods` ∪
             // `channel.otherGoods`；`other_goods[]` 本來就是完整 LBProduct 陣列，不需多打一次 API，

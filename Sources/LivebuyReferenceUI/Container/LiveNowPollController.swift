@@ -21,6 +21,17 @@ import LivebuySDK
 // `LivebuyLiveEntryController`'s dismiss / drag-clamp / entrance-animation / live-end-notification
 // machinery, which is specific to a user-dismissible floating card and has no equivalent concept
 // for a pill embedded in the player chrome.
+//
+// ios-live-now-poll-fetch-cache: the MUST-NOT-share-instance invariant above is UNCHANGED — this
+// controller and `LivebuyLiveEntryController` remain fully independent `ObservableObject`
+// instances, each owning its own poll `Task` / `@Published` state / `start()`/`stop()`
+// lifecycle. What's new is narrower: both controllers now read/write a shared, read-only,
+// 5-second-TTL `LiveNowFetchCache` (`.shared` by default) of "most recent real fetch result per
+// shopId" — purely to skip one redundant network round trip at the moment a host switches
+// between the mutually-exclusive-by-convention pill (this controller) and the floating entry
+// card (`LivebuyLiveEntryController`). Each controller instance consults the cache ONLY on its
+// own first poll round (`hasAppliedFirstRound`); every later round is unconditionally a real
+// fetch. See `LiveNowFetchCache.swift`'s header for the full rationale.
 public final class LiveNowPollController: ObservableObject {
 
     /// The currently detected "another live in progress" video, or `nil`. Drives
@@ -35,14 +46,26 @@ public final class LiveNowPollController: ObservableObject {
     /// `Livebuy.fetchLatestLive(id:)`) — a test substitutes a `Fake*` closure instead of hitting
     /// the network, mirroring `LivebuyLiveEntryController`'s identical seam.
     private let fetch: (String) async throws -> LBVideoItem?
+    /// ios-live-now-poll-fetch-cache: read-only, short-TTL cross-controller fetch cache. Default
+    /// `.shared` for production; tests that drive a REAL `pollLoop()` run (via `start()`) MUST
+    /// inject a private `LiveNowFetchCache()` instance to stay isolated from `.shared` and from
+    /// any other test — see `LiveNowFetchCache.swift`'s header.
+    private let cache: LiveNowFetchCache
 
     private var pollTask: Task<Void, Never>?
+    /// ios-live-now-poll-fetch-cache: only this instance's first poll round may read `cache`;
+    /// every subsequent round is unconditionally a real fetch. NOT set inside `pollLoop`'s
+    /// `catch` branch — a failed first attempt keeps this `false` so the fast-retry round can
+    /// still consult the cache. See `LiveNowFetchCache.swift`'s header for the full rationale.
+    private var hasAppliedFirstRound = false
 
     public init(shopId: String?,
                 pollInterval: TimeInterval = 30,
+                cache: LiveNowFetchCache = .shared,
                 fetch: @escaping (String) async throws -> LBVideoItem? = { try await Livebuy.fetchLatestLive(id: $0) }) {
         self.shopId = shopId
         self.pollInterval = pollInterval
+        self.cache = cache
         self.fetch = fetch
     }
 
@@ -65,10 +88,23 @@ public final class LiveNowPollController: ObservableObject {
     /// `do/catch`（非 `try?`）比照 `LivebuyLiveEntryController.pollLoop`：區分「目前沒有直播」
     /// （`nil` → 清空鈕）與「請求失敗 / 尚未 configure」（throw → **保留**上一輪的值、3s 快重試）——
     /// 一次暫時的網路抖動不該讓鈕閃爍消失又出現。
+    ///
+    /// ios-live-now-poll-fetch-cache：只有 `!hasAppliedFirstRound` 這一輪才會先查 `cache`——命中
+    /// 就直接用（跳過真實 `fetch`），沒命中才真的 `fetch` 再寫回 `cache`。不論走哪條路，這輪跑完
+    /// （成功）後 `hasAppliedFirstRound` 恆設 `true`，之後每一輪都無條件真實 `fetch`（仍持續寫回
+    /// `cache` 供其他 controller 受益）。`catch` 分支不設 `hasAppliedFirstRound`，讓快重試那一輪
+    /// 仍有機會查快取。
     private func pollLoop(shopId: String) async {
         while !Task.isCancelled {
             do {
-                let video = try await fetch(shopId)
+                let video: LBVideoItem?
+                if !hasAppliedFirstRound, case .hit(let cached) = cache.cached(shopId: shopId) {
+                    video = cached
+                } else {
+                    video = try await fetch(shopId)
+                    cache.record(shopId: shopId, video: video)
+                }
+                hasAppliedFirstRound = true
                 let gated = lbLiveEntryGate(video)
                 await MainActor.run { self.apply(gated) }
                 try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))

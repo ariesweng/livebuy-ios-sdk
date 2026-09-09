@@ -237,6 +237,16 @@ public final class PlayerShellModel: ObservableObject {
     public var livePinnedProducts: [LBProduct] {
         liveActiveProducts.isEmpty ? [pinnedProduct].compactMap { $0 } : liveActiveProducts
     }
+    /// The FULL, unfiltered product list for the current video —
+    /// `DefaultPlayerTemplate.productOverlay.products` (`expose-player-moment-state-template`,
+    /// already public), NOT a time-window / narrate-status filter over it. `vodActiveProducts`
+    /// / `liveActiveProducts` above are both filtered SUBSETS of this same list. Feeds
+    /// `PlayerShellView`'s background image prefetch (`rb-ios-product-image-loading-polish`) —
+    /// prefetching against an already-filtered list would fire no earlier than today (the
+    /// filter only becomes non-empty at the exact moment a card needs the image); prefetching
+    /// against the FULL list warms `ReferenceUIImageCache` as soon as the product data itself
+    /// arrives, well before any individual product's window opens.
+    @Published public private(set) var allProducts: [LBProduct]
 
     // -- Identity (DefaultIdentityLabel, AUTH_STATE_CHANGED) --------------------
 
@@ -331,6 +341,7 @@ public final class PlayerShellModel: ObservableObject {
             vodActiveProduct: t.vodActiveProduct,
             vodActiveProducts: t.vodActiveProducts,
             liveActiveProducts: t.liveActiveProducts,
+            allProducts: t.productOverlay.products,
             isLoggedIn: t.identityLabel.current?.isLoggedIn ?? false,
             displayName: t.identityLabel.current?.displayName ?? "",
             isRestricted: t.isRestricted
@@ -383,6 +394,7 @@ public final class PlayerShellModel: ObservableObject {
         vodActiveProduct: LBProduct? = nil,
         vodActiveProducts: [LBProduct]? = nil,
         liveActiveProducts: [LBProduct] = [],
+        allProducts: [LBProduct] = [],
         isLoggedIn: Bool = false,
         displayName: String = "",
         chatEnabled: Bool = false,
@@ -429,6 +441,7 @@ public final class PlayerShellModel: ObservableObject {
         // get a single-element list; the live snapshot path passes the full plural.
         self.vodActiveProducts = vodActiveProducts ?? [vodActiveProduct].compactMap { $0 }
         self.liveActiveProducts = liveActiveProducts
+        self.allProducts = allProducts
         self.isLoggedIn = isLoggedIn
         self.displayName = displayName
         self.chatEnabled = chatEnabled
@@ -497,6 +510,7 @@ public final class PlayerShellModel: ObservableObject {
         vodActiveProduct = t.vodActiveProduct
         vodActiveProducts = t.vodActiveProducts
         liveActiveProducts = t.liveActiveProducts
+        allProducts = t.productOverlay.products
 
         isLoggedIn = t.identityLabel.current?.isLoggedIn ?? false
         displayName = t.identityLabel.current?.displayName ?? ""
