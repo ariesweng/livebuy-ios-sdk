@@ -294,6 +294,16 @@ struct PlayerOverlayRootView: View {
     /// first report.
     @State private var moreSheetOpen: Bool = false
 
+    /// Mirrors `ProductSheetsOverlayView`'s aggregate "any product sheet/modal presented" signal
+    /// (list drawer / detail-or-restock sheet / zoom lightbox / cart-needs-login gate /
+    /// variant-select prompt), so the sibling `PlayerShellView` (composed BELOW it in this same
+    /// ZStack, not a descendant) can suppress its vertical-swipe video-switch gesture while a
+    /// sheet is visually covering the video (rb-ios-block-swipe-nav-when-sheet-open).
+    /// `ProductSheetsOverlayView` reports the initial value + every change via
+    /// `onPresentationChange`, mirroring the existing `infoPanelOpen` / `cleanMode` /
+    /// `moreSheetOpen` mirrors above. Defaults `false` (baseline unchanged) until the first report.
+    @State private var productSheetsPresented: Bool = false
+
     var body: some View {
         ZStack {
             PlayerShellView(
@@ -323,6 +333,10 @@ struct PlayerOverlayRootView: View {
                 onHoldEnd: onHoldEnd,
                 // Hide the LIVE bottom bar while the composer is up (avoid bottom overlap).
                 composerPresented: composerController.isPresented,
+                // Suppress the vertical-swipe video-switch gesture while any product sheet/modal
+                // is presented (mirrored from `ProductSheetsOverlayView.onPresentationChange`
+                // below) — rb-ios-block-swipe-nav-when-sheet-open.
+                sheetsPresented: productSheetsPresented,
                 // Mirror info-panel open state to hide the chat feed while it's up.
                 onInfoPanelPresentedChange: { infoPanelOpen = $0 },
                 // Mirror LIVE/VOD so the LIVE-only chat feed is dropped in VOD.
@@ -404,7 +418,10 @@ struct PlayerOverlayRootView: View {
                 onRequestLogin: onRequestLogin,
                 // 「更多商品」推薦格（rb-ios-product-detail-recommendations）——resolve + 換片。
                 onResolveProduct: onResolveProduct,
-                onSwitchVideo: onSwitchVideo)
+                onSwitchVideo: onSwitchVideo,
+                // Mirror the aggregate sheet-presented signal into `PlayerShellView.sheetsPresented`
+                // above (rb-ios-block-swipe-nav-when-sheet-open).
+                onPresentationChange: { productSheetsPresented = $0 })
 
             ChatComposerBar(
                 controller: composerController,

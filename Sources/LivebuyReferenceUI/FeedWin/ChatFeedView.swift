@@ -693,7 +693,10 @@ struct LBChatLineRow: View {
 
     /// 非主播但仍走角色版型（`hasRole == true && isHost == false`）的暱稱顏色（design
     /// R30：固定 `#FBB0B7` 粉色，取代先前的白 `0.66`）。internal（非 `private`）以便單元
-    /// 測試直接斷言數值。
+    /// 測試直接斷言數值。**第二個消費點（`rb-ios-chat-audience-bubble-pink-nickname-full-
+    /// lines`）**：一般觀眾留言（`hasRole == false`）的 `bubbleText` 暱稱/冒號自本 change
+    /// 起也套用同一顆常數，取代先前的半透明白 `.white.opacity(0.72)`——兩個路徑現在共用
+    /// 同一份色值來源，非各自獨立定義、恰好數值相同。
     static let guestRoleNameColor: Color = Color(hex: "#FBB0B7") ?? .pink
 
     /// Translucent dark bubble. ACT_BUBBLE: radius 12, black 0.42, padding h11/v4.
@@ -705,6 +708,17 @@ struct LBChatLineRow: View {
     /// bubble, whose own line-height metrics run taller even at the same nominal
     /// padding; NOT a design-token realignment, and Android's `vertical = 3.dp`
     /// is intentionally left unchanged by that change).
+    ///
+    /// `.lineLimit(nil)` (was `.lineLimit(2)`, `rb-ios-chat-audience-bubble-pink-nickname-
+    /// full-lines`): the message text is now fully shown, no longer capped at 2 lines +
+    /// ellipsis — matching `roleBubble`'s existing unlimited-lines behavior (host / AI /
+    /// reply messages), which previously excluded this general-viewer path on purpose (see
+    /// the dedicated "主播 / 角色聊天氣泡訊息完整顯示（不限行數）" spec Requirement this
+    /// change revises). For content that already fits within 2 lines this produces
+    /// byte-identical pixels (already established by that Requirement's own "snapshot /
+    /// demo baseline 不位移" scenario), so most existing demo/snapshot content is
+    /// unaffected by this specific edit — only the nickname/colon color change above
+    /// moves pixels for those baselines.
     ///
     /// `bubbleText.offset(y:)` (`rb-ios-chat-bubble-text-vertical-center`) compensates for
     /// `Text`'s own line-box being vertically asymmetric around its glyph ink at this size
@@ -740,7 +754,7 @@ struct LBChatLineRow: View {
     private var bubble: some View {
         bubbleText
             .offset(y: Self.guestBubbleTextVerticalOffset * theme.fontScale)
-            .lineLimit(2)
+            .lineLimit(nil)
             .padding(.horizontal, 11)
             .padding(.vertical, 4)
             .background(
@@ -785,6 +799,13 @@ struct LBChatLineRow: View {
     /// colon glyph a taller line box than the text on either side of it, reading as "not
     /// vertically centered" — see `guestBubbleTextVerticalOffset` below for the
     /// re-measurement this fix triggered.
+    ///
+    /// The nickname / colon color is fixed pink `#FBB0B7` (`Self.guestRoleNameColor`,
+    /// `rb-ios-chat-audience-bubble-pink-nickname-full-lines`) — **replaces** the prior
+    /// translucent white `.white.opacity(0.72)`. This reuses the SAME color constant
+    /// already applied to the "non-host but still role-styled" nickname in `roleBubble`
+    /// (see its doc comment above `guestRoleNameColor`) — the two call sites now share one
+    /// source of value, not two definitions that happen to match.
     private var bubbleText: Text {
         let body = Text(text)
             .font(.system(size: 11.5 * theme.fontScale, weight: .regular))
@@ -792,10 +813,10 @@ struct LBChatLineRow: View {
         guard let userName = userName, !userName.isEmpty else { return body }
         return Text(userName)
             .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
-            .foregroundColor(.white.opacity(0.72))
+            .foregroundColor(Self.guestRoleNameColor)
             + Text("：")
                 .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
-                .foregroundColor(.white.opacity(0.72))
+                .foregroundColor(Self.guestRoleNameColor)
             + body
     }
 

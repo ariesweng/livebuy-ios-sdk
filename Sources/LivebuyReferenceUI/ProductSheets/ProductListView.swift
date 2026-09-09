@@ -106,6 +106,15 @@ public struct ProductListView: View {
     /// `[beginTime, endTime]` to decide「介紹中」. From `DefaultPlaybackProgressState.position`.
     private let playbackPosition: Int
 
+    /// 搶購場旗標（`rb-ios-flash-sale-live-signal-wiring`）— `ProductSheetsModel.isFlashSale`
+    /// ← `header.isFlashSale`. Passed straight through to every row's `ProductRowView
+    /// .isFlashSale` — drives ONLY the `mode == .live` name-tag pill's「直播價」vs「搶購中」
+    /// variant. The narrating banner text no longer branches on this flag (reverted per
+    /// `rb-ios-narrating-banner-revert-flash-sale-text` — it is now a constant「介紹中」).
+    /// Default `false` (existing call sites, which predate this flag) → every row renders
+    /// byte-identical to before.
+    public let isFlashSale: Bool
+
     /// Host-wired product-row tap → core product-tap exit. The container forwards
     /// this to its host-wired `onProductTap`, which the host wires to core
     /// `LivebuyPlayerViewController.simulateProductTap(product)`. nil for demo /
@@ -162,6 +171,7 @@ public struct ProductListView: View {
         productsBackendOrder: [LBProduct] = [],
         mode: ProductRowMode? = nil,
         playbackPosition: Int = 0,
+        isFlashSale: Bool = false,
         onOpenProduct: ((LBProduct) -> Void)? = nil,
         onQuickAdd: ((LBProduct) -> Void)? = nil,
         onNotifyRestock: ((LBProduct) -> Void)? = nil,
@@ -180,6 +190,7 @@ public struct ProductListView: View {
         self.productsBackendOrder = productsBackendOrder
         self.mode = mode
         self.playbackPosition = playbackPosition
+        self.isFlashSale = isFlashSale
         self.onOpenProduct = onOpenProduct
         self.onQuickAdd = onQuickAdd
         self.onNotifyRestock = onNotifyRestock
@@ -374,6 +385,7 @@ public struct ProductListView: View {
                         isNarrating: ProductBagNarratingBadge.isNarrating(
                             productId: product.id, narratingIds: introducingProductIds),
                         playbackPosition: playbackPosition,
+                        isFlashSale: isFlashSale,
                         badgeIndex: ProductRowNumberBadge.resolveIndex(
                             product: product, backendOrder: productsBackendOrder, mode: effectiveMode),
                         onOpenProduct: { onOpenProduct?(product) },

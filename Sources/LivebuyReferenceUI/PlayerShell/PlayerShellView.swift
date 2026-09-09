@@ -115,10 +115,20 @@ public struct PlayerShellView: View {
     /// model; this only governs the sheet affordance's open/closed state.
     @State private var infoPanelPresented: Bool = false
 
-    /// Local heart-burst trigger for the LIVE bottom bar's like tap (rb-ios-live-bottom-heart-burst).
-    /// Bumped each time the user taps 愛心 → drives a `HeartBurstView` anchored above the like
-    /// button (design `LBLiveBottomBar onLike → spawnHeart`). Local presentation state only.
+    /// Local heart-burst trigger for the LIVE bottom bar's like tap (rb-ios-live-bottom-heart-burst,
+    /// restyled by `rb-ios-live-like-burst-restyle`). Bumped ONCE PER BURST — a single like tap
+    /// now bumps this 1–4 times, staggered 300ms apart (`resolveLikeBurstCount` /
+    /// `likeGlowDurationMs` below), each bump driving one more `HeartBurstView` burst anchored
+    /// above the like button (design `LBLiveBottomBar onLike → likeAnimation`). Local
+    /// presentation state only.
     @State private var liveHeartTick: Int = 0
+
+    /// LIVE like button bright (accent) state (design R37 `LBLiveBottomBar liked` prop,
+    /// `rb-ios-live-like-burst-restyle`). `true` while the staggered burst sequence from the
+    /// most recent like tap is still playing out; reverts to `false` after
+    /// `likeGlowDurationMs(count:)`. Local presentation state only — mirrors `liveHeartTick`'s
+    /// existing pattern, does NOT touch `PlayerShellModel`.
+    @State private var liveLiked: Bool = false
 
     /// The VOD products whose now-introducing cards the viewer has dismissed (by id). Each card
     /// re-appears when the playhead advances and that product re-enters `vodActiveProducts`. A
@@ -295,6 +305,15 @@ public struct PlayerShellView: View {
     /// before (snapshot-neutral); the drop-in container drives it from
     /// `ChatComposerController.isPresented`.
     private let composerPresented: Bool
+
+    /// Whether any product sheet/modal (the sibling `ProductSheetsOverlayView`'s list drawer /
+    /// detail-or-restock sheet / zoom lightbox / cart-needs-login gate / variant-select prompt)
+    /// is currently presented — fed by the container's mirror of
+    /// `ProductSheetsOverlayView.onPresentationChange` (rb-ios-block-swipe-nav-when-sheet-open).
+    /// `true` suppresses the vertical-swipe video-switch gesture (`allowsSwipeNav`) exactly like
+    /// `model.isLive == true` does — see `handleSwipeEnded`. Default `false` → existing call
+    /// sites unchanged (snapshot-neutral).
+    private let sheetsPresented: Bool
 
     /// Reports the info-panel (`VideoInfoPanelView` bottom sheet) open/closed state to the
     /// container each time it changes, so the container can hide the family-2 chat feed
@@ -682,10 +701,24 @@ public struct PlayerShellView: View {
     }
 
     /// The "exit clean mode" button's full bottom offset: the `isLive`-branched base value (see
-    /// `cleanModeExitButtonBaseBottomInset(isLive:)`'s doc comment) plus the existing, independent
-    /// dynamic `scrubChromeLiftIfExpanded` lift — `rb-ios-clean-mode-exit-icon-fix`.
+    /// `cleanModeExitButtonBaseBottomInset(isLive:)`'s doc comment) — `rb-ios-clean-mode-exit-
+    /// button-scrub-lift`: MUST NOT additionally superimpose the dynamic `scrubChromeLiftIfExpanded`
+    /// lift. This button only ever renders while `cleanMode == true` (guarded at the call site
+    /// below), and design `screens.jsx:401`'s formula for it — `bottom: 16 + safeArea.bottom +
+    /// ((scrubVisible || cleanMode) ? 36 : 0)` — has `cleanMode` permanently true at that render
+    /// site, so the ternary is permanently saturated at `36` regardless of `scrubVisible`
+    /// (`_scrubBarExpanded`'s design counterpart): the `52`/`16` base values above ALREADY are that
+    /// complete, one-time-computed story (see the base function's own doc comment). Superimposing
+    /// `scrubChromeLiftIfExpanded` on top double-counts that `36` during the post-release hold
+    /// window (`scrubBarExpanded && !isScrubbing`), producing an `88` this button never has in the
+    /// design, in Android (`cleanModeExitButtonBottomDp`, a pure function with no scrub parameter),
+    /// or in RN (this same button's existing Requirement: "MUST NOT depend on `scrubChromeLift`").
+    /// `scrubChromeLiftIfExpanded` remains the correct dynamic lift for every OTHER floating
+    /// element in this file that is mutually exclusive with — and independently visible from —
+    /// this button (those render only while `!cleanMode`, so they still need the dynamic lift to
+    /// bridge their own "not yet expanded" vs. "temporarily expanded" states).
     private var cleanModeExitButtonBottomInset: CGFloat {
-        Self.cleanModeExitButtonBaseBottomInset(isLive: model.isLive) + scrubChromeLiftIfExpanded
+        Self.cleanModeExitButtonBaseBottomInset(isLive: model.isLive)
     }
 
     /// Test seam exposing the private `cleanModeExitButtonBottomInset` computed property
@@ -766,6 +799,7 @@ public struct PlayerShellView: View {
                 onHoldStart: (() -> Void)? = nil,
                 onHoldEnd: (() -> Void)? = nil,
                 composerPresented: Bool = false,
+                sheetsPresented: Bool = false,
                 onInfoPanelPresentedChange: ((Bool) -> Void)? = nil,
                 onIsLiveChange: ((Bool) -> Void)? = nil,
                 onHasAnnounceChange: ((Bool) -> Void)? = nil,
@@ -806,6 +840,7 @@ public struct PlayerShellView: View {
         self.onHoldStart = onHoldStart
         self.onHoldEnd = onHoldEnd
         self.composerPresented = composerPresented
+        self.sheetsPresented = sheetsPresented
         self.onInfoPanelPresentedChange = onInfoPanelPresentedChange
         self.onIsLiveChange = onIsLiveChange
         self.onHasAnnounceChange = onHasAnnounceChange
@@ -865,8 +900,17 @@ public struct PlayerShellView: View {
     /// `isUpcoming` / `isFinishedLiveReplay` 互斥）MUST NOT 用垂直滑動切換影片（design R18，
     /// `screens.jsx` 的 `liveInProgress = effectiveState === 'live_main' && !isUpcoming && !isReplay`）；
     /// 預告倒數（upcoming）與已結束直播的回放（finished-live replay）不受影響，維持可滑動換片
-    /// （rb-ios-live-swipe-gesture-gating）。抽成純函式使此 gate 可單元測試（不需渲染手勢）。
-    static func allowsSwipeNav(isLive: Bool) -> Bool { !isLive }
+    /// （rb-ios-live-swipe-gesture-gating）。
+    ///
+    /// **任一商品 sheet 呈現中同樣 MUST NOT 用垂直滑動切換影片**（`sheetsPresented`——商品列表抽屜 /
+    /// 明細-補貨 sheet / 放大燈箱 / 加購需登入閘 / 「請選規格」提示中任一者，見
+    /// `ProductSheetsOverlayView.anyProductSheetPresented`。純防禦性：`ProductSheetsOverlayView`
+    /// 的 sheet/modal scrim 目前只掛 tap 手勢，沒有掛任何垂直拖曳辨識器與此視圖競爭，理論上跨越 sheet
+    /// 邊界起手的垂直拖曳仍可能被此層判定為換片並執行——`rb-ios-block-swipe-nav-when-sheet-open`）。
+    /// 預設 `false`，既有呼叫端零改動、行為不變。抽成純函式使此 gate 可單元測試（不需渲染手勢）。
+    static func allowsSwipeNav(isLive: Bool, sheetsPresented: Bool = false) -> Bool {
+        !isLive && !sheetsPresented
+    }
 
     /// Resolves a committed vertical drag into the correct action, honoring host overrides.
     /// - **直播進行中**（`model.isLive == true`）MUST NOT 觸發任何換片 / 關閉動作——本函式整個提早
@@ -874,13 +918,16 @@ public struct PlayerShellView: View {
     ///   `navigateToPrev`）、close-on-empty（`onCloseRequest`）三者皆不觸發（rb-ios-live-swipe-
     ///   gesture-gating）。拖曳事件本身仍由呼叫端（`resolveGestureEnd`）分類為 swipe，不會落回 tap，
     ///   故仍被手勢層吞掉，不會誤觸點擊靜音。
+    /// - **任一商品 sheet 呈現中**（`sheetsPresented == true`）同樣 MUST NOT 觸發任何換片 / 關閉動作，
+    ///   抑制範圍與「直播進行中」完全相同（`rb-ios-block-swipe-nav-when-sheet-open`）。
     /// - A host `onSwipeUp` / `onSwipeDown` override ALWAYS wins (called instead of any
     ///   template-nav / close behavior).
     /// - Otherwise (template-nav fallback): swipe toward a video → navigate; swipe toward
     ///   an EMPTY direction (no next / no prev) → `onCloseRequest()` (close the player, #7).
     func handleSwipeEnded(translationHeight dy: CGFloat) {
-        // 直播進行中：不換片、不關閉（拖曳事件已由呼叫端分類為 swipe，仍算被吞掉，只是無 side effect）。
-        guard Self.allowsSwipeNav(isLive: model.isLive) else { return }
+        // 直播進行中 / 任一商品 sheet 呈現中：不換片、不關閉（拖曳事件已由呼叫端分類為 swipe，仍算被
+        // 吞掉，只是無 side effect）。
+        guard Self.allowsSwipeNav(isLive: model.isLive, sheetsPresented: sheetsPresented) else { return }
         // Host override wins, regardless of next/prev availability.
         if dy <= -Self.swipeThreshold, let onSwipeUp = onSwipeUp { onSwipeUp(); return }
         if dy >= Self.swipeThreshold, let onSwipeDown = onSwipeDown { onSwipeDown(); return }
@@ -975,6 +1022,35 @@ public struct PlayerShellView: View {
     /// rationale); the `52`/`16` constants are the complete story, not a partial one.
     static func cleanModeExitButtonBaseBottomInset(isLive: Bool) -> CGFloat {
         isLive ? 16 : 52
+    }
+
+    // MARK: - LIVE like burst count / timing (rb-ios-live-like-burst-restyle, design R37)
+    //
+    // Design `LBLiveBottomBar`'s `likeAnimation(n)`: `count = (n ?? random(0...3)) + 1` (1...4
+    // hearts), each spawned 300ms apart, with the like icon staying bright (accent) until
+    // `300*(count-1) + 2000` ms after the tap. Both resolved here as PURE functions (no
+    // rendering, no timers) so the count RANGE and the duration FORMULA are unit-testable
+    // without driving SwiftUI state — the actual scheduling (staggered `liveHeartTick` bumps +
+    // the `liveLiked` revert) lives in the `onLike` closure below, which is not unit-testable
+    // (it's a `DispatchQueue`-driven closure), matching this file's existing
+    // pure-decision/impure-dispatch split (see `handleDragChanged` above).
+
+    /// Pure — resolves how many hearts one like tap spawns. Range **1...4** (design `+ 1` after
+    /// a `0...3` random draw). Injectable RNG for test determinism.
+    static func resolveLikeBurstCount<G: RandomNumberGenerator>(using generator: inout G) -> Int {
+        Int.random(in: 0...3, using: &generator) + 1
+    }
+
+    /// Production entry point — uses the system RNG.
+    static func resolveLikeBurstCount() -> Int {
+        var rng = SystemRandomNumberGenerator()
+        return resolveLikeBurstCount(using: &rng)
+    }
+
+    /// Pure — total milliseconds the like icon stays bright (accent) after a tap that spawned
+    /// `count` staggered bursts `staggerMs` apart, mirroring design `300*(count-1) + 2000`.
+    static func likeGlowDurationMs(count: Int, staggerMs: Double = 300, tailMs: Double = 2000) -> Double {
+        staggerMs * Double(count - 1) + tailMs
     }
 
     /// Drag in progress: on the first change, record which half the press started in
@@ -1177,8 +1253,11 @@ public struct PlayerShellView: View {
     /// no-intro VOD (the common case) there is no intro MP4, so by `.buffering` the channel
     /// is already loaded (rail enablement set, header data filled) — the rail/bag appear
     /// alongside the header instead of waiting for the first played frame (`.done`).
-    /// This single source of truth drives the rail, the floating bag, AND the
-    /// now-introducing card's bag-clearance inset (rb-ios-vod-rail-show-on-buffering).
+    /// This single source of truth drives the rail, the floating bag, the now-introducing
+    /// card's bag-clearance inset (rb-ios-vod-rail-show-on-buffering), AND — since
+    /// rb-ios-now-introducing-carousel-buffering-gate — whether the now-introducing card
+    /// renders AT ALL (previously only its trailing inset consulted this property, so an
+    /// early-non-empty `vodActiveProducts` could show the card before the rail/bag).
     private var showsVodMainChrome: Bool {
         isVodMainChrome && model.startPhase != .loading && model.startPhase != .splash
     }
@@ -1373,9 +1452,13 @@ public struct PlayerShellView: View {
                     // rb-ios-now-introducing-real-image-carousel (問題 9 滿寬+真實圖, 問題 10 多商品輪播).
                     // 「mini-cart」（design `LBPMiniCart`）在乾淨模式隱藏 — iOS 對應此 now-introducing
                     // carousel（rb-ios-gesture-clean-mode-rewrite ADDED Requirement）。
+                    // 卡片本身是否渲染 SHALL 跟隨 `showsVodMainChrome`（與側欄 / 浮動商品袋同一閘門），
+                    // MUST NOT 只因 `vodActiveProducts` 提早非空就在開場序列（.loading/.splash）搶先出現
+                    // ——先前只有 trailing padding（見下）用了 `showsVodMainChrome`，本身渲染卻沒有，
+                    // 導致這張卡比側欄 / 浮動袋更早出現（rb-ios-now-introducing-carousel-buffering-gate）。
                     let introducing = model.vodActiveProducts
                         .filter { !dismissedVodProductIds.contains($0.id) }
-                    if !introducing.isEmpty && !isScrubbing && !cleanMode {
+                    if !introducing.isEmpty && !isScrubbing && !cleanMode && showsVodMainChrome {
                         NowIntroducingCarouselView(
                             theme: theme,
                             peeks: introducing.map { product in
@@ -1577,6 +1660,7 @@ public struct PlayerShellView: View {
                         // 對 liveStatus==3 回 404；rb-ios-replay-chat-closed-bottom-bar）。behind-edge
                         // isReplay（仍直播）不受影響——chatClosed 只由 isFinishedLiveReplay 驅動。
                         chatClosed: model.isFinishedLiveReplay,
+                        liked: liveLiked,
                         onBag: {
                             model.performGoodsTap()   // telemetry-only panel-toggle event
                             onOpenProductList?()       // host opens the product-list overlay
@@ -1590,9 +1674,26 @@ public struct PlayerShellView: View {
                         // 由容器經 `onShare` 注入（rb-ios-live-share-default-sheet）；非容器 /
                         // snapshot（onShare == nil）維持既有 headless `model.performShare()`。
                         onShare: { if let onShare = onShare { onShare() } else { model.performShare() } },
-                        // Real like via the existing turnkey forwarder + an immediate local heart
-                        // burst (rb-ios-live-bottom-heart-burst — design `onLike → spawnHeart`).
-                        onLike: { model.performLike(); liveHeartTick &+= 1 },
+                        // Real like via the existing turnkey forwarder + 1–4 staggered local heart
+                        // bursts + a bright (accent) glow on the icon itself while they play out
+                        // (rb-ios-live-like-burst-restyle — design `onLike → likeAnimation(n)`).
+                        // `model.performLike()` fires ONCE per tap (unchanged turnkey contract);
+                        // only the local, presentation-only burst count/glow is randomized —
+                        // reference-ui still MUST NOT call like more than once per tap.
+                        onLike: {
+                            model.performLike()
+                            let count = Self.resolveLikeBurstCount()
+                            liveLiked = true
+                            for i in 0..<count {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 * Double(i)) {
+                                    liveHeartTick &+= 1
+                                }
+                            }
+                            let glowMs = Self.likeGlowDurationMs(count: count)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + glowMs / 1000) {
+                                liveLiked = false
+                            }
+                        },
                         // CC (字幕) toggle → the SAME real forwarder `OperationRailView`'s VOD
                         // `.subtitle` rail item uses (`handleRailTap(.subtitle)` → `model.toggleSubtitle()`),
                         // restored 2026-09-03 (correction round) at its NEW trailing-slot position
@@ -1619,9 +1720,13 @@ public struct PlayerShellView: View {
                 }
 
                 // LIVE bottom-bar heart burst — the shared `HeartBurstView` anchored ABOVE the
-                // like button (bottom-trailing), driven by the local `liveHeartTick`. Bag-only
-                // (introPlaying) draws no like → no burst. Transient + non-interactive →
-                // snapshot-neutral at rest. (rb-ios-live-bottom-heart-burst)
+                // like button (bottom-trailing), driven by the local `liveHeartTick`, which one
+                // like tap now bumps 1–4 times staggered 300ms apart (rb-ios-live-like-burst-
+                // restyle). `HeartBurstView` itself still only reacts to ITS `tick` increasing
+                // by exactly 1 at a time — the multi-burst richness lives entirely in the
+                // staggered bumps above, not in this shared view. Bag-only (introPlaying) draws
+                // no like → no burst. Transient + non-interactive → snapshot-neutral at rest.
+                // (rb-ios-live-bottom-heart-burst, rb-ios-live-like-burst-restyle)
                 // 心動特效在乾淨模式隱藏（rb-ios-gesture-clean-mode-rewrite ADDED Requirement）——
                 // 同上，範圍只限 usesLiveChrome 那一支，不影響 upcoming。
                 if ((usesLiveChrome && !cleanMode) || model.isUpcoming) && !model.introPlaying {

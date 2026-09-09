@@ -121,6 +121,18 @@ public final class ProductSheetsModel: ObservableObject {
     @Published public private(set) var isReplay: Bool
     @Published public private(set) var position: Double
 
+    /// 搶購場旗標（`rb-ios-flash-sale-live-signal-wiring`）— straight mirror of
+    /// `DefaultPlayerHeaderState.isFlashSale` (← core `LBChannel.isFlashSale` ← backend
+    /// top-level `is_flash_sale`, orthogonal to `type`/`live_status`). Consumed by
+    /// `ProductRowView.isFlashSale` (via `ProductListView`, below) to pick「直播價」vs
+    /// 「搶購中」for the `mode == .live` name-tag pill ONLY. The narrating-banner text
+    /// (`ProductRowView.introducingLabel`) previously ALSO branched on this flag but that
+    /// split was reverted per user decision (`rb-ios-narrating-banner-revert-flash-sale-
+    /// text`) — the banner is now a constant「介紹中」regardless. Default `false` for a
+    /// demo / snapshot instance (no bound template) — same convention as `isLive` /
+    /// `isReplay` above.
+    @Published public private(set) var isFlashSale: Bool
+
     /// Derived playback mode for the product-row overlay (replay takes precedence
     /// over live). `nil` for a demo / snapshot model (no bound template) → the
     /// view falls back to its real-frame `live` flag so baselines stay byte-identical.
@@ -249,6 +261,7 @@ public final class ProductSheetsModel: ObservableObject {
             isLive: t.header.isLive,
             isReplay: t.header.isFinishedLiveReplay,
             position: t.playbackProgress.position,
+            isFlashSale: t.header.isFlashSale,
             detail: t.productSheet.detail,
             variant: t.variantPicker.state,
             qty: t.qtyStepper.state,
@@ -280,6 +293,7 @@ public final class ProductSheetsModel: ObservableObject {
         isLive: Bool = false,
         isReplay: Bool = false,
         position: Double = 0,
+        isFlashSale: Bool = false,
         detail: LBProductDetailState? = nil,
         variant: LBVariantState = ProductSheetsModel.emptyVariant,
         qty: LBQtyState = ProductSheetsModel.emptyQty,
@@ -299,6 +313,7 @@ public final class ProductSheetsModel: ObservableObject {
         self.isLive = isLive
         self.isReplay = isReplay
         self.position = position
+        self.isFlashSale = isFlashSale
         self.detail = detail
         self.variant = variant
         self.qty = qty
@@ -332,6 +347,7 @@ public final class ProductSheetsModel: ObservableObject {
         isLive = t.header.isLive
         isReplay = t.header.isFinishedLiveReplay
         position = t.playbackProgress.position
+        isFlashSale = t.header.isFlashSale
         detail = t.productSheet.detail
         variant = t.variantPicker.state
         qty = t.qtyStepper.state

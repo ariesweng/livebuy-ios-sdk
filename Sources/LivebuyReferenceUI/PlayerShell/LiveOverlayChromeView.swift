@@ -601,7 +601,13 @@ public struct LiveOverlayChromeView: View {
     static let priceCaptionSuffix = "開始銷售"
     /// Host-caption live-price color (`#FFD0D7` — design pink for the price span).
     static let captionPriceColor = Color(hex: "#FFD0D7") ?? Color.pink
-    /// Narrate-tag copy shown on the pinned card ("介紹中").
+    /// Narrate-tag copy shown on the pinned card — 恆定「介紹中」，不受 isFlashSale 影響
+    /// (`rb-ios-narrating-banner-revert-flash-sale-text`). `rb-ios-flash-sale-live-signal-
+    /// wiring` previously split this into「開標中」(flash-sale) vs「介紹中」(default) per
+    /// the backend documentation's wording; the user later decided to revert that split for
+    /// both this pinned-card copy AND `ProductRowView.introducingLabel` (a SEPARATE view/
+    /// file's product-row narrating banner) — both are constants again. Written as a
+    /// literal — reference-ui 層文案一律寫死、不走 i18n（同本檔案既有慣例）。
     static let narrateTagText = "介紹中"
     /// Narrate badge background (R31, `rb-ios-vod-live-product-card-restyle`): fixed
     /// `rgba(240,50,70,0.7)` coral — no longer `theme.accent`. Shared verbatim with

@@ -5,6 +5,44 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.16.0] - 2026-09-09
+
+> **Minor.** 自 `4.15.0` 以來累積 109 個 commit（iOS 17 個獨立行為，另 2 個為既有功能的
+> snapshot baseline 重生／素材補交支援性 commit）。主軸是商品名稱標籤系統落地（design R39：
+> LIVE 直播價/搶購中、VOD/回放熱賣中/即將售完）、讚特效重寫兩輪（design R37 手繪版 → PNG
+> 素材版）、「介紹中」等化器呼吸動畫（design R40）、`isFlashSale` 旗標（core，additive）、
+> 浮動小卡新增 `inset` host 覆寫、觀眾留言暱稱粉色化＋不限行數等一系列使用者驗收/實機回報
+> 後的新增與修復。**含 1 項 ⚠️ BREAKING**（reference-ui-internal 視覺行為）——比照
+> v4.5.0/v4.8.0/v4.9.0/v4.11.0/v4.13.0/v4.14.0/v4.15.0 先例，整輪仍判定 minor。完整敘述見
+> [`docs/release-notes/v4.16.0.md`](../docs/release-notes/v4.16.0.md)。
+
+### Added
+
+- **`LBChannel.isFlashSale`**（core，additive，解碼 `/sdk/video` 新欄位 `is_flash_sale`）。
+- **`DefaultPlayerHeaderState.isFlashSale`**（view-model 投影）。
+- **商品名稱標籤系統落地**（design R39）：LIVE 直播價/搶購中、VOD/回放熱賣中/即將售完，
+  「搶購中」分支接上真實 `isFlashSale` 資料。
+- **浮動小卡新增 `inset` host 覆寫參數**（既有 `position` 覆寫的延伸）。
+- **商品 sheet 開啟時抑制垂直滑動換片**（防禦性補強）。
+
+### Changed
+
+- **一般觀眾留言暱稱改固定粉色 `#FBB0B7` + 訊息不限行數**（撤回原先觀眾留言行數上限）。
+- **「介紹中」等化器圖示改呼吸動畫**，取代靜態版（design R40）。
+- **讚按鈕特效重寫**：4 種隨機圖案×3 種軌跡×3 種擺動 + liked 亮色態（design R37）。
+- **⚠️ BREAKING — 讚特效 4 種圖案全改用真實 PNG 素材**：heart 圖案不再吃呼叫端
+  `color`/`theme.accent` 染色，改為顯示 PNG 本身烘焙好的固定色（`color` 參數保留供源碼相容，
+  純視覺行為，無 API 簽章影響）。
+
+### Fixed
+
+- **乾淨模式退出鈕拿掉重複疊加的動態墊高**（88→52）。
+- **商品明細大圖橫向換頁手勢修復阻擋外層 sheet 垂直捲動**。
+- **VOD「正在介紹」商品卡輪播出現時機提早於側欄/浮動商品袋**：改為共用同一渲染閘門
+  （`showsVodMainChrome`），三者顯示時機一致，不再於開場序列（`.loading`/`.splash`）階段
+  提早出現。
+- **`bindSession`/`clearUser` 對重疊呼叫改為序列化執行**（core，修復併發競態）。
+
 ## [4.15.0] - 2026-09-07
 
 > **Minor.** 自 `4.14.0` 以來累積 67 個 commit（iOS 13 個），主軸是商品列表 sheet 售完/

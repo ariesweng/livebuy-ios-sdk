@@ -288,6 +288,14 @@ public final class DefaultPlayerHeaderState {
     /// 預設 `false`（pre-channel / 直播中 / 預告 / 純 VOD）。NOT in `LBPlayerMomentState`。
     private(set) public var isFinishedLiveReplay: Bool = false
 
+    /// 搶購場旗標 — 原樣鏡射 core 既有公開的 `channel.isFlashSale`（`channel-flash-sale-flag`，
+    /// 語意 = 上游 `sale_type==2`，恆存在）。Channel-derived（由 `ingestChannel` 餵入）。與
+    /// `isLive` / `isFinishedLiveReplay` **語意正交、不互斥**——同一場搶購場可以同時是直播中 /
+    /// 回放 / 純 VOD，這個旗標只標示「是不是搶購場」，跟播放狀態無關。view-model 層只搬運、
+    /// MUST NOT 依 `liveStatus` / `type` 推導或覆寫。預設 `false`（pre-channel）。
+    /// NOT in `LBPlayerMomentState`（單一來源）。
+    private(set) public var isFlashSale: Bool = false
+
     // MARK: - Top-bar chrome (player-chrome-template D3) — from public `channel`
     /// Host pill 標題 — `channel.title`.
     private(set) public var title: String = ""
@@ -337,6 +345,15 @@ public final class DefaultPlayerHeaderState {
     func handleFinishedLiveReplay(_ value: Bool) {
         guard value != self.isFinishedLiveReplay else { return }
         self.isFinishedLiveReplay = value
+        onMutation?()
+    }
+
+    /// 搶購場旗標 from the public `channel`（原樣鏡射 `channel.isFlashSale`）。Diff-then-notify；
+    /// re-feeding the same value is a no-op. Fed inside `ingestChannel`'s coalescing batch so a
+    /// single channel ingest fires `onMutation` at most once（與 `handleFinishedLiveReplay` 同形）。
+    func handleFlashSale(_ value: Bool) {
+        guard value != self.isFlashSale else { return }
+        self.isFlashSale = value
         onMutation?()
     }
 

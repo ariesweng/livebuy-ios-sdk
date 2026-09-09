@@ -229,6 +229,11 @@ public enum LBAccessibilityID {
     /// 一個 index 一顆，`tap` 跳圖。
     public static func productGalleryThumbnail(_ index: Int) -> String { "lb_product_gallery_thumbnail_\(index)" }
 
+    /// 商品明細主圖相簿的大圖手勢面容器（`rb-ios-product-photo-gallery-scroll-conflict`）——
+    /// 供 E2E 定位真實觸控拖曳的起點（大圖區域），比照 Android `PRODUCT_DETAIL_PHOTO_GALLERY`
+    /// testTag 的做法。
+    public static let productGalleryMainImage = "lb_product_gallery_main_image"
+
     public static let notifyRestockSheet = "lb_notify_restock_sheet"
     public static let restockNoticeCta = "lb_restock_notice_cta"
 

@@ -23,7 +23,8 @@ import LivebuyUI
 //   • a trailing slot — SHARE in every variant except `chatClosed`, where it is replaced
 //     by a CC (字幕) toggle forwarding `onToggleCC` (design R32 moves the CC button INTO
 //     share's old position — see `trailingActionKind`),
-//   • an accent like (heartFill) button.
+//   • a like (heartFill) button — white by default, accent while `liked == true` (design R37,
+//     `rb-ios-live-like-burst-restyle`; the caller drives the timing).
 //
 // `chatClosed` variant button count (design `LBLiveBottomBar`'s `replay` branch,
 // `design/contract/components.md` line 67): FOUR icon buttons — bag / 更多 (leading slot,
@@ -141,6 +142,14 @@ public struct LiveBottomBarView: View {
     ///
     /// nil → inert (demo / snapshot).
     public let onToggleCC: (() -> Void)?
+    /// LIVE 讚鈕亮色狀態（design R37 `LBLiveBottomBar` — `liked` prop，`rb-ios-live-like-burst-restyle`）。
+    /// **預設 `false` → 白色**（與其餘 icon 一致）；`PlayerShellView` 在使用者點擊愛心後把它設為
+    /// `true`，並在本地計時（隨飄心次數而定，見 `PlayerShellView.likeGlowDurationMs(count:)`）過後
+    /// 恢復 `false`。**與舊行為的差異**：愛心圖示先前恆為 `theme.accent`（不論是否剛按過）；本
+    /// 旗標把它改為「沒按時白色、按了之後短暫亮 accent」，其餘四顆 icon（購物袋 / 暱稱或更多 /
+    /// 分享或 CC）不受影響、維持既有色彩。This sub-view remains READ-ONLY presentation: it does
+    /// NOT drive the timer itself, only paints the tint the caller passes in.
+    public let liked: Bool
     /// 「更多」(⋯) tap → host opens `LiveMoreSheetView` (分享 + 客服). Only rendered in the
     /// `chatClosed` (finished-live-replay) variant, in the LEADING slot (nickname's position —
     /// design `LBLiveBottomBar` R32: the old CC-toggle slot now shows「更多」; CC itself moves
@@ -158,6 +167,7 @@ public struct LiveBottomBarView: View {
         isUpcoming: Bool = false,
         bagOnly: Bool = false,
         chatClosed: Bool = false,
+        liked: Bool = false,
         onBag: (() -> Void)? = nil,
         onComment: (() -> Void)? = nil,
         onNickname: (() -> Void)? = nil,
@@ -172,6 +182,7 @@ public struct LiveBottomBarView: View {
         self.isUpcoming = isUpcoming
         self.bagOnly = bagOnly
         self.chatClosed = chatClosed
+        self.liked = liked
         self.onBag = onBag
         self.onComment = onComment
         self.onNickname = onNickname
@@ -249,7 +260,9 @@ public struct LiveBottomBarView: View {
                 // VOD `.subtitle` rail item already draws (rb-ios-cc-icon-design-align), so the
                 // two CC call sites in this package are now visually consistent.
                 trailingAction
-                iconButton(symbol: Self.likeSymbol, tint: theme.accent, action: onLike)
+                // 亮色狀態 SHALL 依 `liked`（design R37）：沒按時白色（與其餘 icon 一致）、按了
+                // 之後短暫亮 accent（`rb-ios-live-like-burst-restyle`；舊行為恆為 accent）。
+                iconButton(symbol: Self.likeSymbol, tint: liked ? theme.accent : .white, action: onLike)
                     .accessibilityIdentifier(LBAccessibilityID.liveHeart)
             }
         }
@@ -521,6 +534,8 @@ struct LiveBottomBarView_Previews: PreviewProvider {
             // chatClosed (finished-live-replay) — 留言區 disabled、leading 格為「更多」(⋯)、
             // trailing 格為 CC 字幕（design R32；2026-09-03 補正輪還原）。
             LiveBottomBarView(theme: ReferenceUIThemePalette.minimal, bagCount: 4, isReplay: false, chatClosed: true)
+            // liked == true (rb-ios-live-like-burst-restyle) — 愛心亮 accent，其餘不變。
+            LiveBottomBarView(theme: ReferenceUIThemePalette.minimal, bagCount: 2, isReplay: false, liked: true)
         }
         .padding(.vertical, 40)
         .background(Color.black)

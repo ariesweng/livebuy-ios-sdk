@@ -928,25 +928,64 @@ public struct ProductDetailSheetView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .contentShape(Rectangle())
         // Horizontal swipe → next/previous gallery page (design `scrollSnapType:'x mandatory'`
-        // drag-to-page). Mirrors `NowIntroducingCarouselView`'s established recipe EXACTLY:
-        // `.highPriorityGesture` + `minimumDistance: 10` + a horizontal-vs-vertical direction
-        // gate, so a committed horizontal drag still wins over the zoom badge's `Button` and
-        // the sheet's own vertical drag-to-dismiss, while a plain tap (no movement) or a
-        // vertical drag falls through unaffected. Harmless no-op when there is ≤1 photo
-        // (`handleGallerySwipe` always clamps back to index 0), so this is unconditionally
-        // attached rather than gated — zero interaction change for every EXISTING call site.
+        // drag-to-page). Mirrors `NowIntroducingCarouselView`'s established recipe:
+        // `.highPriorityGesture` + a horizontal-vs-vertical direction gate in
+        // `handleGallerySwipe`'s `.onEnded`, so a committed horizontal drag still wins over the
+        // zoom badge's `Button`, while a plain tap (no movement) falls through unaffected.
+        // Harmless no-op when there is ≤1 photo (`handleGallerySwipe` always clamps back to
+        // index 0), so this is unconditionally attached rather than gated — zero interaction
+        // change for every EXISTING call site.
+        //
+        // `minimumDistance: 20` (rb-ios-product-photo-gallery-scroll-conflict; was `10` — see
+        // git history) is the load-bearing number here, NOT the `.highPriorityGesture` choice
+        // itself (which is UNCHANGED and still needed — see below). `DragGesture`'s
+        // `minimumDistance` is a straight-line distance, not axis-scoped, so ANY direction of
+        // drag crossing it lets this gesture start tracking — `handleGallerySwipe`'s
+        // `abs(width) > abs(height)` direction check only runs in `.onEnded`, by which point the
+        // touch sequence has ALREADY been claimed. At `minimumDistance: 10`, a real-touch XCUITest
+        // proved this gesture always won that claim over the ancestor `LBSheetScaffold`
+        // `ScrollView` (`BottomSheetPresenter.swift`) for EVERY direction — including a plainly
+        // vertical drag with only a 15pt horizontal jitter — leaving the sheet's scroll position
+        // completely unmoved (the exact reported symptom). Empirically this held true regardless
+        // of `.gesture` / `.simultaneousGesture` / `.highPriorityGesture`: all three still
+        // blocked the `ScrollView` at `minimumDistance: 10` (SwiftUI's public `Gesture` API has no
+        // "un-claim mid-drag" primitive the way Compose's low-level pointer-input API does — see
+        // the Android sibling change, `rb-android-product-photo-gallery-scroll-conflict`, which
+        // fixes the analogous bug with exactly that mechanism, unavailable here). What DID change
+        // the outcome, confirmed by the SAME real-touch XCUITest across several values: raising
+        // `minimumDistance`. At `20`, a vertical-dominant drag scrolls the `ScrollView` correctly
+        // (and does not page), while a horizontal-dominant drag past the existing 40pt commit
+        // threshold (`gallerySwipeThreshold`) still pages correctly — the most plausible mechanism
+        // (SwiftUI's exact internal arbitration is closed-source, so this is the best-supported
+        // explanation from black-box testing, not a documented guarantee) is that the ancestor
+        // `ScrollView`'s own built-in pan recognizer has a touch-slop threshold noticeably below
+        // 20pt, so raising OUR threshold above it gives that recognizer a genuine chance to claim
+        // FIRST on a vertical-dominant drag (where our straight-line distance only crosses 20
+        // once vertical travel is already well past the `ScrollView`'s own threshold), while a
+        // horizontal-dominant drag's vertical component stays small enough, for long enough, that
+        // the `ScrollView`'s own threshold is never reached before OURS claims the touch via its
+        // much-faster-growing horizontal component. This keeps `.highPriorityGesture` (so a
+        // drag that DOES commit horizontally still wins over the badge `Button`, unchanged from
+        // before) while the raised `minimumDistance` is what actually gives the `ScrollView` a
+        // fair chance on vertical drags. `handleGallerySwipe`'s own 40pt `gallerySwipeThreshold`
+        // and direction check are UNCHANGED — `minimumDistance: 20` only affects when this
+        // gesture starts tracking, not the separate decision inside `.onEnded` of whether/which
+        // way to page.
         //
         // Stays attached to the OUTER container in BOTH branches (design.md D6) — not the inner
         // scaled-image node in the KNOWN branch above — so the zoom badge never drifts off its
         // bottom-trailing corner and the swipe hit-area always covers the full letterbox gap,
         // not just the visible photo pixels.
         .highPriorityGesture(
-            DragGesture(minimumDistance: 10)
+            DragGesture(minimumDistance: 20)
                 .onEnded { handleGallerySwipe($0) }
         )
         // E2E: the gallery's current page (visual-only container; the zoom badge Button is
-        // a child).
+        // a child). `productGalleryMainImage` (rb-ios-product-photo-gallery-scroll-conflict)
+        // lets an XCUITest locate a real touch-drag START POINT inside the actual gesture
+        // surface under test, mirroring `productDetail`'s own container id.
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(LBAccessibilityID.productGalleryMainImage)
     }
 
     /// The 縮圖選取列 (design R34): 48×48 thumbnails, 8pt gap, tap-to-jump, non-current
@@ -993,6 +1032,12 @@ public struct ProductDetailSheetView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityIdentifier(LBAccessibilityID.productGalleryThumbnail(index))
+        // Purely additive semantic annotation (rb-ios-product-photo-gallery-scroll-conflict,
+        // mirrors Android's `.clickable` → `.selectable` testability move) — publishes the
+        // `.isSelected` accessibility trait so an XCUITest can assert WHICH page is active
+        // (`XCUIElement.isSelected`) after a drag, without needing a pixel diff. No visual
+        // change: the dim overlay above is the only thing that renders "selected", unchanged.
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     /// The CURRENT gallery page's verbatim photo string (untrimmed, exactly as stored in

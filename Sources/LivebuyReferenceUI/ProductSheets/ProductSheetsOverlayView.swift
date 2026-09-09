@@ -214,6 +214,19 @@ public struct ProductSheetsOverlayView: View {
     /// reached this detail via 商品袋 → 清單 → 明細 → 更多商品. nil for demo / snapshot instances.
     private let onSwitchVideo: ((String) -> Void)?
 
+    /// Reports whether ANY product sheet/modal (see `anyProductSheetPresented` below) is
+    /// currently presented — its initial value and every change — to the container, so the
+    /// sibling `PlayerShellView` (a SEPARATE `ZStack` child composed by `PlayerOverlayRootView`,
+    /// not a descendant of this view) can suppress its vertical-swipe video-switch gesture while
+    /// a sheet is visually covering the video (`rb-ios-block-swipe-nav-when-sheet-open`) — a
+    /// vertical drag starting over an open sheet's scrim has no competing drag recognizer of its
+    /// own and could otherwise be picked up by the lower `PlayerShellView` hit-test layer. Mirrors
+    /// the existing `PlayerShellView.onInfoPanelPresentedChange` / `onCleanModeChange` /
+    /// `onMoreSheetPresentedChange` bubble-callback precedent (report-only; this view's own sheet
+    /// presentation / dismissal logic is unchanged). nil (default / snapshot) → no report
+    /// (baseline unchanged).
+    private let onPresentationChange: ((Bool) -> Void)?
+
     /// The product-detail the sheet is currently presented for, if any. Mirrors
     /// `model.detail` so the sheet binds a non-optional detail inside; the SOLD-OUT
     /// bit selects restock vs plain detail. The template owns detail open/close —
@@ -303,7 +316,8 @@ public struct ProductSheetsOverlayView: View {
         onShareProduct: ((LBProduct) -> Void)? = nil,
         onRequestLogin: (() -> Void)? = nil,
         onResolveProduct: ((String) -> LBProduct?)? = nil,
-        onSwitchVideo: ((String) -> Void)? = nil
+        onSwitchVideo: ((String) -> Void)? = nil,
+        onPresentationChange: ((Bool) -> Void)? = nil
     ) {
         self.model = model
         self.theme = theme
@@ -315,6 +329,45 @@ public struct ProductSheetsOverlayView: View {
         self.onRequestLogin = onRequestLogin
         self.onResolveProduct = onResolveProduct
         self.onSwitchVideo = onSwitchVideo
+        self.onPresentationChange = onPresentationChange
+    }
+
+    /// PURE: whether ANY product sheet/modal this container can render is currently presented —
+    /// the aggregate OR of all FIVE full-bleed overlay surfaces (`rb-ios-block-swipe-nav-when-
+    /// sheet-open`). Deliberately exhaustive (not "any future overlay auto-counts") — a future
+    /// sixth overlay must be a deliberate edit here:
+    ///
+    /// 1. `listPresented` — the product list drawer (`model.listPresented`).
+    /// 2. `detailPresented` — the detail-or-restock sheet (`presentingDetail != nil`).
+    /// 3. `zoomPresented` — the product-photo zoom lightbox (`zoomedDetail != nil`).
+    /// 4. `cartLoginGatePresented` — the add-to-cart needs-login gate (`AuthGateModalView`).
+    /// 5. `variantPromptPresented` — the「請選規格」prompt (`SelectVariantPromptModalView`).
+    ///
+    /// The add-to-cart success toast (`cartToastVisible` → `CartToastView`) is DELIBERATELY
+    /// excluded — its call site applies `.allowsHitTesting(false)`, so it is structurally
+    /// incapable of absorbing or leaking a touch; it is not a "sheet" in the sense this gate
+    /// cares about, and including it would have zero effect on the gesture-leak it guards
+    /// against.
+    static func anyProductSheetPresented(
+        listPresented: Bool,
+        detailPresented: Bool,
+        zoomPresented: Bool,
+        cartLoginGatePresented: Bool,
+        variantPromptPresented: Bool
+    ) -> Bool {
+        listPresented || detailPresented || zoomPresented || cartLoginGatePresented || variantPromptPresented
+    }
+
+    /// The current aggregate from the five live signals above — recomputed on every `body`
+    /// evaluation (cheap, no I/O), fed to `onPresentationChange` by the `.onChange`/`.onAppear`
+    /// modifiers below.
+    private var anyProductSheetPresentedNow: Bool {
+        Self.anyProductSheetPresented(
+            listPresented: model.listPresented,
+            detailPresented: presentingDetail != nil,
+            zoomPresented: zoomedDetail != nil,
+            cartLoginGatePresented: cartLoginGatePresented,
+            variantPromptPresented: variantPromptPresented)
     }
 
     public var body: some View {
@@ -407,8 +460,14 @@ public struct ProductSheetsOverlayView: View {
         // `model.needsVariantSelection` reflects the result immediately after `model.addToCart()`
         // returns, re-arming on every attempt. See `addToCartReprompting()` / `VariantPromptTrigger`.
         // Seed the cartCount watermark once on appear so the first genuine rise (not the
-        // bind-time value) flashes the toast (D-1).
-        .onAppear { if lastCartCount < 0 { lastCartCount = model.cartCount } }
+        // bind-time value) flashes the toast (D-1). Also reports the INITIAL
+        // `anyProductSheetPresentedNow` value (`.onChange` below does not fire for it) —
+        // rb-ios-block-swipe-nav-when-sheet-open, mirrors `PlayerShellView`'s own combined
+        // `.onAppear` precedent (multiple initial-value reports folded into one block).
+        .onAppear {
+            if lastCartCount < 0 { lastCartCount = model.cartCount }
+            onPresentationChange?(anyProductSheetPresentedNow)
+        }
         // Flash the success toast on each cartCount rise (success → incrementOnAdd). dedup /
         // needsLogin / failure leave the count unchanged → no toast (D-1 known limitation).
         .flashCartToast(onCartCount: model.cartCount, last: $lastCartCount) { showCartToast() }
@@ -416,6 +475,18 @@ public struct ProductSheetsOverlayView: View {
         // synchronous dedup resolves within a frame). The sheets read `cartLoadingVisible` as
         // their CTA loading state (cart-add-loading-state D-2).
         .syncCartLoading(on: model.addToCartInFlight) { syncCartLoading($0) }
+        // Report `anyProductSheetPresentedNow` to the container on every change to ANY of the
+        // five underlying signals (rb-ios-block-swipe-nav-when-sheet-open), so the sibling
+        // `PlayerShellView` can suppress its vertical-swipe video-switch gesture while a sheet is
+        // visually covering the video. One `.onChange` per tracked signal, mirroring the
+        // established `onInfoPanelPresentedChange` / `onCleanModeChange` /
+        // `onMoreSheetPresentedChange` bubble-callback shape on `PlayerShellView` (each of THOSE
+        // precedents is likewise one `.onChange` per tracked `@State`).
+        .onChange(of: model.listPresented) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
+        .onChange(of: presentingDetail != nil) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
+        .onChange(of: zoomedDetail != nil) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
+        .onChange(of: cartLoginGatePresented) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
+        .onChange(of: variantPromptPresented) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
     }
 
     /// The product sheet-stack proper (mini-cart peek + the `lbBottomSheet` list / detail /
@@ -455,6 +526,11 @@ public struct ProductSheetsOverlayView: View {
                 // supplies the real mode + playback position (rb-ios-product-row-status-overlay).
                 mode: model.rowMode,
                 playbackPosition: Int(model.position),
+                // 搶購場旗標（rb-ios-flash-sale-live-signal-wiring）— straight passthrough to
+                // every row's name-tag pill ONLY (`ProductRowView.isFlashSale`, via
+                // `ProductListView.isFlashSale`). The narrating banner text no longer reads
+                // this (reverted per `rb-ios-narrating-banner-revert-flash-sale-text`).
+                isFlashSale: model.isFlashSale,
                 onOpenProduct: { product in
                     // 明細鈕 / 商品名 → full browse sheet. reference-ui NEVER opens the detail
                     // itself — set the LOCAL presentation mode, then forward to the host-wired

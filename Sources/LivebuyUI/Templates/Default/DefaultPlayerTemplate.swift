@@ -748,6 +748,9 @@ public final class DefaultPlayerTemplate {
             // 純 VOD 點播（type==1）兩旗標皆 false → 維持 VOD 版型。
             header.handleFinishedLiveReplay(
                 Self.isFinishedLiveReplay(type: ch.type, liveStatus: ch.liveStatus))
+            // 搶購場旗標（channel-flash-sale-flag-template）：原樣鏡射 core 既有的 channel.isFlashSale，
+            // 跟 isLive / isFinishedLiveReplay 語意正交、不互斥，不依播放狀態推導或覆寫。
+            header.handleFlashSale(ch.isFlashSale)
             // 會員等級限定軟閘門（restriction-gate ②）：衍生 isRestricted 供 reference-ui 疊遮罩。
             applyRestriction(ch.isRestriction == 1)
             // 通用 loading 封面（player-loading-cover-background-template）：衍生 loadingCover =

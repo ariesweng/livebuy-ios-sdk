@@ -17,8 +17,12 @@ import LivebuyUI
 // $presented)` gives a host a full-screen turnkey player that collapses to a floating
 // `FloatingWidgetView` on minimize — in ONE line. The resting corner defaults to bottom-right
 // and, since rb-ios-floating-widget-position, can be switched to bottom-left via the `position`
-// parameter (host-injected raw `extensions.floating_setting.position`). It composes ONLY
-// existing pieces (`LivebuyPlayer` + the family-5 `FloatingWidgetView` + the sibling
+// parameter (host-injected raw `extensions.floating_setting.position`). The resting/drag-clamp
+// INSET (how far the card sits from those edges) defaults to `CGSize(width: 12, height: 24)`
+// and, since rb-ios-collapsible-player-floating-inset, can be overridden via the `inset`
+// parameter — a pure host STYLING preference (e.g. to clear the host's own tab bar), NOT a
+// backend wire value (unlike `position`, `floating_setting` has no inset sub-field). It composes
+// ONLY existing pieces (`LivebuyPlayer` + the family-5 `FloatingWidgetView` + the sibling
 // `LivebuyLiveEntry`'s `LBFloatingEntryPosition`); it adds NO view-model, NO pixels, and does
 // NOT change `LivebuyPlayer`. Dependency direction stays one-way `reference-ui → template → core`.
 
@@ -213,6 +217,22 @@ public struct LivebuyPlayerPresenter: ViewModifier {
     /// is NOT redefined here, so the two floating surfaces share one fallback boundary.
     let position: String?
 
+    /// The floating preview card's resting inset — how far it sits from the resting corner's
+    /// edges (`width` = distance from whichever edge `position` anchors to, trailing for
+    /// `.rightBottom` / leading for `.leftBottom`; `height` = distance from the bottom, same for
+    /// both anchors). Unlike `position` above, this is NOT a backend wire value: `POST
+    /// /sdk/config`'s `data.extensions.floating_setting` has no inset sub-field today — this is
+    /// purely a host STYLING preference (e.g. to clear the host's own tab bar / a floating CTA
+    /// that would otherwise sit under the card). DEFAULT `nil` → falls back to the existing
+    /// hardcoded `Self.floatingInset` (`CGSize(width: 12, height: 24)`), i.e. this presenter's
+    /// existing resting padding and drag-clamp bounds, so **existing host call sites need zero
+    /// changes and keep their existing behaviour** (including the existing snapshot baseline).
+    /// The same value drives BOTH the resting padding AND the drag-clamp lower bound (single
+    /// source — see `resolvedInset`), mirroring the sibling drop-in `LivebuyLiveEntry`'s
+    /// `LivebuyLiveEntryConfig.inset` (`CGSize`, same default, same single-source guarantee).
+    /// rb-ios-collapsible-player-floating-inset.
+    let inset: CGSize?
+
     /// A host-incremented counter marking an "open intent" (e.g. a carousel tap), independent of
     /// whether the target video's `id` actually differs from the one currently bound
     /// (`ios-collapsible-player-reopen-same-video-fix`). `.onChange(of: video?.id)` alone cannot
@@ -280,6 +300,7 @@ public struct LivebuyPlayerPresenter: ViewModifier {
         config: LivebuyPlayerConfig,
         themeOverride: ReferenceUITheme?,
         position: String?,
+        inset: CGSize? = nil,
         openSignal: Int = 0,
         isMinimizedForTesting: Bool = false
     ) {
@@ -287,6 +308,7 @@ public struct LivebuyPlayerPresenter: ViewModifier {
         self.config = config
         self.themeOverride = themeOverride
         self.position = position
+        self.inset = inset
         self.openSignal = openSignal
         self._isMinimized = State(initialValue: isMinimizedForTesting)
     }
@@ -475,8 +497,9 @@ public struct LivebuyPlayerPresenter: ViewModifier {
         return c
     }
 
-    /// Resting bottom-right (or bottom-left, see `resolvedPosition`) padding of the floating
-    /// card. The bottom-right value matches the historical anchor — keeps the default position
+    /// The DEFAULT resting bottom-right (or bottom-left, see `resolvedPosition`) padding of the
+    /// floating card — used whenever a host does not inject `inset` (see `resolvedInset`). The
+    /// bottom-right value matches the historical anchor — keeps the default position
     /// pixel-identical so snapshot baselines are unchanged.
     private static let floatingInset = CGSize(width: 12, height: 24)
 
@@ -485,10 +508,22 @@ public struct LivebuyPlayerPresenter: ViewModifier {
     /// MUST read this computed property rather than comparing `position` (the raw string) directly.
     private var resolvedPosition: LBFloatingEntryPosition { .normalized(position) }
 
+    /// The resolved floating-card inset: the host-injected `inset`, else the existing hardcoded
+    /// `Self.floatingInset`. `floatingCard(_:)` / `dragGesture(...)` MUST read this computed
+    /// property rather than `Self.floatingInset` directly — mirrors `resolvedPosition` for
+    /// `position`. rb-ios-collapsible-player-floating-inset.
+    private var resolvedInset: CGSize { inset ?? Self.floatingInset }
+
     /// Test-only read window (internal-testability; NOT public, host apps never see this): lets a
     /// unit test read the resolved resting corner off a freshly-constructed presenter without
     /// mounting SwiftUI — the same shape as `LivebuyLiveEntry.appearedForTesting`.
     var resolvedPositionForTesting: LBFloatingEntryPosition { resolvedPosition }
+
+    /// Test-only read window (internal-testability; NOT public, host apps never see this): lets a
+    /// unit test read the resolved resting inset off a freshly-constructed presenter without
+    /// mounting SwiftUI — the same shape as `resolvedPositionForTesting` above.
+    /// rb-ios-collapsible-player-floating-inset.
+    var resolvedInsetForTesting: CGSize { resolvedInset }
 
     /// Test-only read window (internal-testability; NOT public, host apps never see this): lets a
     /// unit test read the composed config (with the presenter's internal seam overrides applied) off
@@ -558,8 +593,8 @@ public struct LivebuyPlayerPresenter: ViewModifier {
                 withAnimation { closeSession() }
             })
         return config.design.floatingPlayerCard(context)
-            .padding(resolvedPosition == .leftBottom ? .leading : .trailing, Self.floatingInset.width)
-            .padding(.bottom, Self.floatingInset.height)
+            .padding(resolvedPosition == .leftBottom ? .leading : .trailing, resolvedInset.width)
+            .padding(.bottom, resolvedInset.height)
             .background(
                 GeometryReader { proxy in
                     Color.clear.preference(key: FloatingCardSizeKey.self, value: proxy.size)
@@ -583,7 +618,7 @@ public struct LivebuyPlayerPresenter: ViewModifier {
                     translation: value.translation,
                     cardSize: floatingCardSize,
                     containerSize: containerSize,
-                    inset: Self.floatingInset,
+                    inset: resolvedInset,
                     position: resolvedPosition)
                 dragTranslation = .zero
             }
@@ -647,7 +682,8 @@ private struct FloatingCardSizeKey: PreferenceKey {
 public extension View {
     /// Present the turnkey `LivebuyPlayer` full-screen for the bound `video`, with a
     /// built-in minimize→floating preview (`FloatingWidgetView`, resting corner defaults to
-    /// bottom-right and is switchable via `position`). ONE line:
+    /// bottom-right and is switchable via `position`; the resting inset from that corner
+    /// defaults to `CGSize(width: 12, height: 24)` and is overridable via `inset`). ONE line:
     ///
     ///     someHostView.livebuyPlayer(video: $presentedVideo, config: cfg)
     ///
@@ -672,6 +708,12 @@ public extension View {
     /// corner, so existing call sites need zero changes. This SDK does not read `sdkConfig`
     /// itself (rb-ios-floating-widget-position); see `LivebuyPlayerPresenter.position`.
     ///
+    /// `inset` is an optional host STYLING preference for the floating card's resting distance
+    /// from its anchored edges (e.g. to clear the host's own tab bar) — NOT a backend wire value
+    /// (`floating_setting` has no inset sub-field). DEFAULT `nil` falls back to the existing
+    /// hardcoded `CGSize(width: 12, height: 24)`, so existing call sites need zero changes
+    /// (rb-ios-collapsible-player-floating-inset); see `LivebuyPlayerPresenter.inset`.
+    ///
     /// `openSignal` is an optional host-incremented counter marking an "open intent" (e.g. a
     /// carousel tap), independent of whether the target video's `id` actually differs from the
     /// one already bound (`ios-collapsible-player-reopen-same-video-fix`). Pass a value that
@@ -685,10 +727,11 @@ public extension View {
         config: LivebuyPlayerConfig = LivebuyPlayerConfig(),
         theme: ReferenceUITheme? = nil,
         position: String? = nil,
+        inset: CGSize? = nil,
         openSignal: Int = 0
     ) -> some View {
         modifier(LivebuyPlayerPresenter(
-            video: video, config: config, themeOverride: theme, position: position,
+            video: video, config: config, themeOverride: theme, position: position, inset: inset,
             openSignal: openSignal))
     }
 }

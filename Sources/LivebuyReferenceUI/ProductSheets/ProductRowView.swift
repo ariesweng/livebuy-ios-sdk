@@ -79,6 +79,17 @@ public struct ProductRowView: View {
     public let isNarrating: Bool
     public let playbackPosition: Int
 
+    /// 搶購場旗標（`rb-ios-flash-sale-live-signal-wiring`）— `ProductSheetsModel.isFlashSale`
+    /// ← `header.isFlashSale`, threaded through `ProductListView`. `.row`-only, consulted by
+    /// `nameTag` (`mode == .live` branch: `.rush` "搶購中" vs `.livePrice` "直播價") ONLY.
+    /// The narrating-banner text (`introducingLabel`) previously ALSO read this flag
+    /// (`rb-ios-flash-sale-live-signal-wiring`) but that two-way split was reverted per
+    /// user decision (`rb-ios-narrating-banner-revert-flash-sale-text`) — the banner is
+    /// now a constant「介紹中」regardless of `isFlashSale`. `.grid` never reads this
+    /// (mirrors `mode`/`isNarrating` above). Default `false` keeps every EXISTING call
+    /// site (which predates this flag) byte-identical.
+    public let isFlashSale: Bool
+
     /// Thumbnail top-leading number / HOT badge (rb-ios-product-row-number-badge, design R35
     /// `sdk-components.jsx:LBPProductRow` `numberBadge`). `nil` (default — every EXISTING call
     /// site, incl. the `.grid` 「更多商品」推薦格, which has no notion of "this video's backend
@@ -140,6 +151,7 @@ public struct ProductRowView: View {
         mode: ProductRowMode = .vod,
         isNarrating: Bool = false,
         playbackPosition: Int = 0,
+        isFlashSale: Bool = false,
         badgeIndex: Int? = nil,
         onOpenProduct: (() -> Void)? = nil,
         onQuickAdd: (() -> Void)? = nil,
@@ -157,6 +169,7 @@ public struct ProductRowView: View {
         self.mode = mode
         self.isNarrating = isNarrating
         self.playbackPosition = playbackPosition
+        self.isFlashSale = isFlashSale
         self.badgeIndex = badgeIndex
         self.onOpenProduct = onOpenProduct
         self.onQuickAdd = onQuickAdd
@@ -192,6 +205,77 @@ public struct ProductRowView: View {
     /// `sold_out > narrating` 排除（`&& !soldOut`）是 reference-ui 實作層自行加上的規則，非設計決定，
     /// 已移除）。
     private var isIntroducing: Bool { overlay.showIntroducing }
+
+    // MARK: - Name-tag pill (rb-ios-product-row-name-tag-system, design R39)
+    //
+    // `.row`-only inline pill rendered immediately BEFORE `product.name` — mutually
+    // exclusive by `mode`: `.live` → outline "直播價" pill; `.vod` / `.replay` → the
+    // pre-existing solid `out_soon` / `hot` capsule, MOVED here from its former
+    // after-price placement (recolored, same trigger data). `.grid` never reads `mode`
+    // so it never reads this either. See `ProductRowNameTag.resolve` for the pure
+    // decision (unit-tested in isolation, no SwiftUI host needed).
+    private var nameTag: ProductRowNameTag {
+        // `soldOut` (above) is the SAME single source of truth (`ProductStatusBadge
+        // .resolve(product) == .soldOut`, full raw-field fallback included) the
+        // 「已售完」price-row swap already uses — passed through rather than
+        // re-derived from `label` alone, so a sold-out row never shows a name-tag
+        // pill in ANY mode (see `ProductRowNameTag.resolve`'s doc for the bug this
+        // fixes: `.live` previously skipped this check entirely).
+        ProductRowNameTag.resolve(mode: mode, label: product.label, soldOut: soldOut, isFlashSale: isFlashSale)
+    }
+
+    @ViewBuilder
+    private var nameTagView: some View {
+        switch nameTag {
+        case .livePrice: livePricePill
+        case .rush:      rushPill
+        case .outSoon:   nameTagPill(Self.outSoonLabel, textColor: theme.text, fillColor: Self.outSoonColor)
+        case .hot:       nameTagPill(Self.hotLabel, textColor: .white, fillColor: Self.hotNameTagColor)
+        case .none:      EmptyView()
+        }
+    }
+
+    /// Shared small-corner-radius pill for ALL FOUR name-tag variants (`rb-ios-product-
+    /// row-name-tag-style` — checkpoint correction: the `.outSoon`/`.hot` cases originally
+    /// reused the pre-existing `statusPill(_:_:)` helper, a full `Capsule()` — mismatched
+    /// against design source `sdk-components.jsx`'s shared `nameTagEl` style
+    /// (`padding: 1px 4px`, `borderRadius: 3`, `fontSize: 11`, `fontWeight: 500`), which
+    /// EVERY variant (`直播價`/`搶購中`/`熱賣中`/`即將售完`) draws from. `livePricePill`
+    /// delegates here too, so all three currently-reachable variants share one code path
+    /// — not three independently hand-matched shapes that could drift apart later.
+    /// `borderColor` is `nil` for a solid fill (`.outSoon`/`.hot`) or set for an outline
+    /// (`.livePrice`, transparent fill). `statusPill(_:_:)` itself is left untouched
+    /// (unused by this view now, kept in case of a future full-capsule use case).
+    private func nameTagPill(_ text: String, textColor: Color, fillColor: Color, borderColor: Color? = nil) -> some View {
+        Text(text)
+            .font(.system(size: 11 * theme.fontScale, weight: .medium))
+            .foregroundColor(textColor)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 3).fill(fillColor))
+            .overlay(
+                RoundedRectangle(cornerRadius: 3)
+                    .stroke(borderColor ?? .clear, lineWidth: borderColor == nil ? 0 : 1)
+            )
+    }
+
+    /// "直播價" outline pill (`mode == .live`, `isFlashSale == false`) — 1pt `theme.accent`
+    /// border, transparent fill, `theme.accent` text (design R39, shared `nameTagPill`
+    /// shape). Text is `livePriceLabel` — see that constant's doc for why this is a
+    /// hardcoded literal rather than a call through the core SDK's i18n system.
+    private var livePricePill: some View {
+        nameTagPill(Self.livePriceLabel, textColor: theme.accent, fillColor: .clear, borderColor: theme.accent)
+    }
+
+    /// "搶購中" solid pill (`mode == .live`, `isFlashSale == true`) — `rb-ios-flash-sale-
+    /// live-signal-wiring`, the rush-mode variant `ProductRowNameTag`'s doc previously
+    /// called "pipe-first, no water yet". Design source
+    /// `design/templates/minimal/sdk-components.jsx:LBPProductRow`'s `liveMode === 'rush'`
+    /// branch: `{ bg: accent, fg: '#fff', border: accent }` — solid `theme.accent` fill,
+    /// white text, same shared `nameTagPill` shape as every other name-tag variant.
+    private var rushPill: some View {
+        nameTagPill(Self.rushLabel, textColor: .white, fillColor: theme.accent, borderColor: theme.accent)
+    }
 
     // MARK: - Number / HOT badge (rb-ios-product-row-number-badge, design R35)
     //
@@ -347,11 +431,25 @@ public struct ProductRowView: View {
 
             Button(action: { onOpenProduct?() }) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(product.name)
-                        .font(.system(size: 14 * theme.fontScale, weight: .semibold))
-                        .foregroundColor(theme.text)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                    if nameTag == .none {
+                        // Byte-identical to the pre-`rb-ios-product-row-name-tag-system` tree —
+                        // no HStack wrapper, no extra spacing — for every row that draws no
+                        // name-tag pill (the overwhelming majority of existing call sites).
+                        Text(product.name)
+                            .font(.system(size: 14 * theme.fontScale, weight: .semibold))
+                            .foregroundColor(theme.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            nameTagView
+                            Text(product.name)
+                                .font(.system(size: 14 * theme.fontScale, weight: .semibold))
+                                .foregroundColor(theme.text)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
 
                     if !hideSub {
                         if soldOut {
@@ -370,11 +468,6 @@ public struct ProductRowView: View {
                                 Text(product.priceShow)
                                     .font(.system(size: 14 * theme.fontScale, weight: .heavy))
                                     .foregroundColor(Self.saleColor)
-                                switch ProductStatusBadge.fromLabel(product.label) {
-                                case .outSoon: statusPill(Self.outSoonLabel, Self.outSoonColor)
-                                case .hot:     statusPill(Self.hotLabel, theme.accent)
-                                default:       EmptyView()
-                                }
                             }
                         }
                     }
@@ -643,17 +736,42 @@ public struct ProductRowView: View {
     static let rowThumbBorder = Color(hex: "#D2D2D2") ?? Color.gray.opacity(0.4)
     static let saleColor = Color(hex: "#E0334B") ?? Color.red
     static let soldOutColor = Color(hex: "#9A96A3") ?? Color.gray
-    static let outSoonColor = Color(hex: "#F5A623") ?? Color.orange
+    /// 「即將售完」名稱前標籤底色（rb-ios-product-row-name-tag-system，色碼訂正）：
+    /// `#F5A623`（琥珀）→ `#FACC15`（黃）。
+    static let outSoonColor = Color(hex: "#FACC15") ?? Color.yellow
     /// 「介紹中」橫幅底色（R31，`rb-ios-vod-live-product-card-restyle`）：固定
     /// `rgba(240,50,70,.7)` 珊瑚紅，不再跟隨商家 `theme.accent`。與
     /// `LiveOverlayChromeView.pinnedCard(_:)` 的新標籤共用同一色票（
     /// `design/templates/minimal/sdk-components.jsx:LBPProductRow`）。
     static let introducingBadgeColor = (Color(hex: "#F03246") ?? Color.red).opacity(0.7)
+    /// 「熱賣中」名稱前標籤底色（rb-ios-product-row-name-tag-system，色碼訂正）：固定
+    /// `rgba(240,50,70,.7)`——與 `introducingBadgeColor` 數值相同的既有色票——取代先前隨商家
+    /// `theme.accent` 主題色變動的寫法（不做成可設定項，直接硬編）。
+    static let hotNameTagColor = (Color(hex: "#F03246") ?? Color.red).opacity(0.7)
 
     static let soldOutLabel = "已售完"
+    /// 「介紹中」底部橫幅文案——恆定字面值，不受 `isFlashSale` 影響
+    /// （`rb-ios-narrating-banner-revert-flash-sale-text`）。`rb-ios-flash-sale-live-signal-
+    /// wiring` 曾依後端文件原話「App 需要用它決定 goods[].label 為 narrating 時顯示『開標中』
+    /// （搶購）或『介紹中』（一般）」把這個字面值改成依 `isFlashSale` 二選一函式；使用者事後
+    /// 拍板撤回該二選一，改回本檔案長期以來的恆定字面值。寫死字面值，不走 i18n（見
+    /// `livePriceLabel` 的文件對此模組既定慣例的說明）。
     static let introducingLabel = "介紹中"
-    static let outSoonLabel = "即將售完"
+    /// 「即將售完」名稱前標籤文案——含 🔥 emoji 前綴，對齊設計來源 `sdk-components.jsx`
+    /// 的字面值 `'🔥 即將售完'`（`rb-ios-product-row-name-tag-style` checkpoint 訂正）。
+    static let outSoonLabel = "🔥 即將售完"
     static let hotLabel = "熱賣中"
+    /// 「直播價」名稱前標籤文案（rb-ios-product-row-name-tag-system，design R39）——沿用既有
+    /// core i18n key `live_price` 的 zh-TW 譯文字面值（`ios/Sources/LivebuySDK/Resources/
+    /// zh-Hant-TW.lproj/Localizable.strings`）。reference-ui 層文案一律寫死、不走 i18n
+    /// ——`LBLocalizedString` / `LBLocalization` 是 `LivebuySDK` 模組內部 `internal` 型別
+    /// （非 `public`），`LivebuyReferenceUI` 是獨立模組，即使 `import LivebuySDK` 也無法呼叫；
+    /// 這與本檔案既有的 `soldOutLabel` / `introducingLabel` / `outSoonLabel` / `hotLabel`
+    /// 寫死慣例一致，並非遺漏 i18n 串接。
+    static let livePriceLabel = "直播價"
+    /// 「搶購中」名稱前標籤文案（`rb-ios-flash-sale-live-signal-wiring`，design R39
+    /// `liveMode === 'rush'` 分支）——同上，寫死字面值、不走 i18n。
+    static let rushLabel = "搶購中"
 
     /// Number / HOT badge background (design `rgba(0,0,0,0.7)`, rb-ios-product-row-number-badge).
     /// Distinct from `introducingBadgeColor` above (bottom banner) — a different badge, different
