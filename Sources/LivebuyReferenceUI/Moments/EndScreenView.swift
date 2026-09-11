@@ -180,8 +180,16 @@ public struct EndScreenView: View {
             // Full-bleed dark scrim (LBPEndScreen `rgba(50,50,50,0.64)`, no blur —
             // rb-ios-endscreen-live-empty-state). Shared by BOTH variants. The moment
             // composites over the ended video — a fixed design color, not theme bg.
+            // `Color` consumes every touch in its own frame by default (no gesture
+            // needed) — once stretched full-bleed this silently swallowed taps meant
+            // for whatever sits beneath (the PlayerShellView header's minimize/close
+            // button). `.allowsHitTesting(false)` here lets touches pass through to
+            // the header; the countdown/empty-state buttons below are unaffected —
+            // they are a separate ZStack sibling, not a descendant of this scrim
+            // (fix-ios-endscreen-close-button-blocked).
             Self.scrim
                 .edgesIgnoringSafeArea(.all)
+                .allowsHitTesting(false)
 
             if showCountdown {
                 countdownVariant

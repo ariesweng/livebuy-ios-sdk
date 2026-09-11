@@ -271,6 +271,20 @@ public final class PlayerShellModel: ObservableObject {
     /// 預設 false（未受限）。
     @Published public private(set) var isRestricted: Bool
 
+    // -- family-4 END moment presence (fix-ios-endscreen-close-button-blocked) -----
+
+    /// Whether the family-4 END moment (`EndScreenView` — either the countdown variant or the
+    /// empty-state variant) is currently active, mirroring `MomentsOverlayView.isEndMomentActive`'s
+    /// condition via THIS model's own bound `template.endScreen` (the SAME
+    /// `DefaultEndScreenState` instance `MomentsModel` already reads `countdown` /
+    /// `endScreenVisible` from — no new template accessor, no second source of truth).
+    /// `PlayerShellView` uses this to force the header's top-right button into a direct-close
+    /// affordance while the end screen is showing (its full-screen scrim otherwise makes
+    /// "minimize to floating widget" an unreachable dead end), regardless of `showCloseIcon` /
+    /// `enableDirectCloseButton`. Default `false` keeps every existing demo / snapshot
+    /// memberwise construction byte-identical.
+    @Published public private(set) var isEndScreenActive: Bool
+
     // MARK: - Live binding
 
     /// The bound template, when constructed from a live player. nil for demo /
@@ -344,7 +358,9 @@ public final class PlayerShellModel: ObservableObject {
             allProducts: t.productOverlay.products,
             isLoggedIn: t.identityLabel.current?.isLoggedIn ?? false,
             displayName: t.identityLabel.current?.displayName ?? "",
-            isRestricted: t.isRestricted
+            isRestricted: t.isRestricted,
+            isEndScreenActive: Self.deriveIsEndScreenActive(
+                countdown: t.endScreen.countdown, endScreenVisible: t.endScreen.endScreenVisible)
         )
     }
 
@@ -398,7 +414,8 @@ public final class PlayerShellModel: ObservableObject {
         isLoggedIn: Bool = false,
         displayName: String = "",
         chatEnabled: Bool = false,
-        isRestricted: Bool = false
+        isRestricted: Bool = false,
+        isEndScreenActive: Bool = false
     ) {
         self.title = title
         self.hostName = hostName
@@ -446,6 +463,7 @@ public final class PlayerShellModel: ObservableObject {
         self.displayName = displayName
         self.chatEnabled = chatEnabled
         self.isRestricted = isRestricted
+        self.isEndScreenActive = isEndScreenActive
     }
 
     deinit {
@@ -516,6 +534,8 @@ public final class PlayerShellModel: ObservableObject {
         displayName = t.identityLabel.current?.displayName ?? ""
         chatEnabled = t.operationRail.chatEnabled
         isRestricted = t.isRestricted
+        isEndScreenActive = Self.deriveIsEndScreenActive(
+            countdown: t.endScreen.countdown, endScreenVisible: t.endScreen.endScreenVisible)
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)
@@ -648,6 +668,13 @@ public final class PlayerShellModel: ObservableObject {
     /// (`narrate_status==2`) contract. Pure.
     static func derivePinnedProduct(_ overlay: DefaultProductOverlayState) -> LBProduct? {
         overlay.activeProduct ?? overlay.products.first { $0.isHot == 1 }
+    }
+
+    /// PURE: whether the family-4 END moment is active, given the endScreen state's
+    /// `countdown` / `endScreenVisible` — mirrors `MomentsOverlayView.isEndMomentActive`.
+    /// Unit-testable without a bound template (fix-ios-endscreen-close-button-blocked).
+    static func deriveIsEndScreenActive(countdown: LBEndScreenCountdown?, endScreenVisible: Bool) -> Bool {
+        countdown != nil || endScreenVisible
     }
 }
 

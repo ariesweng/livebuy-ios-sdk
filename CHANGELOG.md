@@ -5,6 +5,22 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.18.1] - 2026-09-11
+
+> **Patch.** 延續 v4.18.0，本輪為純 bug fix（1 項 iOS-only 結束畫面觸控/行為修復），無新增
+> 公開欄位、無行為預設值改變、無 API 簽章變更。**本輪 iOS-only**——Android 自 `4.18.0` 以來
+> 零程式碼改動，不重新 publish（見
+> [`docs/release-notes/v4.18.1.md`](../docs/release-notes/v4.18.1.md)）。
+
+### Fixed
+
+- **結束畫面右上角縮小/關閉鈕觸控被攔截**：`EndScreenView` 的滿版 scrim 依框架預設行為會
+  攔截整個 frame 的觸控，擋住底下 `PlayerShellView` header 的縮小/關閉鈕；加
+  `.allowsHitTesting(false)` 讓觸控穿透（零視覺效果，倒數/空狀態變體既有按鈕不受影響）。
+- **結束畫面顯示期間右上角鈕固定為直接關閉整個 player**：不再受全域
+  `enableDirectCloseButton` 設定影響（複用既有 `onCloseRequest` 出口）；結束畫面以外情境
+  行為不變。
+
 ## [4.18.0] - 2026-09-11
 
 > **Minor.** 自 `4.17.0` 以來累積 169 個 commit（iOS 14 個獨立行為——含發版準備期間追加的

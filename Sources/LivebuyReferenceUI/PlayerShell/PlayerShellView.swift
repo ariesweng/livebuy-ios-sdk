@@ -1364,6 +1364,112 @@ public struct PlayerShellView: View {
                                             subtitleAvailable: subtitleAvailable)
     }
 
+    // MARK: - Header top-right button override while END screen is active
+    //         (fix-ios-endscreen-close-button-blocked)
+    //
+    // While the family-4 END moment (`EndScreenView`, composed by `MomentsOverlayView` ABOVE
+    // this view) is showing, its full-screen scrim makes "minimize to floating widget" an
+    // unreachable dead end — the button MUST behave as a direct close instead, regardless of
+    // the per-shell `enableDirectCloseButton` / `model.showCloseIcon` constant.
+
+    /// PURE: the top-right button's effective `showCloseIcon`, forced to `true` while the END
+    /// moment is active. Unit-testable without rendering (mirrors the `showsCaptionOverlay(...)`
+    /// / `hidesChatFeedForReplayCaption(...)` pure-function precedent above).
+    static func effectiveShowCloseIcon(isEndScreenActive: Bool, showCloseIcon: Bool) -> Bool {
+        isEndScreenActive || showCloseIcon
+    }
+
+    /// The header's top-right tap target: while the END screen is active it ALWAYS closes the
+    /// whole player (`onCloseRequest` — the same exit `swipe-nav-close-on-empty` already uses);
+    /// otherwise it falls back to the existing `onMinimize` forwarding, unchanged.
+    private func handleHeaderTopRightTap() {
+        if model.isEndScreenActive {
+            onCloseRequest?()
+        } else {
+            onMinimize?()
+        }
+    }
+
+    /// The family-1 header chrome, hoisted to a computed property (concrete return type, not
+    /// `some View`) so a test can read the EXACT `PlayerHeaderBarView` instance `body` composes
+    /// — including `showCloseIcon` and the top-right tap closure's actual routing — via
+    /// `headerBarForTesting` below (mirrors `activeMomentForTesting` in `MomentsOverlayView` /
+    /// the `PlayerHeaderBarCloseIconTests` doc comment's rationale against a parallel copy).
+    /// Every parameter is byte-identical to the pre-existing inline construction except
+    /// `showCloseIcon` / `onMinimize`, which now route through the two helpers above.
+    private var headerBar: PlayerHeaderBarView {
+        PlayerHeaderBarView(
+            theme: theme,
+            title: model.title,
+            hostName: model.hostName,
+            shopLogo: model.shopLogo,
+            viewerCount: model.viewerCount,
+            isSubscribed: model.isSubscribed,
+            // live-chrome 家族（真直播 + 回放）皆餵 isLive: true → header 畫 viewer-count
+            // （回放套 LIVE 版型，rb-ios-replay-live-chrome）。
+            isLive: usesLiveChrome,
+            // Replay hides the LIVE pill but keeps the viewer count (design
+            // `hideLivePill = isReplay`). 兩種回放皆隱 LIVE 膠囊：behind-edge replay
+            // （`model.isReplay`，鏡像 playbackProgress.isReplay）與 finished-live replay
+            // （`model.isFinishedLiveReplay`，已結束直播）——後者非正在直播，顯紅 LIVE 會誤導。
+            isReplay: model.isReplay || model.isFinishedLiveReplay,
+            // Real shop logo only over a live video surface (placeholder suppressed) —
+            // reuse the same runtime image gate the cover/upcoming surfaces use; the
+            // snapshot/demo path (`paintsBackgroundPlaceholder == true`) stays monogram.
+            live: !paintsBackgroundPlaceholder,
+            // Host-config viewer-count gate (rb-ios-hide-viewer-count-config): default
+            // true; `false` (host) hides the viewer count even while live / replay.
+            showViewerCount: model.showViewerCount,
+            // Backend viewer-count gate (rb-ios-viewer-count-show-pv-num): mirrors
+            // `channel.show_pv_num == 1` via the view-model (same source as `viewerCount`).
+            // The badge shows ⟺ isLive && viewerCountVisible && showViewerCount — so replay
+            // (LIVE chrome) honours the original live-time show_pv_num setting.
+            viewerCountVisible: model.viewerCountVisible,
+            // Backend / merchant title-marquee capability gate (rb-ios-video-title-scroll):
+            // mirrors `extensions.video_title_scroll` via `LivebuyPlayerConfig.titleScroll`.
+            // `false` keeps the title (single line + ellipsis, same height) but stops it
+            // scrolling; the overflow MEASUREMENT itself is untouched.
+            titleScroll: model.titleScroll,
+            // Cold-start loading gate (rb-live-entry-viewer-count-loading-gate):
+            // mirrors `model.startPhase`. While `.loading` (the `/sdk/video` fetch
+            // has not yet resolved) the viewer-count badge is suppressed so a
+            // not-yet-real `viewerCount` (type default `0`) is never drawn as if it
+            // were a real count.
+            startPhase: model.startPhase,
+            // 乾淨模式隱藏「top bar logo」+「host badge」（design 兩個獨立元件，iOS 合併
+            // 成同一顆 hostPill）——保留頂欄唯一的 minimize(PIP) 鈕不受影響（rb-ios-gesture-
+            // clean-mode-rewrite ADDED Requirement，見 `PlayerHeaderBarView.cleanMode`）。
+            cleanMode: cleanMode,
+            // 乾淨模式限定靜音切換鈕（`rb-ios-gesture-clean-mode-v2`, design R29）：補回
+            // 單擊切靜音手勢退役後的操作管道。`onToggleMute` 只在 `cleanMode == true` 期間
+            // 非 nil——`PlayerHeaderBarView` 依此決定是否渲染這顆鈕（不佔位）。
+            muted: model.muted,
+            // 右上角鈕圖示模式（rb-ios-player-direct-close-button）：per-shell 常數，
+            // 由 `LivebuyPlayer.buildModels()` 解析 `LivebuyPlayerConfig
+            // .enableDirectCloseButton` 對全域偏好後寫入；純呈現旗標，本層不知道
+            // 全域設定的存在。強制升為 `true`（且點擊改觸發 `onCloseRequest`）當 END
+            // moment 正在顯示（fix-ios-endscreen-close-button-blocked）——見上方
+            // `effectiveShowCloseIcon` / `handleHeaderTopRightTap`。
+            showCloseIcon: Self.effectiveShowCloseIcon(
+                isEndScreenActive: model.isEndScreenActive, showCloseIcon: model.showCloseIcon),
+            onMinimize: { handleHeaderTopRightTap() },
+            // 訂閱徽章 → 容器注入的 gate（未登入 → AuthGate(.subscribe)）；未注入 fallback
+            // `model.toggleSubscribe()`（rb-ios-subscribe-login-gate）。與 info pill 共用。
+            onSubscribe: { performSubscribe() },
+            // Host badge tap → open the VideoInfoPanel (design LBPHostBadge →
+            // video_info; presentation-only, replaces the removed VOD rail
+            // `more` pill). Same presentation toggle the `more` pill used.
+            onTapHostBadge: { withAnimation { infoPanelPresented.toggle() } },
+            onToggleMute: cleanMode ? { onToggleMute?() } : nil)
+    }
+
+    /// Test seam exposing the private `headerBar` computed property (`*ForTesting` naming,
+    /// mirrors `showsLiveNowPillForTesting` / `cleanModeExitButtonBottomInsetForTesting` above)
+    /// so a test can read the EXACT `PlayerHeaderBarView` instance `body` composes — including
+    /// `showCloseIcon` and the top-right tap closure's actual routing
+    /// (fix-ios-endscreen-close-button-blocked).
+    var headerBarForTesting: PlayerHeaderBarView { headerBar }
+
     public var body: some View {
         ZStack {
             // The video area sits behind everything (host supplies the actual
@@ -1624,66 +1730,7 @@ public struct PlayerShellView: View {
                 // Header is drawn UNCONDITIONALLY in every mode — including the VOD start
                 // sequence (opening MP4 / loader): only the VOD side rail + floating bag are
                 // suppressed there, the header stays (rb-ios-vod-intro-keep-header).
-                PlayerHeaderBarView(
-                    theme: theme,
-                    title: model.title,
-                    hostName: model.hostName,
-                    shopLogo: model.shopLogo,
-                    viewerCount: model.viewerCount,
-                    isSubscribed: model.isSubscribed,
-                    // live-chrome 家族（真直播 + 回放）皆餵 isLive: true → header 畫 viewer-count
-                    // （回放套 LIVE 版型，rb-ios-replay-live-chrome）。
-                    isLive: usesLiveChrome,
-                    // Replay hides the LIVE pill but keeps the viewer count (design
-                    // `hideLivePill = isReplay`). 兩種回放皆隱 LIVE 膠囊：behind-edge replay
-                    // （`model.isReplay`，鏡像 playbackProgress.isReplay）與 finished-live replay
-                    // （`model.isFinishedLiveReplay`，已結束直播）——後者非正在直播，顯紅 LIVE 會誤導。
-                    isReplay: model.isReplay || model.isFinishedLiveReplay,
-                    // Real shop logo only over a live video surface (placeholder suppressed) —
-                    // reuse the same runtime image gate the cover/upcoming surfaces use; the
-                    // snapshot/demo path (`paintsBackgroundPlaceholder == true`) stays monogram.
-                    live: !paintsBackgroundPlaceholder,
-                    // Host-config viewer-count gate (rb-ios-hide-viewer-count-config): default
-                    // true; `false` (host) hides the viewer count even while live / replay.
-                    showViewerCount: model.showViewerCount,
-                    // Backend viewer-count gate (rb-ios-viewer-count-show-pv-num): mirrors
-                    // `channel.show_pv_num == 1` via the view-model (same source as `viewerCount`).
-                    // The badge shows ⟺ isLive && viewerCountVisible && showViewerCount — so replay
-                    // (LIVE chrome) honours the original live-time show_pv_num setting.
-                    viewerCountVisible: model.viewerCountVisible,
-                    // Backend / merchant title-marquee capability gate (rb-ios-video-title-scroll):
-                    // mirrors `extensions.video_title_scroll` via `LivebuyPlayerConfig.titleScroll`.
-                    // `false` keeps the title (single line + ellipsis, same height) but stops it
-                    // scrolling; the overflow MEASUREMENT itself is untouched.
-                    titleScroll: model.titleScroll,
-                    // Cold-start loading gate (rb-live-entry-viewer-count-loading-gate):
-                    // mirrors `model.startPhase`. While `.loading` (the `/sdk/video` fetch
-                    // has not yet resolved) the viewer-count badge is suppressed so a
-                    // not-yet-real `viewerCount` (type default `0`) is never drawn as if it
-                    // were a real count.
-                    startPhase: model.startPhase,
-                    // 乾淨模式隱藏「top bar logo」+「host badge」（design 兩個獨立元件，iOS 合併
-                    // 成同一顆 hostPill）——保留頂欄唯一的 minimize(PIP) 鈕不受影響（rb-ios-gesture-
-                    // clean-mode-rewrite ADDED Requirement，見 `PlayerHeaderBarView.cleanMode`）。
-                    cleanMode: cleanMode,
-                    // 乾淨模式限定靜音切換鈕（`rb-ios-gesture-clean-mode-v2`, design R29）：補回
-                    // 單擊切靜音手勢退役後的操作管道。`onToggleMute` 只在 `cleanMode == true` 期間
-                    // 非 nil——`PlayerHeaderBarView` 依此決定是否渲染這顆鈕（不佔位）。
-                    muted: model.muted,
-                    // 右上角鈕圖示模式（rb-ios-player-direct-close-button）：per-shell 常數，
-                    // 由 `LivebuyPlayer.buildModels()` 解析 `LivebuyPlayerConfig
-                    // .enableDirectCloseButton` 對全域偏好後寫入；純呈現旗標，本層不知道
-                    // 全域設定的存在。
-                    showCloseIcon: model.showCloseIcon,
-                    onMinimize: { onMinimize?() },
-                    // 訂閱徽章 → 容器注入的 gate（未登入 → AuthGate(.subscribe)）；未注入 fallback
-                    // `model.toggleSubscribe()`（rb-ios-subscribe-login-gate）。與 info pill 共用。
-                    onSubscribe: { performSubscribe() },
-                    // Host badge tap → open the VideoInfoPanel (design LBPHostBadge →
-                    // video_info; presentation-only, replaces the removed VOD rail
-                    // `more` pill). Same presentation toggle the `more` pill used.
-                    onTapHostBadge: { withAnimation { infoPanelPresented.toggle() } },
-                    onToggleMute: cleanMode ? { onToggleMute?() } : nil)
+                headerBar
 
                 Spacer(minLength: 0)
 
