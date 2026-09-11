@@ -50,6 +50,22 @@ import LivebuyUI
 // digits — no K-abbreviation), gated by `LBVideoItem.showPvNum == 1` (mirrors
 // `PlayerHeaderBarView.viewerCountVisible`'s existing gating convention — pure
 // presentation, no core / view-model change). Never shown for VOD / UPCOMING.
+// As of rb-ios-live-entry-hide-viewer-count, display additionally requires
+// `showViewerCount: Bool` (see VIEWER COUNT VISIBILITY FLAG below) — an
+// independent AND-gate layered on top of this existing condition, not a
+// replacement for it.
+//
+// VIEWER COUNT VISIBILITY FLAG (`showViewerCount`, iOS only, rb-ios-live-entry-
+// hide-viewer-count): `showViewerCount: Bool` (default `true`) gates whether the
+// viewer-count badge above may ever draw, on top of its existing `isLive &&
+// item.showPvNum == 1` gate. Carousel row / video-shop grid / the two unaffected
+// `FloatingWidgetView` consumers (`WidgetOverlayView`'s `.floating` content mode,
+// `MinimalDesign.floatingPlayerCard`) MUST NOT pass this parameter, so they keep
+// drawing the badge exactly as before this flag existed. `FloatingWidgetView`
+// forwards its own same-named parameter straight through; `LivebuyLiveEntry`
+// passes `showViewerCount: false` so its floating entry card never shows a
+// viewer count, regardless of `showPvNum` / `watchNum`. Independent of
+// `showTitle` / `productCard` — the three presentation axes never interact.
 //
 // PRODUCT-CARD MODES (rb-ios-widget-product-card-modes, design R14; the `below`
 // placement was later reversed by design R17 / rb-ios-widget-product-card-below-slot-
@@ -225,6 +241,18 @@ public struct CarouselCardView: View {
     /// not interact.
     public let showTitle: Bool
 
+    /// Whether the LIVE-only viewer-count badge (`viewerCountBadge`) may ever draw
+    /// (rb-ios-live-entry-hide-viewer-count). **Default `true`** — carousel row /
+    /// video-shop grid, and the two `FloatingWidgetView` consumers that keep the
+    /// existing behavior (`WidgetOverlayView`'s `.floating` content mode,
+    /// `MinimalDesign.floatingPlayerCard`), **MUST NOT** pass this parameter, so
+    /// they keep the badge's pre-existing `isLive && item.showPvNum == 1` gate as
+    /// the sole condition. `false` (used by `FloatingWidgetView` when constructed
+    /// by `LivebuyLiveEntry`) means the badge **MUST NOT** draw regardless of
+    /// `showPvNum` / `watchNum` — an AND-gate layered on top of the existing
+    /// condition, not a replacement for it. See VIEWER COUNT VISIBILITY FLAG above.
+    public let showViewerCount: Bool
+
     /// Card tap → host-wired exit (→ host → core open player for `item.id`). nil for
     /// demo / snapshot instances — the card is inert. This layer NEVER opens the
     /// player / calls core simulate* itself.
@@ -237,6 +265,7 @@ public struct CarouselCardView: View {
         live: Bool = false,
         productCard: String? = nil,
         showTitle: Bool = true,
+        showViewerCount: Bool = true,
         onTap: (() -> Void)? = nil
     ) {
         self.item = item
@@ -245,6 +274,7 @@ public struct CarouselCardView: View {
         self.live = live
         self.productCard = productCard
         self.showTitle = showTitle
+        self.showViewerCount = showViewerCount
         self.onTap = onTap
     }
 
@@ -504,15 +534,19 @@ public struct CarouselCardView: View {
     /// Viewer-count pill beside `liveTag` (design `LBPCarouselCard` R33): a person
     /// icon + `LBVideoItem.watchNum` RAW digits (deliberately NOT the K-abbreviated
     /// `PlayerHeaderBarView.formatViewerCount` — the design shows the bare number, and
-    /// that formatter belongs to a different family-1 component). Shown ⟺ `isLive &&
-    /// item.showPvNum == 1` (mirrors `PlayerHeaderBarView.viewerCountVisible`'s
-    /// existing gating convention — pure presentation, no core / view-model change).
-    /// `EmptyView()` when the gate is false, so `kindBadge`'s `HStack { liveTag;
-    /// viewerCountBadge }` costs zero extra pixels / spacing when there is no viewer
-    /// count to show.
+    /// that formatter belongs to a different family-1 component). Shown ⟺
+    /// `showViewerCount && isLive && item.showPvNum == 1` (the `isLive &&
+    /// item.showPvNum == 1` half mirrors `PlayerHeaderBarView.viewerCountVisible`'s
+    /// existing gating convention — pure presentation, no core / view-model change;
+    /// `showViewerCount` is an independent AND-gate layered on top,
+    /// rb-ios-live-entry-hide-viewer-count — see VIEWER COUNT VISIBILITY FLAG in the
+    /// file header doc comment). `EmptyView()` when the gate is false, so
+    /// `kindBadge`'s `HStack { liveTag; viewerCountBadge }` costs zero extra pixels /
+    /// spacing when there is no viewer count to show — pixel-identical to the badge
+    /// being naturally absent via `showPvNum == 0`.
     @ViewBuilder
     private var viewerCountBadge: some View {
-        if isLive && item.showPvNum == 1 {
+        if showViewerCount && isLive && item.showPvNum == 1 {
             HStack(spacing: 3) {
                 Image(systemName: "person.fill")
                     .font(.system(size: 9, weight: .semibold))

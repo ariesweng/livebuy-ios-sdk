@@ -140,7 +140,10 @@ public struct LiveBottomBarView: View {
     /// the live-chrome branch so a caption actually appears is a SEPARATE, larger scope
     /// EXPLICITLY NOT undertaken in this round — see design.md.
     ///
-    /// nil → inert (demo / snapshot).
+    /// nil → inert (demo / snapshot). Only forwarded when `CcIconState` is `.on`/`.off`
+    /// (`subtitleAvailable == true`) — `rb-ios-cc-icon-availability-redesign` — an `.unavailable`
+    /// tap (`subtitleAvailable == false`) swallows the tap and shows `SubtitleUnavailableTooltip`
+    /// instead, never calling this closure.
     public let onToggleCC: (() -> Void)?
     /// LIVE 讚鈕亮色狀態（design R37 `LBLiveBottomBar` — `liked` prop，`rb-ios-live-like-burst-restyle`）。
     /// **預設 `false` → 白色**（與其餘 icon 一致）；`PlayerShellView` 在使用者點擊愛心後把它設為
@@ -160,6 +163,61 @@ public struct LiveBottomBarView: View {
     /// not share one closure even if naming allowed it (rb-ios-live-replay-more-menu-and-video-info-live-copy).
     public let onMore: (() -> Void)?
 
+    /// 是否目前已啟用字幕（CC）——僅影響 `chatClosed` 變體 TRAILING slot 的 CC 切換鈕，資料來源與
+    /// `OperationRailView` 呼叫端已在用的既有 `PlayerShellModel.subtitleEnabled` 完全同一個欄位
+    /// （NOT 一個新 view-model 欄位）。與 `subtitleAvailable`（見其自身 doc comment）一起經
+    /// `CcIconState.resolve` 解出三態（`rb-ios-cc-icon-availability-redesign`，MODIFIED——先前僅本
+    /// 欄位單獨驅動二態）：`subtitleAvailable && true` → `.on`（按鈕背景轉 `Color.white`、`CcGlyph`
+    /// 顏色轉 `theme.accent`）；`subtitleAvailable && false`（**預設**）→ `.off`（維持既有的半透明
+    /// 深色底 + 白色 glyph，與修正前行為一致）；`!subtitleAvailable` → `.unavailable`（不論本欄位值）。
+    /// 預設值 `false`（而非比照 `OperationRailView` 走必填參數）讓既有的多個測試 / Preview / demo
+    /// 呼叫點零修改仍可編譯——只有生產呼叫點（`PlayerShellView`）需要接上真實值。對 `.share` /
+    /// `.nickname` / `.more` / 購物袋 / 愛心任一按鈕的背景色或圖示顏色 MUST NOT 影響。
+    public let subtitleEnabled: Bool
+
+    /// 是否有字幕來源可用（`subtitleAvailable`，`rb-ios-cc-icon-availability-redesign`）——與
+    /// `OperationRailView`（`items[.subtitle].enabled`）讀的是同一個既有 view-model 布林值，這裡
+    /// 是**新** init 參數，因為 LIVE 底部 bar 先前完全沒有可用性訊號。連同 `subtitleEnabled` 一起
+    /// 解出 `CcIconState`（`.on` / `.off` / `.unavailable`）。**預設 `true`**（源碼相容——既有的多個
+    /// 測試 / Preview / demo 呼叫點零修改仍可編譯，等同「原本就恆可用」的既有觀感）；正式生產呼叫點
+    /// （`PlayerShellView`）由既有 `model.railItems` 推導帶入真實值，不新增任何 `PlayerShellModel`
+    /// API。`false`（無字幕來源）時 TRAILING slot 的 `.cc` 分支改畫 `CcUnavailableGlyph`（固定灰、
+    /// 非正方形），點擊 MUST NOT 轉發 `onToggleCC`——改顯示本地提示泡泡（見 `handleCcTap(state:)`）。
+    public let subtitleAvailable: Bool
+
+    /// Local, presentation-only UI state: whether the CC toggle's `.unavailable`-state transient
+    /// tooltip (`SubtitleUnavailableTooltip`) is currently shown (`rb-ios-cc-icon-availability-
+    /// redesign`). NOT part of the public init shape — mirrors `PlayerShellView.liveLiked`'s
+    /// identically-shaped local timed UI state.
+    @State private var subtitleTooltipVisible = false
+
+    // MARK: - Viewport-clamp geometry state (`rb-ios-cc-tooltip-viewport-clamp`)
+    //
+    // Three measured inputs to `SubtitleUnavailableTooltip.clampedTopOffsetX` — see that
+    // function's own doc comment for why they are measured via a NAMED `GeometryReader`
+    // coordinate space anchored to THIS view's own root (`ccTooltipViewportSpace`) rather than
+    // `UIScreen.main.bounds`/`.global`. All three default to `0` ("not yet measured"), which the
+    // clamp function's own guard treats as "apply no additional shift" — matching this package's
+    // existing `LoopingVideoView.onScreen` precedent (seeded to a safe default, corrected once
+    // real geometry lands).
+
+    /// The bar's own measured width — a self-contained proxy for "the viewport" (in production
+    /// this bar spans the full device width via `.frame(maxWidth: .infinity)` inside a
+    /// full-screen player). The isolated `ccToggleButtonForTesting(tooltipVisible:)` test
+    /// accessor (used by the EXISTING `live-bottom-bar-chat-closed-cc-tooltip-visible` baseline)
+    /// renders ONLY `ccToggleButton`'s own subtree, never `body`'s probe — so this stays `0`
+    /// there, the clamp is a guaranteed no-op, and that baseline is unaffected by this change.
+    @State private var ccTooltipViewportWidth: CGFloat = 0
+
+    /// The CC toggle button's own horizontal center, in the SAME named coordinate space as
+    /// `ccTooltipViewportWidth` — the second input to the clamp calculation.
+    @State private var ccButtonCenterXInBar: CGFloat = 0
+
+    /// The CC tooltip bubble's own measured width — the third input. `0` until the tooltip is
+    /// first shown and its own `GeometryReader` reports real geometry (the tooltip renders
+    /// nothing while `show == false`, so this is genuinely unmeasured, not just stale, at rest).
+    @State private var ccTooltipBubbleWidth: CGFloat = 0
+
     public init(
         theme: ReferenceUITheme,
         bagCount: Int,
@@ -168,6 +226,8 @@ public struct LiveBottomBarView: View {
         bagOnly: Bool = false,
         chatClosed: Bool = false,
         liked: Bool = false,
+        subtitleEnabled: Bool = false,
+        subtitleAvailable: Bool = true,
         onBag: (() -> Void)? = nil,
         onComment: (() -> Void)? = nil,
         onNickname: (() -> Void)? = nil,
@@ -183,6 +243,8 @@ public struct LiveBottomBarView: View {
         self.bagOnly = bagOnly
         self.chatClosed = chatClosed
         self.liked = liked
+        self.subtitleEnabled = subtitleEnabled
+        self.subtitleAvailable = subtitleAvailable
         self.onBag = onBag
         self.onComment = onComment
         self.onNickname = onNickname
@@ -272,6 +334,18 @@ public struct LiveBottomBarView: View {
         .frame(maxWidth: .infinity)
         // rb-ios-live-chrome-gradient-removal: no background scrim (design dropped
         // `LBLiveBottomBar`'s `linear-gradient(to top, rgba(0,0,0,0.55), transparent)` 2026-08-31).
+        // rb-ios-cc-tooltip-viewport-clamp: names this view's own root as the coordinate space
+        // the CC toggle's viewport-clamp geometry (`ccButtonCenterXInBar` / `ccTooltipViewportWidth`)
+        // is measured in, and probes this view's OWN width via an invisible `Color.clear`
+        // `GeometryReader` background (mirrors `LoopingVideoView`'s established off-screen-probe
+        // idiom) — zero visual/layout footprint, so every EXISTING baseline is byte-unaffected.
+        .coordinateSpace(name: Self.ccTooltipViewportSpace)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: CcTooltipViewportWidthPreferenceKey.self, value: geo.size.width)
+            }
+        )
+        .onPreferenceChange(CcTooltipViewportWidthPreferenceKey.self) { ccTooltipViewportWidth = $0 }
     }
 
     // MARK: - Bag button (`LBLiveBottomBar` bag)
@@ -421,8 +495,131 @@ public struct LiveBottomBarView: View {
             iconButton(action: onShare) { ShareGlyph(size: Self.iconGlyphSize, color: .white) }
                 .accessibilityIdentifier(LBAccessibilityID.liveShare)
         case .cc:
-            iconButton(action: onToggleCC) { CcGlyph(size: Self.iconGlyphSize, color: .white) }
-                .accessibilityIdentifier(LBAccessibilityID.liveCC)
+            // 3-state icon (`rb-ios-cc-icon-availability-redesign`, MODIFIED — supersedes the
+            // prior 2-state `subtitleEnabled`-only active-fill logic): `CcIconState.resolve`
+            // combines `subtitleAvailable` (NEW — see its own doc comment) with `subtitleEnabled`
+            // to pick `.on` / `.off` / `.unavailable`, extracted into `ccToggleButton` (its own
+            // function, mirrors `OperationRailView.subtitlePillButton`) so it can attach a
+            // tooltip overlay alongside the button — a plain `iconButton(...)` call chain cannot
+            // add a sibling node.
+            ccToggleButton(tooltipVisible: subtitleTooltipVisible)
+        }
+    }
+
+    /// The TRAILING slot's `.cc` content: 3-state icon (`CcIconState`) + tap-routing (`.on`/
+    /// `.off` forward `onToggleCC`; `.unavailable` shows `SubtitleUnavailableTooltip` instead,
+    /// `rb-ios-cc-icon-availability-redesign`). Extracted out of `trailingAction`'s `switch` (same
+    /// reasoning as `trailingAction` itself, and mirrors `OperationRailView.subtitlePillButton`)
+    /// so the button + tooltip compose cleanly.
+    ///
+    /// Takes `tooltipVisible` as a parameter (rather than reading `subtitleTooltipVisible`
+    /// directly) so `ccToggleButtonForTesting(tooltipVisible:)` below can force the tooltip
+    /// visible without simulating a real tap + timer (`rb-ios-cc-tooltip-position-fix`). The
+    /// tooltip is attached via `.overlay(_:alignment:)` (NOT a raw `ZStack`) so it does NOT
+    /// influence the button's own reported size to the bottom bar's `HStack` — see
+    /// `SubtitleUnavailableTooltip.positionedOutsideButton()`'s doc comment.
+    ///
+    /// `rb-ios-cc-tooltip-viewport-clamp`: on top of `positionedOutsideButton()`'s centered
+    /// placement, an additional `.offset(x: clampOffsetX)` nudges the bubble back inside the
+    /// viewport when this button sits close to its trailing edge (`chatClosed`'s CC button is
+    /// the LAST-but-one element in the row). `clampOffsetX` is computed by the pure
+    /// `SubtitleUnavailableTooltip.clampedTopOffsetX` from three geometry inputs measured here via
+    /// `GeometryReader` + `PreferenceKey` (see the `@State` declarations' own doc comments for why
+    /// this button's own anchor + the bar's own width, not `UIScreen.main.bounds`, are the inputs).
+    ///
+    /// `rb-ios-cc-tooltip-arrow-anchor-fix`: `clampOffsetX` shifts the WHOLE tooltip (bubble +
+    /// arrow), which used to leave the arrow no longer pointing at this button once the clamp
+    /// engaged. `arrowOffsetX` (`SubtitleUnavailableTooltip.arrowCompensationOffsetX`) is the
+    /// equal-and-opposite compensation passed through to keep the arrow pinned to
+    /// `ccButtonCenterXInBar` regardless of `clampOffsetX`.
+    private func ccToggleButton(tooltipVisible: Bool) -> some View {
+        let state = CcIconState.resolve(subtitleAvailable: subtitleAvailable, subtitleEnabled: subtitleEnabled)
+        let active = state.isActiveFill
+        let placement = SubtitleUnavailableTooltip.Placement.top
+        let clampOffsetX = SubtitleUnavailableTooltip.clampedTopOffsetX(
+            anchorCenterX: ccButtonCenterXInBar,
+            bubbleWidth: ccTooltipBubbleWidth,
+            viewportWidth: ccTooltipViewportWidth
+        )
+        // rb-ios-cc-tooltip-arrow-anchor-fix: the arrow-alone compensation, equal-and-opposite
+        // to `clampOffsetX` — see `arrowCompensationOffsetX(bubbleShift:)`'s doc comment. Keeps
+        // the arrow pinned to `ccButtonCenterXInBar` even while `clampOffsetX` nudges the bubble
+        // body to stay inside the viewport.
+        let arrowOffsetX = SubtitleUnavailableTooltip.arrowCompensationOffsetX(bubbleShift: clampOffsetX)
+        return Button(action: { handleCcTap(state: state) }) {
+            ZStack {
+                Circle().fill(active ? Color.white : Self.iconButtonBackground)
+                ccGlyph(for: state)
+            }
+            .frame(width: Self.iconSize, height: Self.iconSize)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(LBAccessibilityID.liveCC)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: CcButtonAnchorXPreferenceKey.self,
+                    value: geo.frame(in: .named(Self.ccTooltipViewportSpace)).midX
+                )
+            }
+        )
+        .onPreferenceChange(CcButtonAnchorXPreferenceKey.self) { ccButtonCenterXInBar = $0 }
+        .overlay(
+            SubtitleUnavailableTooltip(show: tooltipVisible, placement: placement, arrowOffsetX: arrowOffsetX)
+                .positionedOutsideButton()
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: CcTooltipBubbleWidthPreferenceKey.self, value: geo.size.width)
+                    }
+                )
+                .onPreferenceChange(CcTooltipBubbleWidthPreferenceKey.self) { ccTooltipBubbleWidth = $0 }
+                .offset(x: clampOffsetX),
+            alignment: placement.overlayAlignment
+        )
+    }
+
+    /// TEST-ONLY: renders the `.cc` trailing-slot button with the tooltip forced to a given
+    /// visibility (`rb-ios-cc-tooltip-position-fix`) — mirrors `trailingActionForTesting`'s
+    /// established precedent, and `OperationRailView.subtitlePillButtonForTesting`'s identical
+    /// reasoning for the sibling call site.
+    func ccToggleButtonForTesting(tooltipVisible: Bool) -> some View {
+        ccToggleButton(tooltipVisible: tooltipVisible)
+    }
+
+    /// The `.cc` toggle's glyph for a given `CcIconState` — `@ViewBuilder` so the 3-way switch
+    /// composes directly (no `AnyView`), matching `ccToggleButton`'s reasoning.
+    @ViewBuilder
+    private func ccGlyph(for state: CcIconState) -> some View {
+        switch state {
+        case .on:
+            CcGlyph(size: Self.iconGlyphSize, color: theme.accent, state: .on)
+        case .off:
+            CcGlyph(size: Self.iconGlyphSize, color: .white, state: .off)
+        case .unavailable:
+            CcUnavailableGlyph(size: Self.iconGlyphSize)
+        }
+    }
+
+    /// Routes a `.cc` toggle tap: `.on`/`.off` forward the existing `onToggleCC` intent
+    /// unchanged; `.unavailable` shows the transient tooltip instead
+    /// (`rb-ios-cc-icon-availability-redesign`).
+    private func handleCcTap(state: CcIconState) {
+        if state.forwardsToggleTapIntent {
+            onToggleCC?()
+        } else {
+            showSubtitleTooltipTransiently()
+        }
+    }
+
+    /// Shows `subtitleTooltipVisible` and schedules its own reset — mirrors
+    /// `PlayerShellView`'s established `liveLiked` + `DispatchQueue.main.asyncAfter` self-reset
+    /// pattern for identically-shaped local timed UI state (same technique
+    /// `OperationRailView.showSubtitleTooltipTransiently()` uses for its own copy of this
+    /// tooltip).
+    private func showSubtitleTooltipTransiently() {
+        subtitleTooltipVisible = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + CcUnavailableTooltipTiming.autoDismissSeconds) {
+            subtitleTooltipVisible = false
         }
     }
 
@@ -462,12 +659,55 @@ public struct LiveBottomBarView: View {
         .buttonStyle(PlainButtonStyle())
     }
 
+    // The former `iconButton(active:action:glyph:)` overload (glyph + explicit "active" fill
+    // state) has no remaining call site as of `rb-ios-cc-icon-availability-redesign` — the ONE
+    // caller it existed for (`.cc` trailing-slot button) now needs a sibling tooltip node
+    // alongside the `Button`, which this two-argument-closure shape cannot express, so that
+    // button was inlined into `ccToggleButton` instead. Removed rather than left dead.
+
     // MARK: - Badge text
 
     /// Clamp very large counts so the badge stays compact (`99+` past 99).
     static func badgeText(_ count: Int) -> String {
         count > 99 ? "99+" : "\(count)"
     }
+
+    // MARK: - Shared height token (rb-ios-caption-overlay-bottom-bar-clearance-fix)
+
+    /// This bar's own real total rendered height (`barTopPadding + iconSize + barBottomPadding`,
+    /// currently 60pt) — the SINGLE SOURCE OF TRUTH other family-1 surfaces positioned above this
+    /// bar (currently `LiveOverlayChromeView`'s announce/pinned-card row + the `subtitleCaption`
+    /// overlay stacked above it) MUST reference instead of re-guessing an independent literal.
+    /// Before this change, `LiveOverlayChromeView` hardcoded a standalone `64` constant with ZERO
+    /// compile-time/runtime coupling to this bar's actual height — any future edit to
+    /// `barTopPadding` / `iconSize` / `barBottomPadding` below would silently NOT be reflected
+    /// there, leaving an already-thin safety gap free to erode further unnoticed. Internal (not
+    /// `public`) — both files live in the same `LivebuyReferenceUI` module, so this does not need
+    /// to be host-visible API (mirrors `LiveOverlayChromeView.captionTrailingClearance`, also
+    /// internal).
+    static var barHeight: CGFloat { barTopPadding + iconSize + barBottomPadding }
+}
+
+// MARK: - Viewport-clamp geometry `PreferenceKey`s (`rb-ios-cc-tooltip-viewport-clamp`)
+//
+// Three `Color.clear`-background `GeometryReader` probes (`body`'s own width + `ccToggleButton`'s
+// anchor + `SubtitleUnavailableTooltip`'s own bubble width) feed these into `@State` via
+// `.onPreferenceChange` — see the `@State` declarations above and `ccToggleButton`'s doc comment.
+// File-private: this plumbing is specific to THIS view's CC toggle, not a shared package type.
+
+private struct CcTooltipViewportWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct CcButtonAnchorXPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct CcTooltipBubbleWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Design tokens (lifted from `live-chrome.jsx` `LBLiveBottomBar`)
@@ -517,6 +757,11 @@ private extension LiveBottomBarView {
     // unused — `trailingAction` 的 `.cc` 分支已改畫 `CcGlyph`，與 `OperationRailView`.subtitle
     // 現行值共用同一顆 glyph。
     static let ccSymbol = "captions.bubble"         // unused — see CcGlyph
+
+    // Viewport-clamp coordinate space (`rb-ios-cc-tooltip-viewport-clamp`) — see the
+    // `ccTooltipViewportWidth` / `ccButtonCenterXInBar` `@State` doc comments and `body`'s
+    // `.coordinateSpace(name:)` call.
+    static let ccTooltipViewportSpace = "liveBottomBarCcTooltipViewport"
 }
 
 // MARK: - Preview (deterministic demo)

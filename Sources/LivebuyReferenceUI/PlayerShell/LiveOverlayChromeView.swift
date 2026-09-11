@@ -68,8 +68,10 @@ public struct LiveOverlayChromeView: View {
     /// (問題 7, rb-ios-live-now-introducing-carousel).
     public let pinnedProducts: [LBProduct]
 
-    /// Extra bottom inset added to the shared announce/pinned-card row's `.padding(.bottom, 64)`
-    /// (rb-ios-restore-vod-playback-progress-bar). Default `0` keeps every existing call site /
+    /// Extra bottom inset added to the shared announce/pinned-card row's `.padding(.bottom,
+    /// LiveBottomBarView.barHeight + bottomBarClearanceGap)` (rb-ios-restore-vod-playback-progress-bar;
+    /// base value updated by rb-ios-caption-overlay-bottom-bar-clearance-fix). Default `0` keeps
+    /// every existing call site /
     /// snapshot baseline pixel-identical. `PlayerShellView` passes a positive value (~36pt)
     /// while the VOD/replay `PlaybackProgressBarView` is expanded but no longer actively being
     /// dragged, so the announce banner + pinned card reappear lifted clear of the still-expanded
@@ -201,6 +203,27 @@ public struct LiveOverlayChromeView: View {
     /// `onAppear` / animation runs there → baselines unchanged).
     @State private var gestureHintsOpacity: Double = 1
 
+    /// Trailing inset for the `subtitleCaption` window (rb-ios-caption-overlay-align-hide-chat) —
+    /// matches the design's `LBPCaptionOverlay` override for the LIVE/回放 caller
+    /// (`screens.jsx` line ~576: `<LBPCaptionOverlay right={120} .../>`, vs. the VOD caller's
+    /// default `right=68` — `PlayerShellView.floatingBagClearance`). The two callers intentionally
+    /// use different values (this row's own bottom bar / pinned-card column is wider than the VOD
+    /// floating bag), so this is a separate, independently-named constant rather than a shared one.
+    static let captionTrailingClearance: CGFloat = 120
+
+    /// Explicit, named safety gap ABOVE `LiveBottomBarView`'s real height that the announce/
+    /// pinned-card row's bottom padding clears (`rb-ios-caption-overlay-bottom-bar-clearance-fix`).
+    /// Before this change the row used a standalone hardcoded `64` constant with ZERO coupling to
+    /// `LiveBottomBarView`'s actual rendered height (`barTopPadding(8) + iconSize(36) +
+    /// barBottomPadding(16) = 60pt`) — that left only a razor-thin margin (`64 − 60 = 4pt` for the
+    /// row itself; `64 + 8 − 60 = 12pt` for the `subtitleCaption` overlay stacked above it, in the
+    /// worst case where the row is otherwise empty) that could silently erode to zero if either
+    /// file's own constants ever drifted independently (user-reported real-device overlap). `12`
+    /// gives a deliberately more generous buffer (row: 12pt, caption worst-case: 20pt) — a
+    /// judgment call (see design.md D3), not a value read off the design mockup (the mockup itself
+    /// only uses the same rough `bottom: 64` literal this replaces).
+    static let bottomBarClearanceGap: CGFloat = 12
+
     public var body: some View {
         // Full-bleed overlay. Affordances are positioned with explicit padding
         // so the layout matches `live-chrome.jsx`'s absolute placement without an
@@ -251,21 +274,31 @@ public struct LiveOverlayChromeView: View {
             // pinned card `right:8 bottom:64 width:100` (R31, was `width:132`).
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                // Real VTT/CC caption (rb-ios-replay-caption-overlay-fix) — leading-aligned,
-                // stacked directly ABOVE the announce/pinned-card row below (SwiftUI lays out
-                // this VStack's children top-to-bottom, so it self-adjusts to the row's height —
-                // no manual pixel offset needed to avoid overlapping the (taller) pinned card).
+                // Real VTT/CC caption (rb-ios-replay-caption-overlay-fix) — stacked directly
+                // ABOVE the announce/pinned-card row below (SwiftUI lays out this VStack's
+                // children top-to-bottom, so it self-adjusts to the row's height — no manual
+                // pixel offset needed to avoid overlapping the (taller) pinned card). This
+                // vertical stacking mechanism is UNCHANGED by rb-ios-caption-overlay-align-hide-
+                // chat below — only the horizontal alignment changes.
                 // Hidden in `cleanMode` — same internal gate as `announceText` / `hostCaption`
                 // below (the CALLER already resolves this to `""` in that case too, see
                 // `PlayerShellView.showsCaptionOverlay`; this is defense-in-depth for any other
                 // direct caller / test, mirroring `testLiveOverlayChromeView_cleanModeHides...`).
+                //
+                // rb-ios-caption-overlay-align-hide-chat: centered within a narrow window (left
+                // 8pt / right `captionTrailingClearance` == 120pt), matching the design's
+                // `LBPCaptionOverlay` override for this caller (`right:120;
+                // justifyContent:'center'`) — REPLACES the previous leading-aligned
+                // `HStack { CaptionOverlayView(); Spacer() }` (which also used a different,
+                // now-retired 10pt trailing inset).
                 if !subtitleCaption.isEmpty && !cleanMode {
                     HStack(spacing: 0) {
+                        Spacer(minLength: 0)
                         CaptionOverlayView(theme: theme, text: subtitleCaption)
                         Spacer(minLength: 0)
                     }
                     .padding(.leading, 8)
-                    .padding(.trailing, 10)
+                    .padding(.trailing, Self.captionTrailingClearance)
                     .padding(.bottom, 8)
                 }
                 HStack(alignment: .bottom, spacing: 8) {
@@ -295,7 +328,12 @@ public struct LiveOverlayChromeView: View {
                 // `bottomInset` (default 0, additive) lifts the row clear of the VOD/replay
                 // `PlaybackProgressBarView` transport bar while it is expanded but no longer
                 // being actively dragged (rb-ios-restore-vod-playback-progress-bar).
-                .padding(.bottom, 64 + bottomInset)
+                //
+                // rb-ios-caption-overlay-bottom-bar-clearance-fix: REPLACES the previous standalone
+                // hardcoded `64` with `LiveBottomBarView.barHeight + Self.bottomBarClearanceGap` —
+                // a single source of truth derived from the REAL bottom bar height instead of an
+                // independently-guessed literal (see `bottomBarClearanceGap`'s own doc comment).
+                .padding(.bottom, LiveBottomBarView.barHeight + Self.bottomBarClearanceGap + bottomInset)
             }
         }
     }

@@ -117,6 +117,22 @@ public struct FloatingWidgetView: View {
     /// placeholder`. See spec `reference-ui-rendering` (family-5).
     public let live: Bool
 
+    /// Whether the reused card's LIVE-only viewer-count badge may draw, forwarded
+    /// verbatim to `CarouselCardView`'s same-named parameter
+    /// (rb-ios-live-entry-hide-viewer-count). **Default `true`** — this surface's
+    /// OTHER two consumers, `WidgetOverlayView`'s `.floating` content mode and
+    /// `MinimalDesign.floatingPlayerCard` (the collapsible player's minimized
+    /// floating card), **MUST NOT** pass this parameter, so their viewer-count
+    /// badge keeps its pre-existing `isLive && item.showPvNum == 1` gate as the
+    /// sole condition — byte-identical to before this parameter existed. The THIRD
+    /// consumer, `LivebuyLiveEntry` (`Container/LivebuyLiveEntry.swift`), passes
+    /// `showViewerCount: false` so its「現正直播」entry card never shows a viewer
+    /// count. This is the ONLY per-caller difference on this surface: `showTitle`
+    /// stays hardcoded `false` for ALL three consumers (see the doc comment on the
+    /// `CarouselCardView(...)` call in `window(_:)` below), because `showViewerCount`
+    /// is genuinely caller-specific while `showTitle` is not.
+    public let showViewerCount: Bool
+
     /// Whole-window tap → host-wired `onTap(video)` → host → core open player for the
     /// live `video.id` (canonical `videoTap`). nil for demo / snapshot instances —
     /// the window is inert. This layer NEVER opens the player itself.
@@ -132,6 +148,7 @@ public struct FloatingWidgetView: View {
         theme: ReferenceUITheme,
         width: CGFloat = 132,
         live: Bool = false,
+        showViewerCount: Bool = true,
         onTap: ((LBVideoItem) -> Void)? = nil,
         onClose: (() -> Void)? = nil
     ) {
@@ -139,6 +156,7 @@ public struct FloatingWidgetView: View {
         self.theme = theme
         self.width = width
         self.live = live
+        self.showViewerCount = showViewerCount
         self.onTap = onTap
         self.onClose = onClose
     }
@@ -178,12 +196,18 @@ public struct FloatingWidgetView: View {
             // intrinsic height shrinks accordingly — see `CarouselCardView`'s TITLE
             // VISIBILITY doc comment), aligning this surface with the design rather than
             // introducing a new deviation.
+            // showViewerCount forwards verbatim (rb-ios-live-entry-hide-viewer-count):
+            // this surface's own `showViewerCount` parameter defaults to `true`, so a
+            // caller that does not pass it (WidgetOverlayView / MinimalDesign) draws
+            // the viewer-count badge exactly as before this parameter existed; only
+            // `LivebuyLiveEntry` sets it `false`.
             CarouselCardView(
                 item: video,
                 theme: theme,
                 width: width,
                 live: live,
                 showTitle: false,
+                showViewerCount: showViewerCount,
                 onTap: { onTap?(video) })
 
             // Top-right round close button (floating-only). A SEPARATE front-most

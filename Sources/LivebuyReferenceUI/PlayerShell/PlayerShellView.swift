@@ -379,6 +379,18 @@ public struct PlayerShellView: View {
     /// (baseline unchanged).
     private let onMoreSheetPresentedChange: ((Bool) -> Void)?
 
+    /// Reports `hidesChatFeedForReplayCaption` (`model.isFinishedLiveReplay && model
+    /// .subtitleEnabled`) — its initial value and every change — to the container, so it can
+    /// additionally hide the family-2 chat feed (`FeedWinOverlayView`'s `ChatFeedView`, a sibling
+    /// composed by `MinimalDesign.playerOverlay`, not a descendant of this view) while an already-
+    /// finished-live replay has CC captions on, letting the caption take over the freed area
+    /// (rb-ios-caption-overlay-align-hide-chat — user report: 「回放啟用字幕要隱藏聊天室」). A
+    /// genuinely live broadcast (`isFinishedLiveReplay == false`) is NEVER affected by this report,
+    /// regardless of `subtitleEnabled`. Read-only state report, mirrors the existing
+    /// `onIsLiveChange` / `onHasAnnounceChange` precedents above. nil (default / snapshot) → no
+    /// report (baseline unchanged).
+    private let onReplayCaptionHidesChatChange: ((Bool) -> Void)?
+
     /// Test-only observability hook (`rb-ios-gesture-clean-mode-v2`, `docs/unit-test-discipline.md`
     /// `*ForTesting` naming): called SYNCHRONOUSLY, alongside `model.seekBy(_:)`, from BOTH the
     /// double-tap-seek commit (`handleVideoTap(zone:)`) and each 2×-speed tick
@@ -807,6 +819,7 @@ public struct PlayerShellView: View {
                 onScrubBarExpandedChange: ((Bool) -> Void)? = nil,
                 onCleanModeChange: ((Bool) -> Void)? = nil,
                 onMoreSheetPresentedChange: ((Bool) -> Void)? = nil,
+                onReplayCaptionHidesChatChange: ((Bool) -> Void)? = nil,
                 isScrubbingForTesting: Bool = false,
                 scrubBarExpandedForTesting: Bool = false,
                 cleanModeForTesting: Bool = false,
@@ -848,6 +861,7 @@ public struct PlayerShellView: View {
         self.onScrubBarExpandedChange = onScrubBarExpandedChange
         self.onCleanModeChange = onCleanModeChange
         self.onMoreSheetPresentedChange = onMoreSheetPresentedChange
+        self.onReplayCaptionHidesChatChange = onReplayCaptionHidesChatChange
         self.seekByForTesting = seekByForTesting
         self.cleanModeTapSchedule = cleanModeTapSchedule
         // Test-only seed for the two scrub-driven `@State` properties (see their doc comments
@@ -1310,6 +1324,46 @@ public struct PlayerShellView: View {
                                  cleanMode: cleanMode)
     }
 
+    /// PURE: whether the merged LIVE-family chat feed (rendered by a SIBLING `FeedWinOverlayView`
+    /// in `PlayerOverlayRootView`, NOT a descendant of this view) should be hidden because a
+    /// finished-live replay has CC captions on (rb-ios-caption-overlay-align-hide-chat — user
+    /// report: 「回放啟用字幕要隱藏聊天室」, so the caption can take over the freed area, design
+    /// `screens.jsx` ~571-576). Genuinely live (`isFinishedLiveReplay == false`) NEVER hides the
+    /// chat feed via this path, regardless of `subtitleEnabled` — a real live broadcast has no
+    /// usable caption source today (the CC button is rendered unavailable there,
+    /// `rb-ios-cc-icon-availability-redesign`), so this asymmetry mirrors `showsCaptionOverlay`'s
+    /// own `!isLive` gate rather than the design's literal (but for iOS's data model equivalent)
+    /// `!ccOn` condition. `subtitleAvailable` (rb-ios-caption-chat-hide-availability-gate — user
+    /// report: 「CC 跨影片保留但沒字幕的影片沒辦法關閉，導致聊天室被隱藏」) additionally requires the
+    /// CURRENT video to actually have a caption source: `subtitleEnabled` deliberately persists
+    /// across a video switch (`DefaultPlayerTemplate.handleSubtitleChannelInfo` preserves it), but
+    /// the CC button is rendered `unavailable` and swallows taps when the new video has none — the
+    /// user cannot turn a stale `true` back off, so without this third clause a caption-less video
+    /// would keep the chat feed hidden for no visible reason. Unit-testable without rendering any
+    /// view.
+    static func hidesChatFeedForReplayCaption(isFinishedLiveReplay: Bool, subtitleEnabled: Bool,
+                                               subtitleAvailable: Bool) -> Bool {
+        isFinishedLiveReplay && subtitleEnabled && subtitleAvailable
+    }
+
+    /// Whether the CURRENT video has a caption source (`railItems`' `.subtitle` item's `enabled`)
+    /// — parity the CC button's own availability read (`rb-ios-cc-icon-availability-redesign`, NOT
+    /// a new `PlayerShellModel` API). Exposed as its own `Bool` (rather than inlined) so
+    /// `.onChange(of: subtitleAvailable)` below can detect a flip that neither `isFinishedLiveReplay`
+    /// nor `subtitleEnabled` alone would catch (rb-ios-caption-chat-hide-availability-gate).
+    private var subtitleAvailable: Bool {
+        model.railItems.first(where: { $0.kind == .subtitle })?.enabled == true
+    }
+
+    /// Wraps `hidesChatFeedForReplayCaption(isFinishedLiveReplay:subtitleEnabled:subtitleAvailable:)`
+    /// for the live model snapshot — reported to the container via `onReplayCaptionHidesChatChange`
+    /// below.
+    private var hidesChatFeedForReplayCaption: Bool {
+        Self.hidesChatFeedForReplayCaption(isFinishedLiveReplay: model.isFinishedLiveReplay,
+                                            subtitleEnabled: model.subtitleEnabled,
+                                            subtitleAvailable: subtitleAvailable)
+    }
+
     public var body: some View {
         ZStack {
             // The video area sits behind everything (host supplies the actual
@@ -1476,28 +1530,17 @@ public struct PlayerShellView: View {
                         withAnimation { infoPanelPresented = true }
                     })
             } else {
-                // 拖曳播放進度條期間（isScrubbing）隱藏字幕疊層 / 介紹中商品卡輪播，讓出畫面給
+                // 拖曳播放進度條期間（isScrubbing）隱藏介紹中商品卡輪播，讓出畫面給
                 // transport bar；放開手指到 2.8 秒收回這段期間（scrubBarExpanded &&
-                // !isScrubbing）兩者重新出現並上移，讓出底部 transport bar 空間
+                // !isScrubbing）重新出現並上移，讓出底部 transport bar 空間
                 // （rb-ios-restore-vod-playback-progress-bar）。
+                //
+                // CC 字幕疊層已抽離為獨立的 top-level ZStack sibling（rb-ios-vod-caption-reserve-
+                // card-space，見下方「VOD CC 字幕疊層」區塊）——不再與這個商品卡輪播共用同一個
+                // VStack。修正前兩者疊在同一個 VStack 裡，商品卡輪播的渲染 / 消失會讓 VStack 版面
+                // 重排，把字幕的實際位置往上推 / 彈回底部（使用者截圖回報「字幕位置會跳動」）。
                 VStack(alignment: .leading, spacing: 0) {
                     Spacer(minLength: 0)
-                    // CC 字幕 overlay 在乾淨模式隱藏（rb-ios-gesture-clean-mode-rewrite ADDED
-                    // Requirement「…長按切換「乾淨模式」隱藏懸浮 chrome」VOD 隱藏清單）。
-                    //
-                    // 字幕來源兩層 fallback（rb-ios-subtitle-vtt-caption-display）：host 明確傳入的
-                    // `captionText`（既有參數）優先，維持既有 host-override 行為 100% 不變；
-                    // `captionText` 為空才 fallback 到 `model.subtitleCues`（turnkey 容器抓取 +
-                    // 解析 `channel.subtitle_url` 灌入）在目前 `model.position` 命中的 cue 文字。
-                    // rb-ios-replay-caption-overlay-fix: `effectiveCaption` / `showsCaptionOverlay`
-                    // hoisted to shared computed properties above (were a local `let` + inline
-                    // condition here) so the live-chrome/replay branch can reuse the exact same
-                    // resolution — behavior here is unchanged (`model.isLive == false` is already
-                    // implied by being in this branch at all).
-                    if showsCaptionOverlay {
-                        CaptionOverlayView(theme: theme, text: effectiveCaption)
-                            .padding(.bottom, 8 + scrubChromeLiftIfExpanded)
-                    }
                     // VOD now-introducing products: a full-width card carousel (real image + page
                     // dots + swipe) over ALL products whose [beginTime,endTime) window contains
                     // the playhead (`model.vodActiveProducts`), minus the ones dismissed locally.
@@ -1538,6 +1581,41 @@ public struct PlayerShellView: View {
                             .padding(.trailing, showsVodMainChrome ? Self.floatingBagClearance : 8)
                             .padding(.bottom, 12 + scrubChromeLiftIfExpanded)
                     }
+                }
+            }
+
+            // VOD CC 字幕疊層 — 獨立的 top-level ZStack sibling（rb-ios-vod-caption-reserve-card-
+            // space）。從上面 VOD else 分支的 VStack 抽離出來，不再與 now-introducing 商品卡輪播
+            // 共用容器：修正前兩者疊在同一個 VStack 裡，商品卡輪播渲染 / 消失時 VStack 版面重排會
+            // 把字幕往上推 / 彈回底部（使用者截圖回報「字幕位置會跳動」）。修正後字幕的垂直位置
+            // 固定預留 92pt（design `design/templates/minimal/screens.jsx:533` 的 `LBPCaptionOverlay`
+            // VOD `safeBottom = safeArea.bottom + 92`，跟同一份設計檔 `sdk-components.jsx` 的
+            // `LBPMiniCart` 商品卡是否顯示〔`bottom: 12 + safeBottom`〕完全無關，兩者是各自獨立定位
+            // 的元件），無論 vodActiveProducts / 商品卡輪播實際有沒有渲染都套用這個固定值——即「永遠
+            // 預留商品卡的空間」。
+            //
+            // 渲染條件與拖曳/展開行為 100% 沿用抽離前：`showsCaptionOverlay` 本身已經 fold 進
+            // `!isScrubbing`（拖曳播放進度條時隱藏字幕）與 `!cleanMode`；`isVodMainChrome` 與進入
+            // 上面那個 else 分支的條件完全相同（純 VOD、非 upcoming、非 introPlaying），取代「巢狀
+            // 在該分支內」這個結構性保證。`.padding(.bottom, 92 + scrubChromeLiftIfExpanded)` 的
+            // `scrubChromeLiftIfExpanded` 項維持「放開手指到 2.8 秒收回這段期間（scrubBarExpanded
+            // && !isScrubbing）字幕跟著上移」不變——只有底座常數從 8 改成 92。只影響純 VOD；LIVE /
+            // 已結束直播回放（usesLiveChrome）的字幕走 LiveOverlayChromeView 自己的
+            // subtitleCaption，不在本次範圍、不受影響。
+            //
+            // 水平對齊（置中於左緣 8pt / 右緣 floatingBagClearance 的窄框，rb-ios-caption-overlay-
+            // align-hide-chat）維持不變，只改錨定容器與底部數字。
+            if isVodMainChrome && showsCaptionOverlay {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        CaptionOverlayView(theme: theme, text: effectiveCaption)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 8)
+                    .padding(.trailing, Self.floatingBagClearance)
+                    .padding(.bottom, 92 + scrubChromeLiftIfExpanded)
                 }
             }
 
@@ -1714,6 +1792,13 @@ public struct PlayerShellView: View {
                         // isReplay（仍直播）不受影響——chatClosed 只由 isFinishedLiveReplay 驅動。
                         chatClosed: model.isFinishedLiveReplay,
                         liked: liveLiked,
+                        // CC 按鈕 active 填色態（rb-ios-live-bottom-bar-cc-icon-active-fill-state）——
+                        // 同一個既有欄位，`OperationRailView(...)` 呼叫點（上方）已經在用。
+                        subtitleEnabled: model.subtitleEnabled,
+                        // 是否有字幕來源可用（rb-ios-cc-icon-availability-redesign）——由既有
+                        // `model.railItems` 推導（`.subtitle` 項的 `enabled`，與 `OperationRailView(...)`
+                        // 呼叫點〔上方〕讀的是同一份 view-model 資料），NOT 新增任何 `PlayerShellModel` API。
+                        subtitleAvailable: model.railItems.first(where: { $0.kind == .subtitle })?.enabled == true,
                         onBag: {
                             model.performGoodsTap()   // telemetry-only panel-toggle event
                             onOpenProductList?()       // host opens the product-list overlay
@@ -1971,6 +2056,9 @@ public struct PlayerShellView: View {
             // `cleanModeForTesting` 預先 seed 的情境）就拿到正確初值（rb-ios-clean-mode-hide-
             // chat-feed）。
             onCleanModeChange?(cleanMode)
+            // 初值報告「回放啟用字幕→隱藏聊天室」(`.onChange` 不會為初值觸發，
+            // rb-ios-caption-overlay-align-hide-chat)，讓容器一進場就拿到正確初值。
+            onReplayCaptionHidesChatChange?(hidesChatFeedForReplayCaption)
             // 初值背景 prefetch 商品照片（`.onChange` 不會為初值觸發，rb-ios-product-image-
             // loading-polish）——見下方 `.onChange(of: allProductIdsForPrefetch)`。
             prefetchIntroducibleProductImages()
@@ -1983,9 +2071,24 @@ public struct PlayerShellView: View {
         .onChange(of: cleanMode) { newValue in
             onCleanModeChange?(newValue)
         }
-        // 回放旗標切換亦回報 live-chrome 家族（換片 live→回放 / 回放→VOD 時聊天 feed 跟著開關）。
+        // 回放旗標切換亦回報 live-chrome 家族（換片 live→回放 / 回放→VOD 時聊天 feed 跟著開關），
+        // 以及「回放啟用字幕→隱藏聊天室」旗標（rb-ios-caption-overlay-align-hide-chat：換片可能同時
+        // 翻轉 isFinishedLiveReplay，須同步重算）。
         .onChange(of: model.isFinishedLiveReplay) { _ in
             onIsLiveChange?(usesLiveChrome)
+            onReplayCaptionHidesChatChange?(hidesChatFeedForReplayCaption)
+        }
+        // CC 開關翻轉時回報「回放啟用字幕→隱藏聊天室」（rb-ios-caption-overlay-align-hide-chat）。
+        // 真直播（`isFinishedLiveReplay == false`）下 `hidesChatFeedForReplayCaption` 恆為
+        // `false`，此回報對聊天室無實際影響。
+        .onChange(of: model.subtitleEnabled) { _ in
+            onReplayCaptionHidesChatChange?(hidesChatFeedForReplayCaption)
+        }
+        // 換片可能只翻轉字幕可用性（`railItems` 的 `.subtitle.enabled`）而不動
+        // `isFinishedLiveReplay` / `subtitleEnabled`——沒字幕的新回放影片必須立刻恢復聊天室
+        // （rb-ios-caption-chat-hide-availability-gate）。
+        .onChange(of: subtitleAvailable) { _ in
+            onReplayCaptionHidesChatChange?(hidesChatFeedForReplayCaption)
         }
         // Report whether the LBLiveAnnounce banner is showing (announceText 非空) so the container
         // gives the chat feed extra bottom clearance only when a 公告 is present

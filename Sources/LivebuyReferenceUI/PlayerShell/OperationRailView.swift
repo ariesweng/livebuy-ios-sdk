@@ -16,12 +16,16 @@ import LivebuyUI
 // `heartBurstTick` + `muted`) and paints:
 //
 //   • a FIXED design-ordered pill stack (top→bottom: CC subtitle → share →
-//     contact-merchant), each pill gated by its kind's `enabled` flag (a disabled
-//     or absent kind is omitted — no dimmed slot). The view-model `items` ORDER
-//     does NOT drive the visual order (it is a bottom-bar action set); see
-//     `presentationOrder`. `goods` / `chat` / `like` / `guestNameEdit` / `more`
-//     are NOT rail kinds (the bag is the separate `FloatingBagButtonView`; info is
-//     the host-badge tap; like / nickname / chat are LIVE bottom-bar / not-in-VOD),
+//     contact-merchant). `.share`/`.serviceLink` are each gated by their kind's
+//     `enabled` flag (a disabled or absent kind is omitted — no dimmed slot).
+//     `.subtitle` (CC) is the ONE exception (`rb-ios-cc-icon-availability-
+//     redesign`): it ALWAYS renders, using `enabled` (`subtitleAvailable`) only to
+//     pick which of its 3 icon states (`CcIconState`) to draw — see
+//     `showsRailPill(kind:items:)`. The view-model `items` ORDER does NOT drive
+//     the visual order (it is a bottom-bar action set); see `presentationOrder`.
+//     `goods` / `chat` / `like` / `guestNameEdit` / `more` are NOT rail kinds (the
+//     bag is the separate `FloatingBagButtonView`; info is the host-badge tap;
+//     like / nickname / chat are LIVE bottom-bar / not-in-VOD),
 //   • a heart burst that replays every time `heartBurstTick` INCREASES.
 //
 // `bagCount` / `muted` are carried for the documented init shape but are no longer
@@ -73,6 +77,13 @@ public struct OperationRailView: View {
     /// so demo / snapshot instances construct action-free.
     public let onTapItem: ((LBSideRailKind) -> Void)?
 
+    /// Local, presentation-only UI state: whether the CC pill's `.unavailable`-state transient
+    /// tooltip (`SubtitleUnavailableTooltip`) is currently shown (`rb-ios-cc-icon-availability-
+    /// redesign`). NOT part of the public init shape — mirrors `PlayerShellView.liveLiked`'s
+    /// identically-shaped local timed UI state (set `true` on tap, reset `false` after
+    /// `CcUnavailableTooltipTiming.autoDismissSeconds` via `showSubtitleTooltipTransiently()`).
+    @State private var subtitleTooltipVisible = false
+
     public init(
         theme: ReferenceUITheme,
         items: [LBSideRailItem],
@@ -96,10 +107,12 @@ public struct OperationRailView: View {
     /// Design-fixed presentation order for the VOD side rail (`LBPSideRail`,
     /// top→bottom): CC subtitle → share → contact merchant. The view-model `items`
     /// order is a bottom-bar action set (`DefaultPlayerChrome` doc) and NO LONGER
-    /// drives the visual order; each kind is drawn only when its item exists and is
-    /// `enabled` (design draws no dimmed slot — a disabled kind is simply omitted).
-    /// The shopping bag is no longer a rail item — it is the separate floating
-    /// `FloatingBagButtonView` (design `LBPBagButton`, anchored lower by the shell).
+    /// drives the visual order. `.share`/`.serviceLink` are drawn only when their item
+    /// exists and is `enabled` (design draws no dimmed slot — a disabled kind is simply
+    /// omitted); `.subtitle` ALWAYS draws (`showsRailPill`, `rb-ios-cc-icon-availability-
+    /// redesign`) — see `isEnabled(_:)`. The shopping bag is no longer a rail item — it
+    /// is the separate floating `FloatingBagButtonView` (design `LBPBagButton`, anchored
+    /// lower by the shell).
     static let presentationOrder: [LBSideRailKind] = [.subtitle, .share, .serviceLink]
 
     public var body: some View {
@@ -128,38 +141,79 @@ public struct OperationRailView: View {
 
     // MARK: - Rail items
 
-    /// Whether `kind` has an enabled item in `items` (design omits disabled kinds).
-    private func isEnabled(_ kind: LBSideRailKind) -> Bool {
-        items.first(where: { $0.kind == kind })?.enabled == true
+    /// PURE FUNCTION: whether `kind` should render at all (`rb-ios-cc-icon-availability-
+    /// redesign`). `.subtitle` (CC) ALWAYS renders now — it no longer disappears when
+    /// unavailable; its `enabled` flag (`subtitleAvailable`) only selects which of the 3 icon
+    /// states `subtitleGlyph(for:)` draws (`.on` / `.off` / `.unavailable`), via `CcIconState`.
+    /// `.share` / `.serviceLink` keep the ORIGINAL "enabled == false → omit, no dimmed slot"
+    /// rule unchanged. Extracted as a static pure function (docs/unit-test-discipline 純函式
+    /// 抽出) so the "always renders" behavior is directly unit-testable — `body`'s `ForEach`
+    /// wraps this decision in a way `Mirror`-based structural tests cannot see into (see
+    /// `pillButtonForTesting`'s doc comment).
+    static func showsRailPill(kind: LBSideRailKind, items: [LBSideRailItem]) -> Bool {
+        if kind == .subtitle { return true }
+        return items.first(where: { $0.kind == kind })?.enabled == true
     }
 
-    /// A standard round pill (`LBPSideRail` `railBtn`): 40×40, fully-rounded. Wears one of two
-    /// fill states per `isActivePill` (design `railBtn(icon, active, onClick)`, rb-ios-cc-icon-
-    /// active-fill-state): `active` → white background + `theme.accent` glyph; inactive (the
-    /// default for every kind except an enabled `.subtitle`) → translucent dark fill
-    /// (`Self.pillBackground`) + white glyph.
+    /// Whether `kind` should render (`.share`/`.serviceLink` enabled-gate; `.subtitle` always —
+    /// see `showsRailPill`).
+    private func isEnabled(_ kind: LBSideRailKind) -> Bool {
+        Self.showsRailPill(kind: kind, items: items)
+    }
+
+    /// PURE FUNCTION: whether `items` carries an available `.subtitle` source
+    /// (`subtitleAvailable`). Missing `.subtitle` entry defaults to `false` — a defensive
+    /// default, not a production path (`DefaultOperationRail` always includes a `.subtitle`
+    /// entry; only its `enabled` value varies).
+    static func subtitleAvailable(items: [LBSideRailItem]) -> Bool {
+        items.first(where: { $0.kind == .subtitle })?.enabled == true
+    }
+
+    /// PURE FUNCTION: resolves the CC pill's 3-state icon from `items`' `.subtitle` entry
+    /// (`subtitleAvailable`) + the caller-supplied `subtitleEnabled` (`rb-ios-cc-icon-
+    /// availability-redesign`).
+    static func ccState(items: [LBSideRailItem], subtitleEnabled: Bool) -> CcIconState {
+        CcIconState.resolve(subtitleAvailable: Self.subtitleAvailable(items: items), subtitleEnabled: subtitleEnabled)
+    }
+
+    /// A standard round pill (`LBPSideRail` `railBtn`): 40×40, fully-rounded. `.subtitle` is
+    /// special-cased into `subtitlePillButton` (3-state icon + tap-routing + tooltip overlay,
+    /// `rb-ios-cc-icon-availability-redesign`); every other kind (only `.share`/`.serviceLink`
+    /// are actually drawn by the aligned VOD rail — see `presentationOrder`) keeps the ORIGINAL,
+    /// unaffected inactive-only styling via `standardPillButton`. `@ViewBuilder` so the two
+    /// branches compose directly into the value tree (no `AnyView` type-erasure box — an opaque
+    /// erasure boundary would hide `subtitlePillButton`'s glyph/tooltip nodes from the existing
+    /// `Mirror`-based structural tests, exactly the pitfall `LiveBottomBarView.trailingAction`'s
+    /// own `@ViewBuilder` switch already avoids).
+    @ViewBuilder
     private func pillButton(for kind: LBSideRailKind) -> some View {
-        let active = Self.isActivePill(kind: kind, subtitleEnabled: subtitleEnabled)
-        return Button(action: { onTapItem?(kind) }) {
+        if kind == .subtitle {
+            subtitlePillButton(tooltipVisible: subtitleTooltipVisible)
+        } else {
+            standardPillButton(for: kind)
+        }
+    }
+
+    /// `.share` / `.serviceLink` (and, defensively, every other non-`.subtitle` kind): always
+    /// the inactive translucent-dark fill (`isActivePill` is `false` for all of these — see its
+    /// doc comment), white glyph. Byte-identical to this file's pre-`rb-ios-cc-icon-availability-
+    /// redesign` behavior for these kinds.
+    private func standardPillButton(for kind: LBSideRailKind) -> some View {
+        Button(action: { onTapItem?(kind) }) {
             ZStack {
-                Circle()
-                    .fill(active ? Color.white : Self.pillBackground)
+                Circle().fill(Self.pillBackground)
                 // Share uses the hand-drawn `ShareGlyph` (design `Icons.share` three-node share);
                 // serviceLink uses the hand-drawn `ContactGlyph` (design `Icons.contact` dual
-                // speech-bubble + question-mark, rb-ios-icon-parity); subtitle uses the hand-drawn
-                // `CcGlyph` (design `Icons.cc` rounded badge + twin "c" curves,
-                // rb-ios-cc-icon-design-align); every other kind keeps its SF Symbol
-                // (rb-ios-share-icon-design-align). The aligned VOD rail only ever draws these
-                // three kinds (`presentationOrder`), so the `else` branch below is unreachable in
-                // production but kept total for the wider view-model kind set. `active` only ever
-                // applies to `.subtitle` (`isActivePill`) — `.share` / `.serviceLink` glyphs stay
-                // white regardless, matching the design's `railBtn(icon, false, ...)` for both.
+                // speech-bubble + question-mark, rb-ios-icon-parity); every other kind keeps its
+                // SF Symbol (rb-ios-share-icon-design-align). The aligned VOD rail only ever
+                // draws `.share`/`.serviceLink` here (`.subtitle` is handled by
+                // `subtitlePillButton`, not this function — see `presentationOrder`), so the
+                // `else` branch below is unreachable in production but kept total for the wider
+                // view-model kind set.
                 if kind == .share {
                     ShareGlyph(size: Self.pillGlyphSize, color: .white)
                 } else if kind == .serviceLink {
                     ContactGlyph(size: Self.pillGlyphSize, color: .white)
-                } else if kind == .subtitle {
-                    CcGlyph(size: Self.pillGlyphSize, color: active ? theme.accent : .white)
                 } else {
                     Image(systemName: Self.symbolName(for: kind))
                         .font(.system(size: Self.pillGlyphSize, weight: .semibold))
@@ -172,15 +226,96 @@ public struct OperationRailView: View {
         .accessibilityIdentifier(Self.accessibilityID(for: kind))
     }
 
+    /// `.subtitle` (CC): 3-state icon (`CcIconState`, `rb-ios-cc-icon-availability-redesign`) —
+    /// `.on`/`.off` draw `CcGlyph(state:)`, `.unavailable` draws `CcUnavailableGlyph` (fixed
+    /// grey, non-square). Fill state follows `isActivePill` (white bg + accent glyph only for
+    /// `.on`). A tap forwards `onTapItem(.subtitle)` for `.on`/`.off`; for `.unavailable` it
+    /// swallows the tap and shows `SubtitleUnavailableTooltip` instead
+    /// (`handleSubtitleTap(state:)`), auto-dismissing after
+    /// `CcUnavailableTooltipTiming.autoDismissSeconds`. ALWAYS rendered (`showsRailPill`) —
+    /// unlike the pre-redesign behavior where `enabled == false` omitted this pill entirely.
+    ///
+    /// Takes `tooltipVisible` as a parameter (rather than reading `subtitleTooltipVisible`
+    /// directly) so `subtitlePillButtonForTesting(tooltipVisible:)` below can force the tooltip
+    /// visible without simulating a real tap + timer (`rb-ios-cc-tooltip-position-fix`). The
+    /// tooltip is attached via `.overlay(_:alignment:)` (NOT a raw `ZStack`) so it does NOT
+    /// influence the button's own reported size to the rail's `VStack` — see
+    /// `SubtitleUnavailableTooltip.positionedOutsideButton()`'s doc comment.
+    private func subtitlePillButton(tooltipVisible: Bool) -> some View {
+        let available = Self.subtitleAvailable(items: items)
+        let state = Self.ccState(items: items, subtitleEnabled: subtitleEnabled)
+        let active = Self.isActivePill(kind: .subtitle, subtitleAvailable: available, subtitleEnabled: subtitleEnabled)
+        let placement = SubtitleUnavailableTooltip.Placement.left
+        return Button(action: { handleSubtitleTap(state: state) }) {
+            ZStack {
+                Circle().fill(active ? Color.white : Self.pillBackground)
+                subtitleGlyph(for: state)
+            }
+            .frame(width: Self.pillSize, height: Self.pillSize)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityIdentifier(Self.accessibilityID(for: .subtitle))
+        .overlay(
+            SubtitleUnavailableTooltip(show: tooltipVisible, placement: placement)
+                .positionedOutsideButton(),
+            alignment: placement.overlayAlignment
+        )
+    }
+
+    /// TEST-ONLY: renders the `.subtitle` pill with the tooltip forced to a given visibility,
+    /// bypassing the private `subtitleTooltipVisible` timed state (`rb-ios-cc-tooltip-position-
+    /// fix`) — mirrors `pillButtonForTesting(for:)`'s established precedent. Lets
+    /// structural/snapshot tests assert the tooltip's actual OUTSIDE-the-button layout position
+    /// without needing to simulate a real button tap + `CcUnavailableTooltipTiming` timer.
+    func subtitlePillButtonForTesting(tooltipVisible: Bool) -> some View {
+        subtitlePillButton(tooltipVisible: tooltipVisible)
+    }
+
+    /// The `.subtitle` pill's glyph for a given `CcIconState` — `@ViewBuilder` so the 3-way
+    /// switch composes directly (no `AnyView`), matching `subtitlePillButton`'s reasoning.
+    @ViewBuilder
+    private func subtitleGlyph(for state: CcIconState) -> some View {
+        switch state {
+        case .on:
+            CcGlyph(size: Self.pillGlyphSize, color: theme.accent, state: .on)
+        case .off:
+            CcGlyph(size: Self.pillGlyphSize, color: .white, state: .off)
+        case .unavailable:
+            CcUnavailableGlyph(size: Self.pillGlyphSize)
+        }
+    }
+
+    /// Routes a `.subtitle` pill tap: `.on`/`.off` forward the existing toggle intent
+    /// unchanged; `.unavailable` shows the transient tooltip instead
+    /// (`rb-ios-cc-icon-availability-redesign`).
+    private func handleSubtitleTap(state: CcIconState) {
+        if state.forwardsToggleTapIntent {
+            onTapItem?(.subtitle)
+        } else {
+            showSubtitleTooltipTransiently()
+        }
+    }
+
+    /// Shows `subtitleTooltipVisible` and schedules its own reset — mirrors
+    /// `PlayerShellView`'s established `liveLiked` + `DispatchQueue.main.asyncAfter` self-reset
+    /// pattern for identically-shaped local timed UI state.
+    private func showSubtitleTooltipTransiently() {
+        subtitleTooltipVisible = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + CcUnavailableTooltipTiming.autoDismissSeconds) {
+            subtitleTooltipVisible = false
+        }
+    }
+
     /// PURE FUNCTION: which pills wear the design's "active" fill (white background + accent
     /// glyph, `LBPSideRail` `railBtn(icon, active, onClick)`, `design/templates/minimal/
     /// sdk-components.jsx:766-786`). Only `.subtitle` (CC) currently binds `active` to a real
-    /// state (`subtitleEnabled`, i.e. the design's `ccOn`) — `.share` / `.serviceLink` are
-    /// hardwired `active == false` in the design (`railBtn(<Icons.share.../>, false, onShare)` /
-    /// `railBtn(<Icons.contact.../>, false, onContact)`) and stay in the inactive style
-    /// regardless of any state. No side effects — safe to unit test directly.
-    static func isActivePill(kind: LBSideRailKind, subtitleEnabled: Bool) -> Bool {
-        kind == .subtitle && subtitleEnabled
+    /// state — `subtitleAvailable && subtitleEnabled` (`rb-ios-cc-icon-availability-redesign`,
+    /// MODIFIED: previously just `subtitleEnabled`, not considering availability) — `.share` /
+    /// `.serviceLink` are hardwired `active == false` in the design (`railBtn(<Icons.share.../>,
+    /// false, onShare)` / `railBtn(<Icons.contact.../>, false, onContact)`) and stay in the
+    /// inactive style regardless of any state. No side effects — safe to unit test directly.
+    static func isActivePill(kind: LBSideRailKind, subtitleAvailable: Bool, subtitleEnabled: Bool) -> Bool {
+        kind == .subtitle && subtitleAvailable && subtitleEnabled
     }
 
     /// TEST-ONLY: exposes the exact per-kind pill subtree `pillButton(for:)` renders (including

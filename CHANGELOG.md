@@ -5,6 +5,57 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.18.0] - 2026-09-11
+
+> **Minor.** 自 `4.17.0` 以來累積 169 個 commit（iOS 14 個獨立行為——含發版準備期間追加的
+> 「靜音偏好跨 App session 持久化」與「回放聊天室隱藏公式補上 subtitleAvailable 判斷」兩批，
+> 另 1 個 QA 工具腳本 commit 與 1 個支援性 baseline 重生 commit 不計入本檔）。主軸是 CC 字幕鈕圖示重新設計
+> （design R42：3-state Font Awesome closed-captioning glyph，不可用時恆渲染＋提示
+> tooltip）、主播斷線後的確認式恢復、字幕疊層對齊與底部安全間隙收斂、EndScreen 直播結束
+> 畫面 gate 鎖存修復。**含 1 項 ⚠️ BREAKING**（CC 字幕圖示重新設計，iOS + Android 皆有）——
+> 比照 v4.5.0/v4.8.0/v4.9.0/v4.11.0/v4.13.0/v4.14.0/v4.15.0/v4.16.0/v4.17.0 先例，整輪仍
+> 判定 minor。完整敘述見 [`docs/release-notes/v4.18.0.md`](../docs/release-notes/v4.18.0.md)。
+
+### Added
+
+- **主播斷線重試耗盡後的確認式恢復**（core）：既有 20 秒 channel-refresh 確認頻道仍在線即
+  自動重新載入，取代過去卡在錯誤畫面直到手動離開重進。
+- **靜音偏好跨 App session 於 Player instance 重建後持久化**（core）：新增 process-wide、
+  純記憶體的 `MutePreferenceStore`，讓關閉播放器再重新開啟的新 instance 沿用使用者剛
+  設定的靜音偏好，補齊既有「僅同一 instance 內 in-place 換片沿用」的空白；新增 public
+  `isMuted` getter，供 host / template 層查詢目前實際的靜音狀態。
+
+### Changed
+
+- **開場片播放期間 `setMuted` 現在會延續到主播放**（core），反轉先前「intro 交棒不延續」
+  的規則（`play` / `pause` 不受影響，仍不延續）；開場片本身也改為一律套用目前的
+  `userMuted`，取代下方「依首次開啟／換片分流」的舊規則。
+- **⚠️ BREAKING — CC 字幕鈕圖示重新設計**（design R42，reference-ui）：反轉既有「不可用時
+  整個省略 pill」的 MUST 規則，改為恆渲染 + 點擊顯示自動消失 tooltip；3-state glyph 取代
+  舊版單一手繪樣式。純視覺/互動行為變更，不影響任何 public API 簽章或事件契約。
+- **字幕疊層從 leading-align 改為對齊設計稿的窄框內水平置中**（reference-ui），回放開字幕
+  時同步隱藏聊天室。
+- **`LivebuyLiveEntry` 浮動入口卡隱藏觀看人數徽章**（reference-ui）。
+
+### Fixed
+
+- **EndScreen 直播結束畫面 gate 鎖存 `isLiveChannel`**（reference-ui），避免背景 channel
+  刷新的無關改動誤判為關閉 player。
+- **開場片改依「首次開啟／換片」分流靜音**（core），修復真機回報「靜音切片後開場片跑出
+  聲音」（本輪已被上方「跨 App session 持久化」進一步取代，開場片改為一律套用
+  `userMuted`，不再需要分流）。
+- **靜音圖示 attach 種子改讀新的 `isMuted` getter**（template），修復真機實測回報「音訊
+  已正確依偏好靜音，但音量圖示沒套用到，需手動點一次才同步」。
+- **字幕疊層/釘選卡/公告底部安全間隙改為單一事實來源**（reference-ui）。
+- **VOD 字幕疊層改為獨立疊層，固定預留商品卡空間**（reference-ui，iOS-only）。
+- **回放聊天室隱藏公式補上 `subtitleAvailable` 判斷**（reference-ui），修復 CC 開關跨影片
+  保留但切到沒有字幕的影片時無法關閉、導致聊天室在沒有任何字幕顯示的情況下永久隱藏、
+  使用者無法恢復的缺口。
+- **CC「未提供字幕」tooltip 邊界夾制後箭頭改為反向補償**（reference-ui）。
+- **CC「未提供字幕」tooltip 補上邊界夾制**（reference-ui），回放不再超出螢幕右緣。
+- **CC 不可用 tooltip 補上外部定位邏輯**（reference-ui，iOS-only）。
+- **LIVE 底部列 CC 切換鈕啟用時改 active 填色態**（reference-ui，iOS-only）。
+
 ## [4.17.0] - 2026-09-10
 
 > **Minor.** 自 `4.16.0` 以來累積 69 個 commit（iOS 14 個獨立行為，另 1 個支援性 baseline

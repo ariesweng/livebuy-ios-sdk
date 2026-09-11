@@ -387,11 +387,18 @@ enum TemplateWiring {
         vc.onReplayChatRevealed = { [weak template] comments in
             template?.handleReplayChatRevealed(comments)
         }
-        // Seed the PlayerHeader mute flag = false (unmuted by default / sound on,
-        // matching the core engines' default-unmuted main playback). momentState
-        // carries no `muted`; the tap-to-unmute gesture / host toggle subsequent
-        // flips via setMuted/toggleMute.
-        template.handleMuted(false)
+        // Seed the PlayerHeader mute flag from the core's actual current state
+        // (mute-preference-persist-across-session-ios-template, Depends On
+        // mute-preference-persist-across-session-ios-core) — `vc.isMuted` mirrors
+        // `userMuted` and is readable synchronously right after construction. A
+        // genuinely fresh process's first instance still reads `false` (same
+        // observable result as the old hardcoded seed); an instance created after
+        // closing and reopening the player may inherit `true` from the app-session
+        // store, so the icon now matches what the engine will actually do instead of
+        // always showing "unmuted" until the first manual toggle. momentState carries
+        // no `muted`; the tap-to-unmute gesture / host toggle subsequent flips via
+        // setMuted/toggleMute.
+        template.handleMuted(vc.isMuted)
 
         // 路 B — unified-listener-only events via an auxiliary listener that
         // COEXISTS with the host's primary `setEventListener` (does not shadow).

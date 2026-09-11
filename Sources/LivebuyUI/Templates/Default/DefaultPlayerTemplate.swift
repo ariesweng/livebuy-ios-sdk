@@ -860,8 +860,10 @@ public final class DefaultPlayerTemplate {
     }
 
     /// Player mute flag → PlayerHeader AND side-rail (mirror the SAME source, D2 —
-    /// no second truth). Seeded `true` at attach (auto-muted on start); the host /
-    /// wiring drives subsequent flips. Coalesced so one mute flip = one onChange.
+    /// no second truth). Seeded from the core's `isMuted` at attach (reflects the
+    /// app-session inherited preference, mute-preference-persist-across-session-ios-
+    /// template — a fresh process reads `false`, same as before); the host / wiring
+    /// drives subsequent flips. Coalesced so one mute flip = one onChange.
     /// PRESENTATION-ONLY — use `setMuted(_:)` to also drive the core engine.
     func handleMuted(_ muted: Bool) {
         coalescing {

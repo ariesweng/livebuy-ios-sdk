@@ -163,6 +163,16 @@ import LivebuyUI
 // the channel's LIVE-vs-VOD classification (mirrors `PlayerShellModel.isLive`,
 // threaded in by the container as its own reactive `isLiveMode` mirror — see
 // `MinimalDesign.swift`). Do not conflate the two.
+//
+// ⚠️ `isLiveChannel` IS A CONTINUOUSLY-REACTIVE MIRROR, NOT A ONE-SHOT SNAPSHOT
+// (`rb-ios-endscreen-live-gate-latch`) — its source chain re-derives from
+// `channel.liveStatus`/`type` on every periodic background channel refresh
+// (`LivebuyPlayerViewController`'s 20s `channelRefreshTimer`, which is NOT
+// cancelled on `live_end`). If this container read it live at the moment
+// `shouldCloseInsteadOfEndScreen` runs, a stale/ambiguous post-`live_end` refresh
+// could flip it to `false` WHILE the end moment is already showing, wrongly
+// closing a real live end screen. See `latchedIsLiveChannel` below — this
+// container LATCHES the value at end-moment entry instead of reading it live.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// The family-4 full-screen player moment container. Conditionally shows the
@@ -195,7 +205,28 @@ public struct MomentsOverlayView: View {
     /// `PlayerOverlayRootView`) — NOT from `model` (this container does not own a
     /// live/VOD signal of its own; `MomentsModel` has none). DISTINCT from `live`
     /// above (media-loading gate); do not conflate the two.
+    ///
+    /// ⚠️ This is a LIVE, CONTINUOUSLY-REACTIVE value — it is NOT safe to read
+    /// directly inside `shouldCloseForVodNoNext` once the end moment is showing
+    /// (`rb-ios-endscreen-live-gate-latch`). See `latchedIsLiveChannel` below.
     public let isLiveChannel: Bool
+
+    /// Latches `isLiveChannel` at the end-moment's entry edge so the VOD-vs-LIVE
+    /// close decision (`shouldCloseForVodNoNext`) is immune to any LATER reactive
+    /// recompute of `isLiveChannel` for the remainder of this display cycle
+    /// (`rb-ios-endscreen-live-gate-latch` — fixes a real-device bug where the
+    /// unrelated 20s `channelRefreshTimer`, never cancelled on `live_end`, could
+    /// recompute `isLiveChannel` to `false` shortly AFTER a real live end screen
+    /// was already showing, causing it to be wrongly closed as "VOD with no
+    /// next"). `nil` == not currently latched (end moment not active). Reset to
+    /// `nil` on the end-moment's EXIT edge (design.md D4) so the next entry
+    /// re-latches with whatever `isLiveChannel` is current at that time. See
+    /// `nextLatchedIsLiveChannel(current:isActive:isLiveChannel:)` for the pure
+    /// edge-detection decision, and the `.onChange(of: isEndMomentActive)` in
+    /// `body` for where it is applied. D3: kept as `@State` on this View (not
+    /// hoisted into `MomentsModel`, which is a read-only mirror per its own doc
+    /// comment) — this is the ONLY consumer that needs a latched, not live, copy.
+    @State private var latchedIsLiveChannel: Bool?
 
     // MARK: - Host-wired action closures (design §"守住的不變式": host-wired exit)
     //
@@ -255,6 +286,41 @@ public struct MomentsOverlayView: View {
         self.onViewCart = onViewCart
     }
 
+    /// Test-only injection point (`internal-testability`; NOT `public` — host apps only see
+    /// `init(model:theme:live:isLiveChannel:...)` above). Lets a unit test construct the
+    /// container with a PRE-SEEDED latch value, so `shouldCloseForVodNoNext` /
+    /// `activeMomentForTesting` can be asserted reading the LATCHED value rather than the
+    /// live `isLiveChannel` — without needing to drive a real SwiftUI mount + `.onChange`
+    /// lifecycle (mirrors `LivebuyLiveEntry`'s `_appeared = State(initialValue:)` test seam,
+    /// `appearedForTesting`). Production code (`MinimalDesign.swift`) never calls this — the
+    /// public init above always starts unlatched (`nil`) and lets the `.onChange`-driven
+    /// edge detection (`nextLatchedIsLiveChannel`) latch it (`rb-ios-endscreen-live-gate-latch`).
+    init(
+        model: MomentsModel,
+        theme: ReferenceUITheme,
+        live: Bool = false,
+        isLiveChannel: Bool,
+        latchedIsLiveChannelForTesting: Bool?,
+        onWatchNext: (() -> Void)? = nil,
+        onPickHot: ((LBHotItem) -> Void)? = nil,
+        onCancel: (() -> Void)? = nil,
+        onRetry: (() -> Void)? = nil,
+        onDismiss: (() -> Void)? = nil,
+        onViewCart: (() -> Void)? = nil
+    ) {
+        self.model = model
+        self.theme = theme
+        self.live = live
+        self.isLiveChannel = isLiveChannel
+        self.onWatchNext = onWatchNext
+        self.onPickHot = onPickHot
+        self.onCancel = onCancel
+        self.onRetry = onRetry
+        self.onDismiss = onDismiss
+        self.onViewCart = onViewCart
+        _latchedIsLiveChannel = State(initialValue: latchedIsLiveChannelForTesting)
+    }
+
     public var body: some View {
         // Full-screen container. At most ONE moment is shown, by priority:
         // error (highest) > end-countdown > start (not .done) > nothing.
@@ -263,6 +329,17 @@ public struct MomentsOverlayView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.momentRoot)
+        // Latch `isLiveChannel` at the end moment's entry edge / reset it at the exit
+        // edge (`rb-ios-endscreen-live-gate-latch` D2/D4) — declared BEFORE the
+        // `shouldCloseForVodNoNext` `.onChange` below per tasks.md 2.2 (defensive
+        // ordering; not load-bearing for correctness: `shouldCloseForVodNoNext`'s
+        // `latchedIsLiveChannel ?? isLiveChannel` fallback already equals the value
+        // this latches on the very same rising-edge render, since the latch cannot
+        // have been polluted by a later refresh within the same SwiftUI update pass).
+        .onChange(of: isEndMomentActive) { isActive in
+            latchedIsLiveChannel = Self.nextLatchedIsLiveChannel(
+                current: latchedIsLiveChannel, isActive: isActive, isLiveChannel: isLiveChannel)
+        }
         // VOD ends with no queued `next` (`shouldCloseForVodNoNext` flips true) →
         // close the player instead of leaving the (unrendered) end moment up.
         // `.onChange` only fires on a genuine transition (never on initial mount),
@@ -274,14 +351,26 @@ public struct MomentsOverlayView: View {
         }
     }
 
+    /// The end moment's presence gate — `true` while EITHER an auto-next countdown OR
+    /// the live-empty-state end screen is active. This is the RISING/FALLING edge this
+    /// container observes to latch/reset `latchedIsLiveChannel`
+    /// (`rb-ios-endscreen-live-gate-latch` D2) — the earliest and only signal this layer
+    /// has that "the end moment is entering" (it has no direct visibility into `live_end`).
+    private var isEndMomentActive: Bool {
+        model.countdown != nil || model.endScreenVisible
+    }
+
     /// Whether the CURRENT snapshot should close the player instead of entering the
-    /// end moment at all — the end-screen gate (`countdown != nil || endScreenVisible`)
-    /// is active AND `Self.shouldCloseInsteadOfEndScreen` says so. Drives BOTH
-    /// `activeMoment`'s branch (never construct `EndScreenView` in this case) and the
-    /// `.onChange`-driven `onDismiss` side effect in `body` above.
+    /// end moment at all — `isEndMomentActive` AND `Self.shouldCloseInsteadOfEndScreen`
+    /// says so. Drives BOTH `activeMoment`'s branch (never construct `EndScreenView` in
+    /// this case) and the `.onChange`-driven `onDismiss` side effect in `body` above.
+    /// Reads `latchedIsLiveChannel ?? isLiveChannel` (NOT `isLiveChannel` directly) —
+    /// the fallback only matters before the FIRST latch of this display cycle, at which
+    /// point it is equivalent to the value about to be latched (`rb-ios-endscreen-live-gate-latch`).
     private var shouldCloseForVodNoNext: Bool {
-        (model.countdown != nil || model.endScreenVisible)
-            && Self.shouldCloseInsteadOfEndScreen(isLiveChannel: isLiveChannel, next: model.next)
+        isEndMomentActive
+            && Self.shouldCloseInsteadOfEndScreen(
+                isLiveChannel: latchedIsLiveChannel ?? isLiveChannel, next: model.next)
     }
 
     /// The single active moment by priority, or `EmptyView` for stable playback.
@@ -295,7 +384,7 @@ public struct MomentsOverlayView: View {
                 error: error,
                 onRetry: { onRetry?() },
                 onDismiss: { onDismiss?() })
-        } else if model.countdown != nil || model.endScreenVisible {
+        } else if isEndMomentActive {
             if shouldCloseForVodNoNext {
                 // VOD ended with no `next` — EndScreen is LIVE-ONLY
                 // (rb-ios-endscreen-live-empty-state): nothing meaningful to show.
@@ -330,6 +419,11 @@ public struct MomentsOverlayView: View {
     /// rendering.
     var activeMomentForTesting: some View { activeMoment }
 
+    /// Test-only read window onto `latchedIsLiveChannel` (`*ForTesting` naming per
+    /// `docs/unit-test-discipline.md` — mirrors `LivebuyLiveEntry.appearedForTesting`).
+    /// `nil` == not currently latched. `rb-ios-endscreen-live-gate-latch`.
+    var latchedIsLiveChannelForTesting: Bool? { latchedIsLiveChannel }
+
     // MARK: - Pure decision (internal-testability)
 
     /// Whether the end moment should be REPLACED by a direct player close
@@ -343,6 +437,27 @@ public struct MomentsOverlayView: View {
     /// (`LivebuyPlayerPresenter.swift`).
     static func shouldCloseInsteadOfEndScreen(isLiveChannel: Bool, next: [LBNavItem]) -> Bool {
         !isLiveChannel && next.isEmpty
+    }
+
+    /// Pure edge-detection decision for `latchedIsLiveChannel`
+    /// (`rb-ios-endscreen-live-gate-latch` D2/D4). `isActive` is `isEndMomentActive`'s
+    /// value AFTER the transition `.onChange(of:)` observed:
+    ///   - rising edge into the end moment (`isActive == true`): latch `isLiveChannel`
+    ///     UNLESS a latch is already present (`current != nil`), in which case the
+    ///     existing latch wins — defensive per tasks.md 2.2; in practice `isActive`
+    ///     only transitions once per entry so `current` is always `nil` here.
+    ///   - falling edge (`isActive == false`): reset to `nil` so the NEXT rising edge
+    ///     re-latches with whatever `isLiveChannel` is current at that time (D4).
+    /// Pure — no view state, no I/O. Mirrors `lbLiveEntryInitialAppeared`'s shape
+    /// (`LiveEntryPositionTimingTests.swift`): isolate the one risky decision into a
+    /// directly-testable function instead of only covering it via SwiftUI mounting.
+    static func nextLatchedIsLiveChannel(
+        current: Bool?,
+        isActive: Bool,
+        isLiveChannel: Bool
+    ) -> Bool? {
+        guard isActive else { return nil }
+        return current ?? isLiveChannel
     }
 }
 

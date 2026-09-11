@@ -294,6 +294,18 @@ struct PlayerOverlayRootView: View {
     /// first report.
     @State private var moreSheetOpen: Bool = false
 
+    /// Mirrors `PlayerShellView.hidesChatFeedForReplayCaption` (`model.isFinishedLiveReplay &&
+    /// model.subtitleEnabled`), so the family-2 chat feed (`FeedWinOverlayView`'s `ChatFeedView`,
+    /// a sibling composed here — NOT a descendant of `PlayerShellView`, so this private computed
+    /// value cannot reach it any other way) can be additionally hidden while an already-finished
+    /// live replay has CC captions on, letting the caption take over the freed area
+    /// (rb-ios-caption-overlay-align-hide-chat — user report: 「回放啟用字幕要隱藏聊天室」).
+    /// `PlayerShellView` reports the initial value + every change via
+    /// `onReplayCaptionHidesChatChange` (the root does NOT observe `shellModel` directly, same
+    /// rationale as the mirrors above). A genuinely live broadcast is NEVER affected by this
+    /// mirror. Defaults `false` (baseline unchanged) until the first report.
+    @State private var replayCaptionHidesChat: Bool = false
+
     /// Mirrors `ProductSheetsOverlayView`'s aggregate "any product sheet/modal presented" signal
     /// (list drawer / detail-or-restock sheet / zoom lightbox / cart-needs-login gate /
     /// variant-select prompt), so the sibling `PlayerShellView` (composed BELOW it in this same
@@ -354,7 +366,10 @@ struct PlayerOverlayRootView: View {
                 onCleanModeChange: { cleanMode = $0 },
                 // Mirror the LIVE bottom bar「更多」(⋯) menu open/closed so the family-2 chat feed
                 // can be hidden while it's up (rb-ios-live-more-sheet-above-chat).
-                onMoreSheetPresentedChange: { moreSheetOpen = $0 })
+                onMoreSheetPresentedChange: { moreSheetOpen = $0 },
+                // Mirror「回放啟用字幕→隱藏聊天室」旗標，讓聊天 feed 讓出畫面給接管的字幕疊層
+                // (rb-ios-caption-overlay-align-hide-chat)。
+                onReplayCaptionHidesChatChange: { replayCaptionHidesChat = $0 })
 
             // Keep the merged chat feed above the LIVE bottom bar (they share this ZStack /
             // safe-area space). Clearance = LiveBottomBarView height (8+36+8 ≈ 52) + its own
@@ -392,7 +407,10 @@ struct PlayerOverlayRootView: View {
                                // once the finger lifts, even during the post-release hold window
                                // — it does NOT stay hidden through the hold (corrected post-
                                // design-review: matches announce banner / pinned card treatment).
-                               showsChatFeed: isLiveMode && !isScrubbingProgressBar,
+                               // 回放啟用字幕時額外隱藏（rb-ios-caption-overlay-align-hide-chat）——
+                               // 真直播（`replayCaptionHidesChat` 恆 `false`）不受影響。
+                               showsChatFeed: isLiveMode && !isScrubbingProgressBar
+                                   && !replayCaptionHidesChat,
                                // Hide the chat feed while clean mode is on, parity Android/
                                // Flutter — WinEntryView / claim sheet below are NOT gated by
                                // cleanMode (rb-ios-clean-mode-hide-chat-feed).

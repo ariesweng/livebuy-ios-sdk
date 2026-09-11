@@ -649,12 +649,28 @@ public struct LivebuyLiveEntry: View {
     /// 外部平台直播 → 開平台 URL（`externalLiveAwareTap`，優先序最高，與 widget 一致）；非外部 →
     /// host `config.onTap` 若接、否則預設開 in-app player（`effectiveOnTap`）。`onClose` 轉交 host 後
     /// 標記 dismissed。
-    private func card(_ live: LBVideoItem) -> some View {
+    ///
+    /// `showViewerCount: false`（rb-ios-live-entry-hide-viewer-count）：「現正直播」浮窗入口卡
+    /// 不顯示觀看人數徽章，不論 `live.showPvNum` / `live.watchNum` 為何——與 `FloatingWidgetView`
+    /// 的另外兩個消費端（`WidgetOverlayView` 的 `.floating` content mode、
+    /// `MinimalDesign.floatingPlayerCard` 最小化播放器浮卡）刻意不同，那兩處未傳此參數、吃預設值
+    /// `true`、維持既有顯示行為不變。
+    ///
+    /// internal-testability：刻意不是 `private`——`@testable import` 的測試需要同步、不經真實
+    /// async 輪詢 mount 直接呼叫此方法驗證 `showViewerCount: false` 的轉發（見
+    /// `LiveEntryViewerCountVisibilityTests`），比經由 `UIHostingController` 真實掛載再等
+    /// `.onAppear` → 輪詢 → `@Published` 傳遞穩定得多；`ReferenceUISnapshotHelper.render(_:size:)`
+    /// 已記錄「SwiftUI 內容經 `UIHostingController` + `drawHierarchy(afterScreenUpdates:)` 在無
+    /// 頭測試環境下不可靠渲染」這個既有坑，本方法放寬存取層級即是為了繞開它，而非新增測試專用
+    /// hook——本方法仍是正式產品程式碼，只是把它的可視範圍從 `private` 放寬到預設的
+    /// module-internal（非 `public`，host app 仍看不到）。
+    func card(_ live: LBVideoItem) -> some View {
         FloatingWidgetView(
             video: live,
             theme: controller.theme,
             width: config.width,
             live: true,
+            showViewerCount: false,
             onTap: externalLiveAwareTap(effectiveOnTap),
             onClose: {
                 config.onClose?()
