@@ -5,6 +5,28 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.19.0] - 2026-09-13
+
+> **Minor.** 自 `4.18.1` 以來累積 18 個相關 commit（iOS 3 個獨立行為，皆與 Android 共同；
+> 其餘為 RN/Flutter 自身獨立進行中的批次與 1 個純治理文件 commit，不計入本檔）。主軸是
+> 加購前本地攔截未登入使用者（新全域設定）、`CART_ADD_REQUEST` 事件補回傳加購數量，以及
+> 標記一個從未被使用的加購批次結帳模式為 deprecated。**零 BREAKING**。完整敘述見
+> [`docs/release-notes/v4.19.0.md`](../docs/release-notes/v4.19.0.md)。
+
+### Added
+
+- **加購前本地攔截未登入使用者**（core，`requireLoginForAddToCart`）：新增全域設定
+  （default `false`，additive），開啟後未登入使用者呼叫加購會被本地攔截（不打
+  `/sdk/video/addcart`），呈現既有登入閘 UI。
+- **`CART_ADD_REQUEST` 事件補回傳加購數量**（core，`num`）：additive 新增欄位，值為呼叫
+  `addToCart` 時實際傳入的數量，含獎品自動加購路徑。
+
+### Deprecated
+
+- **`addToCart` 的 `ids`（批次結帳模式）標記淘汰**（core）：查證零呼叫端使用，且未經核實
+  對現行後端可用；加 doc comment 說明，預告下一個四端同步的 major 版本移除。零執行期行為
+  改變。
+
 ## [4.18.1] - 2026-09-11
 
 > **Patch.** 延續 v4.18.0，本輪為純 bug fix（1 項 iOS-only 結束畫面觸控/行為修復），無新增

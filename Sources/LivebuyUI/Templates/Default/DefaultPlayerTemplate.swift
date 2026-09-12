@@ -1184,6 +1184,20 @@ public final class DefaultPlayerTemplate {
         // Reset the transient flags for this attempt (both orthogonal flags together).
         addToCartFailed = false
         addToCartNeedsLogin = false
+        // Login gate (add-to-cart-login-gate-template) — checked FIRST, before the
+        // sold-out / variant-selection guards below and before any network call.
+        // This is a deliberate priority ordering: when the host has opted into
+        // `requireLoginForAddToCart` and the user is not logged in, whether they
+        // even qualify to check out takes precedence over stock / spec-selection
+        // feedback — there is no point steering an unauthenticated guest through
+        // "pick a variant" or "sold out" only to then also demand login. Reuses
+        // the EXISTING `applyAddNeedsLogin()` presentation path (same as the
+        // backend-401 branch below) so reference-ui needs zero changes.
+        if Self.addToCartRequiresLoginLocally(requireLogin: Livebuy.shared?.requireLoginForAddToCart ?? false,
+                                               isLoggedIn: Livebuy.isLoggedIn) {
+            applyAddNeedsLogin()
+            return
+        }
         // Guard 1 — sold-out / no stock.
         guard qtyStepper.max > 0 else { return }
         // Guard 2 — has spec groups but selection incomplete.
@@ -1283,6 +1297,16 @@ public final class DefaultPlayerTemplate {
     static func isAddToCartAuthRequired(_ error: Error) -> Bool {
         if case LBError.serverError(let code, _) = error { return code == 401 }
         return false
+    }
+
+    /// Pure decision (add-to-cart-login-gate-template): does the host's
+    /// global opt-in policy require blocking `addToCart()` locally — before any
+    /// network call — right now? `requireLogin` mirrors
+    /// `Livebuy.shared?.requireLoginForAddToCart ?? false`; `isLoggedIn` mirrors
+    /// `Livebuy.isLoggedIn`. Extracted (rather than inlined in `addToCart()`) so
+    /// the decision is unit-testable without a real `Livebuy` singleton.
+    static func addToCartRequiresLoginLocally(requireLogin: Bool, isLoggedIn: Bool) -> Bool {
+        requireLogin && !isLoggedIn
     }
 
     /// Host intent to re-zero the per-session cart count (OQ2 — on release /
