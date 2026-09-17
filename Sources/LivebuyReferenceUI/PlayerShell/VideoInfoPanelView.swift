@@ -85,9 +85,10 @@ public struct VideoInfoPanelView: View {
 
     /// Whether the video this panel describes is a LIVE BROADCAST (`model.isLive`,
     /// `channel.liveStatus == 1`) rather than VOD/replay. `false` (default) → existing
-    /// VOD copy (「點播間說明」/「影片詳情」/ plain dim publishAt caption), byte-identical to
-    /// before this flag existed. `true` → LIVE copy (「直播間說明」/「直播詳情」/ a red
-    /// 「直播中」pill + `|` + `info.publishAt`) (design R32,
+    /// VOD copy (「影片資訊」/「影片詳情」/ a plain publishAt-row status label — see
+    /// `isFinishedLiveReplay` below). `true` → LIVE copy (「直播資訊」/「直播詳情」/ a red
+    /// 「直播中」pill, badge-only — design R44, rb-ios-video-info-panel-replay-copy removed
+    /// the trailing `|` + date this pill used to carry, design R32,
     /// rb-ios-live-replay-more-menu-and-video-info-live-copy).
     ///
     /// ⚠️ Deliberately named `isLiveBroadcast`, NOT `live`/`isLive`: this file's existing
@@ -96,6 +97,22 @@ public struct VideoInfoPanelView: View {
     /// full "naming trap" warning. Do not conflate the two when mirroring this to Android /
     /// RN / Flutter; give the parity prop an equally unambiguous name there too.
     public let isLiveBroadcast: Bool
+
+    /// Whether the video this panel describes is a FINISHED LIVE BROADCAST'S REPLAY
+    /// (`model.isFinishedLiveReplay`) rather than a genuine VOD upload. `false` (default) →
+    /// the publishAt-row shows 「點播影片」when `isLiveBroadcast == false`. `true` → the row
+    /// shows 「直播回放」instead. Has NO effect when `isLiveBroadcast == true` — the LIVE
+    /// 「直播中」badge always wins (design R44, rb-ios-video-info-panel-replay-copy).
+    ///
+    /// ⚠️ NAMING TRAP: deliberately named `isFinishedLiveReplay` (mirroring
+    /// `PlayerShellModel.isFinishedLiveReplay`'s existing concept name), NOT `isReplay`. This
+    /// codebase already has THREE different `isReplay` meanings elsewhere:
+    /// `LBPlaybackProgress.isReplay` (DVR live-edge-behind — a completely different axis),
+    /// `LiveBottomBarView`'s retained-but-unused `isReplay` param, and `PlayerShellView`'s own
+    /// local closure-argument shorthand `isReplay` (that file's own doc comment already warns
+    /// it is NOT `template.playbackProgress.current.isReplay`). Adding a FOURTH `isReplay`
+    /// here would only deepen that ambiguity — MUST NOT be confused with any of those.
+    public let isFinishedLiveReplay: Bool
 
     /// Host-wired tab-switch intent. The shell forwards
     /// `model.selectInfoTab(tab)`. nil for demo / snapshot instances — the panel
@@ -156,6 +173,7 @@ public struct VideoInfoPanelView: View {
         notice: String,
         live: Bool = false,
         isLiveBroadcast: Bool = false,
+        isFinishedLiveReplay: Bool = false,
         onSelectTab: ((LBInfoPanelTab) -> Void)? = nil,
         onOpenStorefront: (() -> Void)? = nil,
         onContactMerchant: (() -> Void)? = nil,
@@ -170,6 +188,7 @@ public struct VideoInfoPanelView: View {
         self.notice = notice
         self.live = live
         self.isLiveBroadcast = isLiveBroadcast
+        self.isFinishedLiveReplay = isFinishedLiveReplay
         self.onSelectTab = onSelectTab
         self.onOpenStorefront = onOpenStorefront
         self.onContactMerchant = onContactMerchant
@@ -230,8 +249,8 @@ public struct VideoInfoPanelView: View {
     /// called from production code, and MUST keep returning the very same `sheetHeader`.
     var sheetHeaderForTesting: some View { sheetHeader }
 
-    /// The header title — VOD default「點播間說明」, or「直播間說明」when
-    /// `isLiveBroadcast == true` (design R32).
+    /// The header title — VOD default「影片資訊」, or「直播資訊」when
+    /// `isLiveBroadcast == true` (design R44).
     private var resolvedPanelTitle: String {
         isLiveBroadcast ? Self.panelTitleLive : Self.panelTitle
     }
@@ -335,32 +354,26 @@ public struct VideoInfoPanelView: View {
 
     private var infoContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // publishAt row — VOD default: a single plain dim caption (unchanged, byte-
-            // identical to before `isLiveBroadcast` existed). LIVE (design R32): a red
-            // 「直播中」pill + `|` + the SAME `info.publishAt` value (NOT a hardcoded date
-            // literal — the date portion still comes from the existing data source; only
-            // the leading VOD-caption text is replaced by the pill).
-            if !info.publishAt.isEmpty {
-                if isLiveBroadcast {
-                    HStack(spacing: 8) {
-                        Text(Self.liveBadgeLabel)
-                            .font(.system(size: 10 * theme.fontScale, weight: .heavy))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(Self.liveBadgeColor))
-                        Text("|")
-                            .font(.system(size: 12 * theme.fontScale))
-                            .foregroundColor(Self.textDim)
-                        Text(info.publishAt)
-                            .font(.system(size: 12 * theme.fontScale))
-                            .foregroundColor(Self.textDim)
-                    }
-                } else {
-                    Text(info.publishAt)
-                        .font(.system(size: 12 * theme.fontScale))
-                        .foregroundColor(Self.textDim)
-                }
+            // publishAt-row status label (design R44, rb-ios-video-info-panel-replay-copy):
+            // a three-state status label/badge that NO LONGER shows any date at all (`info
+            // .publishAt` is intentionally unused in this row now — the field itself is
+            // untouched, it just no longer surfaces here) and is NO LONGER gated by
+            // `info.publishAt.isEmpty` (all three branches are independent of that field, so
+            // the row always renders one of them). `isLiveBroadcast` wins over
+            // `isFinishedLiveReplay` — a defensive priority for the type-legal-but-should-
+            // never-happen combination of both being `true` (PlayerShellModel's `isLive` /
+            // `isFinishedLiveReplay` are a mutually exclusive pair upstream).
+            if isLiveBroadcast {
+                Text(Self.liveBadgeLabel)
+                    .font(.system(size: 10 * theme.fontScale, weight: .heavy))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Self.liveBadgeColor))
+            } else {
+                Text(isFinishedLiveReplay ? Self.replayStatusLabel : Self.vodStatusLabel)
+                    .font(.system(size: 12 * theme.fontScale))
+                    .foregroundColor(Self.textDim)
             }
 
             // title — primary heading.
@@ -640,15 +653,21 @@ public struct VideoInfoPanelView: View {
 
     // MARK: - Fixed localized copy (static presentation strings)
 
-    static let panelTitle = "點播間說明"
+    static let panelTitle = "影片資訊"
     static let infoTabTitle = "影片詳情"
-    /// LIVE variant of `panelTitle` (design R32, `isLiveBroadcast == true`).
-    static let panelTitleLive = "直播間說明"
+    /// LIVE variant of `panelTitle` (design R44, `isLiveBroadcast == true`).
+    static let panelTitleLive = "直播資訊"
     /// LIVE variant of `infoTabTitle` (design R32, `isLiveBroadcast == true`).
     static let infoTabTitleLive = "直播詳情"
     /// The red publishAt-row pill label (design R32, `isLiveBroadcast == true`).
     static let liveBadgeLabel = "直播中"
-    static let noticeTabTitle = "公告"
+    /// Non-LIVE, non-replay publishAt-row label (design R44, `isLiveBroadcast == false &&
+    /// isFinishedLiveReplay == false` — the existing default).
+    static let vodStatusLabel = "點播影片"
+    /// Non-LIVE, finished-live-replay publishAt-row label (design R44, `isLiveBroadcast ==
+    /// false && isFinishedLiveReplay == true`).
+    static let replayStatusLabel = "直播回放"
+    static let noticeTabTitle = "公告訊息"
     static let systemNoticeLabel = "系統公告"
     static let mallNoticeLabel = "商城公告"
     static let subscribeLabel = "訂閱通知"
@@ -791,8 +810,8 @@ struct VideoInfoPanelView_Previews: PreviewProvider {
                 notice: "")
                 .previewDisplayName("notice tab hidden — activeTab fallback")
 
-            // LIVE copy (design R32): 「直播間說明」標題、「直播詳情」tab、紅底「直播中」徽章 +
-            // `info.publishAt`。
+            // LIVE copy (design R44): 「直播資訊」標題、「直播詳情」tab、紅底「直播中」徽章
+            // ONLY (no trailing `|` + date any more).
             VideoInfoPanelView(
                 theme: theme,
                 info: VideoInfoPanelView.demoInfo,
@@ -802,6 +821,19 @@ struct VideoInfoPanelView_Previews: PreviewProvider {
                 notice: VideoInfoPanelView.demoNotice,
                 isLiveBroadcast: true)
                 .previewDisplayName("info tab — LIVE copy")
+
+            // Finished-live-replay copy (design R44, rb-ios-video-info-panel-replay-copy):
+            // VOD title/tab ("影片資訊"/"影片詳情"), publishAt-row reads「直播回放」instead of
+            // the default「點播影片」, no date either way.
+            VideoInfoPanelView(
+                theme: theme,
+                info: VideoInfoPanelView.demoInfo,
+                activeTab: .info,
+                canOpenNotice: true,
+                systemNotice: VideoInfoPanelView.demoSystemNotice,
+                notice: VideoInfoPanelView.demoNotice,
+                isFinishedLiveReplay: true)
+                .previewDisplayName("info tab — finished-live-replay copy")
         }
         .frame(width: 393, height: 520)
         .previewLayout(.sizeThatFits)

@@ -2039,6 +2039,10 @@ public struct PlayerShellView: View {
                 // 與這個檔案自己的 `live:`（上一行，網路圖片載入 gate）是完全不同的兩件事，故取名
                 // `isLiveBroadcast` 而非 `isLive`/`live`，避免與既有語彙混淆（見 `live` prop 文件註解）。
                 isLiveBroadcast: model.isLive,
+                // 已結束直播回放 vs 純點播文案分流（design R44,
+                // rb-ios-video-info-panel-replay-copy）——沿用既有 `model.isFinishedLiveReplay`
+                // （與 `model.isLive` 既有互斥），不新增任何 view-model 欄位。
+                isFinishedLiveReplay: model.isFinishedLiveReplay,
                 onSelectTab: { tab in model.selectInfoTab(tab) },
                 // 與商家一對一對話 → present the「聯絡商家」confirm modal FIRST (design
                 // `contact_merchant`), same intent as the side-rail serviceLink tap; only its

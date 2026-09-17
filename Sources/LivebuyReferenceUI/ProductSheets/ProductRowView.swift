@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import LivebuySDK
 import LivebuyUI
 
@@ -235,6 +236,36 @@ public struct ProductRowView: View {
         }
     }
 
+    /// Hand-drawn-UIKit-fallback equivalent of `nameTagView`'s switch, for
+    /// `ProductRowNameTagInlineText`'s pre-iOS-17 rendering path
+    /// (`rb-ios-product-row-name-tag-wrap-fix`). MUST mirror `nameTagView` case-for-case —
+    /// references the SAME constants (`Self.livePriceLabel` / `theme.accent` /
+    /// `Self.outSoonColor` / `Self.hotNameTagColor` etc.) rather than a second hand-copied
+    /// decision, so any future edit to those propagates to both rendering paths. Never actually
+    /// exercised by this repo's test environment (no iOS < 17 simulator runtime installed —
+    /// `design.md`'s disclosed risk); `.none` is never reached at the call site (only invoked
+    /// from the `nameTag != .none` branch) but is still mapped to a harmless empty value for
+    /// exhaustiveness.
+    private var nameTagFallback: ProductRowNameTagInlineText.PillFallbackSpec {
+        let fontSize = 11 * theme.fontScale
+        switch nameTag {
+        case .livePrice:
+            return .init(text: Self.livePriceLabel, textColor: UIColor(theme.accent),
+                         fillColor: .clear, borderColor: UIColor(theme.accent), fontSize: fontSize)
+        case .rush:
+            return .init(text: Self.rushLabel, textColor: .white,
+                         fillColor: UIColor(theme.accent), borderColor: UIColor(theme.accent), fontSize: fontSize)
+        case .outSoon:
+            return .init(text: Self.outSoonLabel, textColor: UIColor(theme.text),
+                         fillColor: UIColor(Self.outSoonColor), borderColor: nil, fontSize: fontSize)
+        case .hot:
+            return .init(text: Self.hotLabel, textColor: .white,
+                         fillColor: UIColor(Self.hotNameTagColor), borderColor: nil, fontSize: fontSize)
+        case .none:
+            return .init(text: "", textColor: .clear, fillColor: .clear, borderColor: nil, fontSize: fontSize)
+        }
+    }
+
     /// Shared small-corner-radius pill for ALL FOUR name-tag variants (`rb-ios-product-
     /// row-name-tag-style` — checkpoint correction: the `.outSoon`/`.hot` cases originally
     /// reused the pre-existing `statusPill(_:_:)` helper, a full `Capsule()` — mismatched
@@ -441,14 +472,22 @@ public struct ProductRowView: View {
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     } else {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            nameTagView
-                            Text(product.name)
-                                .font(.system(size: 14 * theme.fontScale, weight: .semibold))
-                                .foregroundColor(theme.text)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                        }
+                        // Pure-SwiftUI inline pill + name (rb-ios-product-row-name-tag-wrap-fix):
+                        // replaces the former `HStack(alignment: .firstTextBaseline, spacing: 4)`
+                        // sibling layout, whose flex-row sizing locked a WRAPPED second line into
+                        // the narrow column the pill left over on line 1. See
+                        // `ProductRowNameTagInlineText`'s doc for the full rationale (including
+                        // why this is `Text(Image:)` concatenation, not a `UIViewRepresentable`
+                        // bridge — the latter does not render under this repo's `ImageRenderer`-
+                        // based snapshot harness).
+                        ProductRowNameTagInlineText.build(
+                            name: product.name,
+                            pillView: AnyView(nameTagView),
+                            pillFallback: nameTagFallback)
+                            .font(.system(size: 14 * theme.fontScale, weight: .semibold))
+                            .foregroundColor(theme.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
 
                     if !hideSub {

@@ -5,6 +5,23 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.20.0] - 2026-09-17
+
+> **Minor.** 自 `4.19.0` 以來累積 54 個相關 commit（iOS 2 個獨立行為；其餘為 Android 專屬/
+> RN/Flutter 自身獨立進行中的批次/上一輪發版收尾/純治理文件與調查筆記，不計入本檔）。主軸是
+> VideoInfoSheet 三態文案改版與商品名稱前標籤換行擠壓修正。**零 BREAKING**。完整敘述見
+> [`docs/release-notes/v4.20.0.md`](../docs/release-notes/v4.20.0.md)。
+
+### Added
+
+- **VideoInfoSheet 三態文案改版**（reference-ui，design R44）：標題/公告分頁標籤/detail
+  分頁狀態列文案改版，狀態列改為純狀態文字並新增「已結束直播回放」與「純 VOD」文案區分。
+
+### Fixed
+
+- **商品列名稱前標籤換行擠壓修正**（reference-ui，design R39）：修正名稱換行後第二行仍被
+  鎖在標籤窄欄裡、無法使用整列完整寬度的既有 bug，改用 `Text(Image:)` 拼接。
+
 ## [4.19.0] - 2026-09-13
 
 > **Minor.** 自 `4.18.1` 以來累積 18 個相關 commit（iOS 3 個獨立行為，皆與 Android 共同；
