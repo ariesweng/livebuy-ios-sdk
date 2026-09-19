@@ -5,6 +5,27 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.21.0] - 2026-09-19
+
+> **Minor.** 自 `4.20.0` 以來累積 59 個相關 commit（4 個屬於上一輪 v4.20.0 發版收尾、2 個純
+> 治理/記錄文件，不計入本檔；其餘 53 個歸為 7 個分類，iOS 相關 8 個獨立行為）。主軸是四輪
+> design（R45/D8/R46/R47）視覺批次四端落地、商品明細/MiniCart 原價劃線色票與呈現 parity
+> 收尾。**零 BREAKING**。完整敘述見 [`docs/release-notes/v4.21.0.md`](../docs/release-notes/v4.21.0.md)。
+
+### Added
+
+- **MiniCartView 原價劃線渲染**（reference-ui，`originalPriceShow`）：`LBMiniCartPeek`
+  template 型別新增 additive 欄位，`MiniCartView` 補上原價劃線渲染，parity Android/RN/
+  Flutter。
+
+### Fixed
+
+- **Design R45/D8/R46/R47 四輪視覺批次**（reference-ui）：商品列表 row 排版重分組 + 新增
+  折扣百分比、商品明細「更多商品」grid 原價改用 `ViewThatFits` 換行、雙擊快進/快退提示改
+  半螢幕漸層、`AddToCartSheet` 主圖旁價格區改垂直堆疊（原價移到現價上方）。
+- **商品明細 sheet / MiniCart 原價劃線色票統一 `#A0A0A0`**（reference-ui）：`ProductDetailSheet`
+  與浮動迷你購物車原價刪除線文字色改為固定色票，與 R45 配色統一，四端全數完成。
+
 ## [4.20.0] - 2026-09-17
 
 > **Minor.** 自 `4.19.0` 以來累積 54 個相關 commit（iOS 2 個獨立行為；其餘為 Android 專屬/

@@ -548,7 +548,7 @@ public final class DefaultQtyStepper {
     }
 }
 
-// MARK: - 4. mini-cart — `{ productId, name, priceShow, soldOut }`
+// MARK: - 4. mini-cart — `{ productId, name, priceShow, originalPriceShow, soldOut }`
 
 /// Host-bindable mini-cart peek for `LBPMiniCart` (D4). Compact snapshot of the
 /// most recent successful add (or the narrating product as a fallback).
@@ -562,13 +562,22 @@ public struct LBMiniCartPeek: Equatable {
     /// callers / demo fixtures byte-identical (reference-ui falls back to the placeholder).
     /// (vod-now-introducing-multi-image-template, 問題 9.)
     public let pic: String
+    /// Original (struck-through) price — direct passthrough of the source `LBProduct.originalPriceShow`
+    /// (same non-nullable-`String`/`""`-means-no-original-price convention as
+    /// `LBProductRecommendation.originalPriceShow`). Default `""` keeps existing callers (e.g. the
+    /// add-to-cart success peek assembled in `DefaultPlayerTemplate.swift`, and existing tests /
+    /// reference-ui demo fixtures) byte-identical — whether to render a strikethrough is a
+    /// reference-ui layout decision. (vod-now-introducing-original-price-template-ios.)
+    public let originalPriceShow: String
 
-    public init(productId: String, name: String, priceShow: String, soldOut: Int, pic: String = "") {
+    public init(productId: String, name: String, priceShow: String, soldOut: Int, pic: String = "",
+                originalPriceShow: String = "") {
         self.productId = productId
         self.name = name
         self.priceShow = priceShow
         self.soldOut = soldOut
         self.pic = pic
+        self.originalPriceShow = originalPriceShow
     }
 }
 

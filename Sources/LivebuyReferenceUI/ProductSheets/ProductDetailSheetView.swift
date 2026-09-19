@@ -1283,7 +1283,15 @@ public struct ProductDetailSheetView: View {
     // spec — i.e. displayed price ≠ price actually added to cart.
     //
     // Drawn by BOTH presentations: `.detail` (below the 4:3 photo) and `.addToCart`
-    // (inside `compactProductCard`), so the fix lands on both with one change.
+    // (inside `compactProductCard`), so the price RESOLUTION fix lands on both with one
+    // change. The LAYOUT DIRECTION now diverges by `presentation`
+    // (rb-ios-add-to-cart-price-stack, design R47): `AddToCartSheet`'s upstream JSX flipped
+    // to a vertical stack with the struck-through original ABOVE the current price;
+    // `ProductDetailSheet`'s JSX has NOT (yet) followed, so `.detail` keeps its existing
+    // horizontal row (current price first, original after) byte-for-byte. Both branches
+    // share the exact same font sizes / weights / colors (`theme.accent`,
+    // `Self.originalPriceColor`, 20pt heavy, 13pt) — only the arrangement direction and
+    // child order differ.
 
     private var priceRow: some View {
         Group {
@@ -1291,7 +1299,25 @@ public struct ProductDetailSheetView: View {
                 Text(Self.soldOutLabel)
                     .font(.system(size: 15 * theme.fontScale, weight: .bold))
                     .foregroundColor(Self.soldOutColor)
+            } else if presentation == .addToCart {
+                // Vertical stack (design R47's `AddToCartSheet`): original price (if any) ABOVE
+                // the current price. No `Spacer` — the enclosing `.frame(maxWidth: .infinity,
+                // alignment: .leading)` already pins this to the leading edge; a `VStack` needs
+                // no trailing filler the way the `HStack` below does.
+                VStack(alignment: .leading, spacing: 2) {
+                    if hasOriginalPrice {
+                        StrikeText(
+                            resolvedPrice.originalPriceShow,
+                            font: .system(size: 13 * theme.fontScale),
+                            color: Self.originalPriceColor)
+                    }
+                    Text(resolvedPrice.priceShow)
+                        .font(.system(size: 20 * theme.fontScale, weight: .heavy))
+                        .foregroundColor(theme.accent)
+                }
             } else {
+                // Horizontal row (design's `ProductDetailSheet`, unchanged by R47): current
+                // price first, struck-through original after, same line.
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(resolvedPrice.priceShow)
                         .font(.system(size: 20 * theme.fontScale, weight: .heavy))
@@ -1300,7 +1326,7 @@ public struct ProductDetailSheetView: View {
                         StrikeText(
                             resolvedPrice.originalPriceShow,
                             font: .system(size: 13 * theme.fontScale),
-                            color: Self.textDim)
+                            color: Self.originalPriceColor)
                     }
                     Spacer(minLength: 0)
                 }
@@ -1811,8 +1837,21 @@ public struct ProductDetailSheetView: View {
     // `theme.soldOut` — design-literal, NOT theme-resolved. Kept consistent with
     // `VideoInfoPanelView` / `WinClaimModalView` so the family reads as one.
 
-    /// `theme.surface.textDim` (secondary / caption text).
+    /// `theme.surface.textDim` (secondary / caption text). (rb-ios-minicart-detail-sheet-
+    /// price-color): no longer used for `priceRow`'s original-price strikethrough (see
+    /// `originalPriceColor`'s doc below) — still used by `briefDescription` /
+    /// `productIntroSection` / `favButtonInline` (un-faved state) / `qtyRow`'s stock caption.
+    /// Value unchanged.
     static let textDim = Color(hex: "#6B6775") ?? Color.gray
+    /// Original-price strikethrough color for `priceRow` (rb-ios-minicart-detail-sheet-price-
+    /// color, design R45) — fixed `#A0A0A0`, does NOT vary with theme. `design/contract/
+    /// claude-design-sync.md` §R45 moved the design's `ProductDetailSheet` original-price
+    /// color off the theme-following `theme.surface.textDim` token onto this literal design
+    /// value; this file's `priceRow` was the one call site the same-day R45 landing
+    /// (`rb-ios-product-row-layout-and-price-color`) explicitly excluded from its scope. This
+    /// constant replaces that single call site — `.detail` and `.addToCart` share it (same
+    /// `priceRow`).
+    static let originalPriceColor = Color(hex: "#A0A0A0") ?? Color.gray
     /// `theme.surface.textFaint` (disabled stepper digit / off control).
     static let textFaint = Color(hex: "#B6B2BE") ?? Color.gray.opacity(0.5)
     /// `theme.surface.stroke` (hairline divider).

@@ -220,11 +220,32 @@ public struct MiniCartView: View {
                 .truncationMode(.tail)
                 .padding(.trailing, 26)
 
-            // Price line — sold-out → 已售完 (dim); else the priceShow in the merchant
-            // accent color (R31: was a fixed `#FF7B8A` price-pink on the dark glass card).
-            Text(isSoldOut ? Self.soldOutLabel : peek.priceShow)
-                .font(.system(size: 12 * theme.fontScale, weight: isSoldOut ? .semibold : .bold))
-                .foregroundColor(isSoldOut ? Self.textDim : theme.accent)
+            // Price line (vod-now-introducing-original-price-reference-ui-ios) — sold-out → 已售完
+            // (dim), no price info at all (design `LBPMiniCart`'s `product.sold ? '已售完' : (...)`
+            // is a fully exclusive branch); else the priceShow in the merchant accent color (R31:
+            // was a fixed `#FF7B8A` price-pink on the dark glass card), optionally followed by a
+            // struck-through original price when the peek carries one. Order is SALE price FIRST,
+            // then ORIGINAL price second (design `sdk-components.jsx:908-943` — the reverse of
+            // `ProductRowView`'s original-first ordering; the two are independent design elements
+            // with their own fixed layouts, not something to reconcile).
+            if isSoldOut {
+                Text(Self.soldOutLabel)
+                    .font(.system(size: 12 * theme.fontScale, weight: .semibold))
+                    .foregroundColor(Self.textDim)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(peek.priceShow)
+                        .font(.system(size: 12 * theme.fontScale, weight: .bold))
+                        .foregroundColor(theme.accent)
+                    if !peek.originalPriceShow.isEmpty,
+                       peek.originalPriceShow != peek.priceShow {
+                        Text(peek.originalPriceShow)
+                            .font(.system(size: 12 * theme.fontScale))
+                            .foregroundColor(Self.originalPriceColor)
+                            .strikethrough(true, color: Self.originalPriceColor)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -274,8 +295,18 @@ public struct MiniCartView: View {
     /// corner radius (was `16`), also reused by `productThumb`'s left-corner radius.
     static let cardCornerRadius: CGFloat = 4
     /// Dim text token (`#6B6775`, this module's established dim-text hex) — the
-    /// sold-out price line.
+    /// sold-out price line. (rb-ios-minicart-detail-sheet-price-color): no longer referenced
+    /// for the original-price strikethrough below (see `originalPriceColor`'s doc) — this
+    /// file's only remaining use is the sold-out「已售完」text. Value unchanged.
     static let textDim = Color(hex: "#6B6775") ?? Color.gray
+    /// Original-price strikethrough color (rb-ios-minicart-detail-sheet-price-color, design
+    /// R45) — fixed `#A0A0A0`, does NOT vary with theme. `design/contract/claude-design-
+    /// sync.md` §R45 moved `LBPMiniCart`'s original-price color off the theme-following
+    /// `theme.surface.textDim` token onto this literal design value; the `vod-now-
+    /// introducing-original-price-reference-ui-ios` change that first drew this strikethrough
+    /// landed the same day but before that R45 decision was reflected here, so it used the
+    /// (by-then-stale) shared `textDim`. This constant replaces that single call site.
+    static let originalPriceColor = Color(hex: "#A0A0A0") ?? Color.gray
 
     // MARK: - Fixed localized copy (static presentation strings)
 

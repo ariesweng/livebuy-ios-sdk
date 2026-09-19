@@ -460,8 +460,15 @@ public struct ProductRowView: View {
             .onTapGesture { (onPlayClick ?? onSeekToIntro)?() }
             .accessibilityIdentifier(LBAccessibilityID.productRowThumb(index))
 
-            Button(action: { onOpenProduct?() }) {
-                VStack(alignment: .leading, spacing: 4) {
+            // `.row` name / price / action-icon column (rb-ios-product-row-layout-and-price-
+            // color, design R45): REGROUPED from the former three-sibling-column shape (thumb +
+            // name/price Button + a fixed-width action-icon HStack) into ONE flexible column —
+            // row 1 is the name, row 2 is a `space-between` line with the price block (left) and
+            // the SAME, unchanged action-icon group (right). See `design.md` D1 for the full
+            // before/after layout rationale and D2 for why `hideSub` gates ONLY the price block,
+            // never the action-icon group below.
+            VStack(alignment: .leading, spacing: 4) {
+                Button(action: { onOpenProduct?() }) {
                     if nameTag == .none {
                         // Byte-identical to the pre-`rb-ios-product-row-name-tag-system` tree —
                         // no HStack wrapper, no extra spacing — for every row that draws no
@@ -489,46 +496,37 @@ public struct ProductRowView: View {
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
-
-                    if !hideSub {
-                        if soldOut {
-                            Text(Self.soldOutLabel)
-                                .font(.system(size: 12 * theme.fontScale))
-                                .foregroundColor(Self.soldOutColor)
-                        } else {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                if !product.originalPriceShow.isEmpty,
-                                   product.originalPriceShow != product.priceShow {
-                                    Text(product.originalPriceShow)
-                                        .font(.system(size: 12 * theme.fontScale))
-                                        .foregroundColor(Self.textDim)
-                                        .strikethrough(true, color: Self.textDim)
-                                }
-                                Text(product.priceShow)
-                                    .font(.system(size: 14 * theme.fontScale, weight: .heavy))
-                                    .foregroundColor(Self.saleColor)
-                            }
-                        }
-                    }
                 }
+                .buttonStyle(PlainButtonStyle())
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .accessibilityIdentifier(LBAccessibilityID.productRowDetail(index))
+                .accessibilityIdentifier(LBAccessibilityID.productRowDetail(index))
 
-            HStack(spacing: 8) {
-                rowOutlineGlyph(action: onOpenProduct) {
-                    DetailGlyph(size: 16, color: theme.accent)
-                }
-                if overlay.showShare {
-                    rowOutlineGlyph(action: onShareProduct) {
-                        ShareGlyph(size: 16, color: theme.accent)
+                HStack(alignment: .center, spacing: 8) {
+                    if !hideSub {
+                        rowPriceBlock
                     }
-                    .accessibilityIdentifier(LBAccessibilityID.productRowShare(index))
+                    Spacer(minLength: 0)
+                    // Action-icon group — CODE UNCHANGED from the pre-regroup tree, only its
+                    // nesting position moves (was a top-level HStack sibling; now row 2 of the
+                    // new column). Deliberately NOT gated by `hideSub` (design.md D2) — the
+                    // pre-existing invariant ("icons always show regardless of `hideSub`") is
+                    // preserved verbatim.
+                    HStack(spacing: 8) {
+                        rowOutlineGlyph(action: onOpenProduct) {
+                            DetailGlyph(size: 16, color: theme.accent)
+                        }
+                        if overlay.showShare {
+                            rowOutlineGlyph(action: onShareProduct) {
+                                ShareGlyph(size: 16, color: theme.accent)
+                            }
+                            .accessibilityIdentifier(LBAccessibilityID.productRowShare(index))
+                        }
+                        rowCartButton
+                            .accessibilityIdentifier(LBAccessibilityID.productRowCart(index))
+                    }
                 }
-                rowCartButton
-                    .accessibilityIdentifier(LBAccessibilityID.productRowCart(index))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -540,6 +538,45 @@ public struct ProductRowView: View {
                     .frame(height: 1)
             }
         )
+    }
+
+    /// `.row` price block (rb-ios-product-row-layout-and-price-color, design R45): 已售完 text
+    /// (no tap, unchanged styling), OR a two-line price stack — struck-through original price +
+    /// discount-percent badge ABOVE the current price, current price ALWAYS its own bottom line.
+    /// REPLACES the former single-line `HStack(alignment: .firstTextBaseline) { originalPrice;
+    /// currentPrice }`. Keeps the pre-existing tap-to-open-detail affordance as its OWN tap
+    /// target — deliberately NOT nested inside the name `Button` above (design.md D3).
+    @ViewBuilder
+    private var rowPriceBlock: some View {
+        if soldOut {
+            Text(Self.soldOutLabel)
+                .font(.system(size: 12 * theme.fontScale))
+                .foregroundColor(Self.soldOutColor)
+        } else {
+            Button(action: { onOpenProduct?() }) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !product.originalPriceShow.isEmpty,
+                       product.originalPriceShow != product.priceShow {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(product.originalPriceShow)
+                                .font(.system(size: 12 * theme.fontScale))
+                                .foregroundColor(Self.originalPriceColor)
+                                .strikethrough(true, color: Self.originalPriceColor)
+                            if let off = ProductRowDiscountBadge.percent(
+                                price: product.price, originalPrice: product.originalPrice) {
+                                Text("(-\(off)%)")
+                                    .font(.system(size: 11 * theme.fontScale, weight: .semibold))
+                                    .foregroundColor(Self.discountColor)
+                            }
+                        }
+                    }
+                    Text(product.priceShow)
+                        .font(.system(size: 14 * theme.fontScale, weight: .heavy))
+                        .foregroundColor(Self.saleColor)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
     }
 
     // MARK: - VOD-only thumbnail overlays (rb-ios-product-row-vod-intro-mask, design R36)
@@ -629,14 +666,25 @@ public struct ProductRowView: View {
     //
     // Price cell + cart button layout (rb-ios-product-row-price-cart-layout-fix): the
     // current price and (optional) struck-through original price live in ONE
-    // leading-aligned VStack (original price is the SECOND child, i.e. BELOW the current
-    // price) — mirrors design source `sdk-components.jsx:1116-1129`'s flex column, where
-    // `p.was` is the column's second child under `p.price`. That price VStack and the
-    // cart button are siblings inside a `.bottom`-aligned HStack (mirrors the design's
-    // outer `alignItems:'flex-end'`), so the cart button always stays pinned to the row's
-    // bottom edge whether the price cell is 1 line (price only) or 2 lines (price +
-    // original-price strikethrough) tall — it must never be pushed down or stay centered
-    // when the second line appears.
+    // leading-aligned price cell (original price is the SECOND element, i.e. BELOW or
+    // beside the current price — see `gridPriceContent` below) — mirrors design source
+    // `sdk-components.jsx:1116-1129`'s flex column/row, where `p.was` is the cell's second
+    // child after `p.price`. That price cell and the cart button are siblings inside a
+    // `.bottom`-aligned HStack (mirrors the design's outer `alignItems:'flex-end'`), so the
+    // cart button always stays pinned to the row's bottom edge whether the price cell is 1
+    // line (price only, or price + original-price on the SAME line) or 2 lines (price +
+    // original-price stacked) tall — it must never be pushed down or stay centered when a
+    // second line appears.
+    //
+    // Width-driven same-line-vs-wrap (rb-ios-product-row-grid-price-wrap, design D8,
+    // `design/contract/claude-design-sync.md` §D8): the design's grid price cell moved from
+    // a hard-coded `flexDirection: p.was ? 'column' : 'row'` two-way switch to an
+    // unconditional `flexWrap: 'wrap'` — same line when both texts fit the available width,
+    // wrapped to a second line otherwise. `gridPriceContent` below reproduces this via
+    // `ViewThatFits(in: .horizontal)` (iOS 16+): `gridPriceRow` (same line, candidate one)
+    // vs `gridPriceStack` (wrapped — the SAME view used for the pre-D8 always-two-line
+    // visual, also the iOS 14/15 fallback since `ViewThatFits` needs iOS 16+). Current price
+    // is always the first child, original price always the second, in BOTH candidates.
 
     private var gridBody: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -669,39 +717,20 @@ public struct ProductRowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(alignment: .bottom, spacing: 6) {
-                VStack(alignment: .leading, spacing: 0) {
-                    if soldOut {
-                        Text(Self.soldOutLabel)
-                            .font(.system(size: 13 * theme.fontScale, weight: .bold))
-                            .foregroundColor(Self.soldOutColor)
-                    } else {
-                        Text(product.priceShow)
-                            .font(.system(size: 14 * theme.fontScale, weight: .heavy))
-                            .foregroundColor(Self.saleColor)
-
-                        // NOT gated by `hideSub` (add-recommendation-original-price-reference-ui-ios)
-                        // — matches design source `LBPProductRow` grid branch, where the
-                        // strikethrough (`p.was`) is unconditional and `hideSub` only gates the
-                        // unrelated `p.sub` caption. See `hideSub`'s doc comment above. Placed
-                        // BELOW the current price, same VStack (rb-ios-product-row-price-cart-
-                        // layout-fix) — see this method's header comment.
-                        if !product.originalPriceShow.isEmpty
-                            && product.originalPriceShow != product.priceShow {
-                            Text(product.originalPriceShow)
-                                .font(.system(size: 11 * theme.fontScale))
-                                .foregroundColor(Self.textDim)
-                                .strikethrough(true, color: Self.textDim)
-                        }
-                    }
-                }
+                // `.layoutPriority(1)` on BOTH the price cell AND the cart button (design.md D2)
+                // groups them into one HIGHER-priority tier that's sized BEFORE the `Spacer`:
+                // within that tier, the cart button's fixed 26pt is subtracted first, and
+                // `gridPriceContent` is proposed what's genuinely left of the row's real width —
+                // NOT an arbitrary 50/50 split with `Spacer` (which squeezes `ViewThatFits` well
+                // below its natural same-line width and makes it wrap prematurely, even for
+                // short prices — verified empirically via this change's own pixel tests, see
+                // tasks.md §3 and design.md D2).
+                gridPriceContent
+                    .layoutPriority(1)
                 Spacer(minLength: 0)
-                // Independent accent cart circle — design R21 "p.sold 時不顯示" (simply
-                // hidden, not converted to a bell like `.row`'s rowCartButton). Sibling of
-                // the price VStack above in a `.bottom`-aligned HStack, so it stays pinned
-                // to the row's bottom edge regardless of the price cell's height
-                // (rb-ios-product-row-price-cart-layout-fix).
                 if !soldOut {
                     gridCartButton
+                        .layoutPriority(1)
                 }
             }
         }
@@ -713,6 +742,101 @@ public struct ProductRowView: View {
         .contentShape(Rectangle())
         .onTapGesture { onOpenProduct?() }
         .accessibilityIdentifier(LBAccessibilityID.productRecommendationCard(index))
+    }
+
+    // MARK: - `.grid` price cell (rb-ios-product-row-grid-price-wrap, design D8)
+    //
+    // `gridPriceContent` decides between: 已售完 text / bare current-price text (no original
+    // price) / a width-driven same-line-vs-wrap choice between `gridPriceRow` and
+    // `gridPriceStack` (has an original price). `gridSalePriceText` / `gridOriginalPriceText`
+    // are shared leaf `Text` views so both candidates (and the iOS-14/15 fallback) can never
+    // visually drift apart — one definition, multiple call sites, mirroring this file's
+    // existing `nameTagFallback`/`nameTagView` convention.
+
+    /// `.grid` price cell content. `soldOut` → unchanged「已售完」text. No original price →
+    /// bare current price (never wraps — a single `Text`). Has an original price → iOS 16+
+    /// picks same-line vs wrapped via `ViewThatFits`; iOS 14/15 (this package's deployment
+    /// floor, `Package.swift`) has no `ViewThatFits` and always falls back to `gridPriceStack`
+    /// — the SAME always-two-line visual this cell rendered before this change, a deliberate,
+    /// documented degradation (design D8's own PARKED note), not a regression.
+    @ViewBuilder
+    private var gridPriceContent: some View {
+        if soldOut {
+            Text(Self.soldOutLabel)
+                .font(.system(size: 13 * theme.fontScale, weight: .bold))
+                .foregroundColor(Self.soldOutColor)
+        } else if hasOriginalPrice {
+            if #available(iOS 16.0, *) {
+                ViewThatFits(in: .horizontal) {
+                    gridPriceRow
+                    gridPriceStack
+                }
+            } else {
+                gridPriceStack
+            }
+        } else {
+            gridSalePriceText
+        }
+    }
+
+    /// `!originalPriceShow.isEmpty && originalPriceShow != priceShow` — the SAME guard this
+    /// price cell used inline before this change; pulled out so `gridPriceContent` and the two
+    /// line-candidates below share one source of truth instead of re-testing it separately.
+    /// NOT gated by `hideSub` (add-recommendation-original-price-reference-ui-ios) — matches
+    /// design source `LBPProductRow` grid branch, where the strikethrough (`p.was`) is
+    /// unconditional and `hideSub` only gates the unrelated `p.sub` caption. See `hideSub`'s
+    /// doc comment above.
+    private var hasOriginalPrice: Bool {
+        !product.originalPriceShow.isEmpty && product.originalPriceShow != product.priceShow
+    }
+
+    /// `.fixedSize(horizontal: true, vertical: false)` keeps this a single line REGARDLESS of
+    /// the width `gridPriceRow`'s `ViewThatFits` candidate check proposes to it
+    /// (rb-ios-product-row-grid-price-wrap, design.md D1 follow-up) — without it, `Text` quietly
+    /// wraps itself onto 2 lines to satisfy a narrow proposal instead of reporting an oversized
+    /// ideal width, which defeats `ViewThatFits(in: .horizontal)`'s own fit check (a wrapping
+    /// `Text` never "overflows" horizontally, so the HStack candidate would incorrectly always
+    /// read as "fits"). Never wrapped in practice before this change either (prices are short),
+    /// so this is a no-op for `gridPriceStack`'s existing visual.
+    private var gridSalePriceText: some View {
+        Text(product.priceShow)
+            .font(.system(size: 14 * theme.fontScale, weight: .heavy))
+            .foregroundColor(Self.saleColor)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// Color source `originalPriceColor`, NOT `textDim` (rb-ios-product-row-layout-and-price-
+    /// color, design R45) — see that constant's doc for why this is a distinct, theme-independent
+    /// token rather than the pre-existing "dim text" one. `.fixedSize` — see `gridSalePriceText`'s
+    /// doc immediately above for why.
+    private var gridOriginalPriceText: some View {
+        Text(product.originalPriceShow)
+            .font(.system(size: 11 * theme.fontScale))
+            .foregroundColor(Self.originalPriceColor)
+            .strikethrough(true, color: Self.originalPriceColor)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// The pre-D8 ALWAYS-two-line stack — current price above, original price below, zero
+    /// spacing (byte-identical to this cell's pre-`rb-ios-product-row-grid-price-wrap` visual).
+    /// Doubles as BOTH the iOS-14/15 fallback AND the iOS-16+ `ViewThatFits` "doesn't fit on one
+    /// line" candidate.
+    private var gridPriceStack: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            gridSalePriceText
+            gridOriginalPriceText
+        }
+    }
+
+    /// The NEW iOS-16+ "fits on one line" candidate (rb-ios-product-row-grid-price-wrap, design
+    /// D8) — current price and struck-through original price side by side, baseline-aligned,
+    /// 4pt gap (mirrors design source `sdk-components.jsx`'s `gap: 4` on the same flex cell).
+    @available(iOS 16.0, *)
+    private var gridPriceRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            gridSalePriceText
+            gridOriginalPriceText
+        }
     }
 
     /// Top-right accent play circle with a breathing pulse (design R21 "呼吸閃爍").
@@ -767,7 +891,21 @@ public struct ProductRowView: View {
     // `ProductListView` / `ProductDetailSheetView`'s own token sets, the established
     // pattern in this module rather than a shared cross-file constant).
 
+    /// (rb-ios-product-row-layout-and-price-color): no longer referenced anywhere in this file
+    /// as of this change — both call sites that used to read this for the original-price
+    /// strikethrough (`.row` and `.grid`) now use the new `originalPriceColor` constant below
+    /// instead (a literal design value, not a theme-adjacent "dim text" token — see that
+    /// constant's doc). Left defined and unmodified, per this change's explicit scope (its
+    /// value is untouched; only its call sites moved to the new constant).
     static let textDim = Color(hex: "#6B6775") ?? Color.gray
+    /// Original-price strikethrough color, `.row` AND `.grid` (rb-ios-product-row-layout-and-
+    /// price-color, design R45) — fixed `#A0A0A0`, does NOT vary with theme. Replaces the prior
+    /// shared use of `textDim` for this specific purpose (see that constant's updated doc).
+    static let originalPriceColor = Color(hex: "#A0A0A0") ?? Color.gray
+    /// `.row`-only discount-percent badge text color (rb-ios-product-row-layout-and-price-color,
+    /// design R45, `sdk-components.jsx` `fontSize:11, fontWeight:600, color:'#3C3C3C'`) — fixed,
+    /// does NOT vary with theme. `.grid` has no corresponding element.
+    static let discountColor = Color(hex: "#3C3C3C") ?? Color.gray
     static let stroke = Color(hex: "#ECEAF0") ?? Color.gray.opacity(0.2)
     static let bgSunken = Color(hex: "#F4F4F6") ?? Color.gray.opacity(0.08)
     /// `.row` thumbnail border (design R34, `rb-ios-product-detail-image-gallery`) — distinct

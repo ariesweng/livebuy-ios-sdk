@@ -404,6 +404,18 @@ public struct PlayerShellView: View {
     /// tell the two apart.
     private let seekByForTesting: ((Double) -> Void)?
 
+    /// Test-only observability hook (`rb-ios-double-tap-seek-feedback`, `docs/unit-test-
+    /// discipline.md` `*ForTesting` naming): called SYNCHRONOUSLY, alongside `model.seekBy(_:)`
+    /// / `seekByForTesting?(_:)` / `showSeekToast(zone:)`, from ONLY the double-tap-seek commit
+    /// branch of `handleVideoTap(zone:)` — NOT from the 2×-speed tick path (that path shows no
+    /// toast). `nil` (default, every production / non-test call site) → inert. Exists for the
+    /// SAME reason `seekByForTesting` (directly above) exists: this file's own established
+    /// finding (`PlayerShellGestureCleanModeRewriteTests.swift` §9.3) that a `@State` write made
+    /// inside one top-level call is not reliably observable via a second, separate call outside
+    /// a live SwiftUI hierarchy — so a test observes the seek-toast trigger via this externally-
+    /// held closure instead of reading `seekToastZone` back.
+    private let seekToastForTesting: ((TapZone) -> Void)?
+
     /// Ctor-injected scheduling function for a DEFERRED action: `(delay, action) -> cancel`.
     /// Renamed from `liveTapSchedule` (`rb-ios-gesture-clean-mode-v2`, design R29 — the R23
     /// lineage's "defer a LIVE mute-commit / already-ended-replay play-pause-commit so a
@@ -475,6 +487,13 @@ public struct PlayerShellView: View {
     /// mechanisms (`onHoldStart` / `onHoldEnd`, `PlaybackPausedOverlayView`'s composition).
     @State private var muteToastVisible: Bool = false
 
+    /// Non-nil (with the tapped half) for ~0.7s after a double-tap-seek commit. Drives the
+    /// half-screen `GestureSeekToastView` (`rb-ios-double-tap-seek-feedback`) — `nil` = hidden.
+    /// Mirrors `muteToastVisible` above's mechanism (transient `@State`, `PlayerShellView`-owned
+    /// auto-dismiss timer, non-interactive composition) for a differently-shaped (half-screen
+    /// edge-pinned, not centered) sibling toast.
+    @State private var seekToastZone: TapZone?
+
     /// Cancel closure for the currently-pending long-press-arms-2×-speed timer (after
     /// `holdDelay`). Cancelled if the finger moves past `moveTolerance` first (it is a
     /// swipe/scroll). Renamed from `holdWorkItem: DispatchWorkItem?`
@@ -487,6 +506,10 @@ public struct PlayerShellView: View {
 
     /// Cancellable timer that auto-dismisses the mute toast after `muteToastDuration`.
     @State private var muteToastWorkItem: DispatchWorkItem?
+
+    /// Cancellable timer that auto-dismisses the seek toast after `seekToastDuration`
+    /// (`rb-ios-double-tap-seek-feedback`) — mirrors `muteToastWorkItem` above.
+    @State private var seekToastWorkItem: DispatchWorkItem?
 
     /// Cancel closure for the currently-pending deferred `cleanMode` toggle
     /// (`rb-ios-gesture-clean-mode-v2`, design R29 — renamed from `pendingLiveTapMuteCommitCancel`
@@ -548,6 +571,9 @@ public struct PlayerShellView: View {
     private static let holdDelay: TimeInterval = 0.45
     /// The mute toast auto-dismisses after this duration (issue 5: ~0.7s).
     private static let muteToastDuration: TimeInterval = 0.7
+    /// The seek toast (`rb-ios-double-tap-seek-feedback`) auto-dismisses after this duration —
+    /// value reused from `muteToastDuration`'s established transient-toast display length.
+    private static let seekToastDuration: TimeInterval = 0.7
     /// Finger movement (pt) past which a pending hold is cancelled (it is a swipe/scroll).
     private static let moveTolerance: CGFloat = 12
     /// Double-tap-to-SEEK recognition window (renamed from `doubleTapLikeWindow`,
@@ -826,6 +852,7 @@ public struct PlayerShellView: View {
                 lastSeekTapAtForTesting: Date? = nil,
                 lastSeekTapZoneForTesting: TapZone? = nil,
                 seekByForTesting: ((Double) -> Void)? = nil,
+                seekToastForTesting: ((TapZone) -> Void)? = nil,
                 cleanModeTapSchedule: @escaping (TimeInterval, @escaping () -> Void) -> (() -> Void) = { delay, action in
                     let work = DispatchWorkItem(block: action)
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
@@ -863,6 +890,7 @@ public struct PlayerShellView: View {
         self.onMoreSheetPresentedChange = onMoreSheetPresentedChange
         self.onReplayCaptionHidesChatChange = onReplayCaptionHidesChatChange
         self.seekByForTesting = seekByForTesting
+        self.seekToastForTesting = seekToastForTesting
         self.cleanModeTapSchedule = cleanModeTapSchedule
         // Test-only seed for the two scrub-driven `@State` properties (see their doc comments
         // below) — there is no production gesture-simulation path to reach these states in a
@@ -1194,6 +1222,23 @@ public struct PlayerShellView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.muteToastDuration, execute: work)
     }
 
+    /// Show the half-screen seek toast (`GestureSeekToastView`, `rb-ios-double-tap-seek-
+    /// feedback`) on `zone`'s edge and auto-dismiss it after `seekToastDuration` (~0.7s) —
+    /// mirrors `showMuteToast()` immediately above. Cancels any still-pending auto-dismiss from a
+    /// PRIOR toast first, so a following double-tap-seek restarts the full duration instead of
+    /// stacking timers. The SHOW is wrapped in a brief ease-in animation (design R46's
+    /// `animation: lbp-fade-in 0.18s ease`, approximated — see design.md Non-Goals); the auto-
+    /// dismiss itself is UNANIMATED, matching `showMuteToast()`'s own unanimated dismiss.
+    private func showSeekToast(zone: TapZone) {
+        seekToastWorkItem?.cancel()
+        withAnimation(.easeIn(duration: 0.18)) {
+            seekToastZone = zone
+        }
+        let work = DispatchWorkItem { self.seekToastZone = nil }
+        seekToastWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.seekToastDuration, execute: work)
+    }
+
     /// Video-area single-tap dispatch (`rb-ios-gesture-clean-mode-v2`, design R29 — SUPERSEDES
     /// the retired `handleLiveTap()` / `handleReplayTap()` / `registerLikeableTap()` trio and the
     /// double-tap-to-like feature they protected). Every short tap toggles `cleanMode` — the
@@ -1213,6 +1258,10 @@ public struct PlayerShellView: View {
     ///   — `.fastForward` → `+10s`, `.rewind` → `-10s`. No following second tap in the window (or
     ///   one landing in the OTHER half, which starts its OWN independent tracked/deferred pair
     ///   instead of cancelling this one) → the deferred toggle fires on its own.
+    ///
+    /// `rb-ios-double-tap-seek-feedback`: the double-tap-seek commit above ALSO shows the
+    /// half-screen `GestureSeekToastView` (`showSeekToast(zone:)` + `seekToastForTesting?(zone)`)
+    /// — the visual reaction to this seek, previously entirely absent.
     private func handleVideoTap(zone: TapZone) {
         guard Self.isSeekable(isLive: model.isLive, isUpcoming: model.isUpcoming,
                               isFinishedLiveReplay: model.isFinishedLiveReplay) else {
@@ -1234,6 +1283,8 @@ public struct PlayerShellView: View {
             let delta = zone == .fastForward ? Self.seekStepSeconds : -Self.seekStepSeconds
             model.seekBy(delta)
             seekByForTesting?(delta)
+            showSeekToast(zone: zone)
+            seekToastForTesting?(zone)
         } else {
             lastSeekTapAt = now
             lastSeekTapZone = zone
@@ -1668,7 +1719,13 @@ public struct PlayerShellView: View {
                                     name: product.name,
                                     priceShow: product.priceShow,
                                     soldOut: product.soldOut,
-                                    pic: product.photos.first ?? product.pic)
+                                    pic: product.photos.first ?? product.pic,
+                                    // vod-now-introducing-original-price-reference-ui-ios: direct
+                                    // passthrough of the source LBProduct's own field, wiring up
+                                    // the template-layer LBMiniCartPeek.originalPriceShow field
+                                    // (vod-now-introducing-original-price-template-ios) into the
+                                    // VOD now-introducing carousel's peek.
+                                    originalPriceShow: product.originalPriceShow)
                             },
                             // Real image only over a live video surface (placeholder suppressed);
                             // the snapshot path keeps the deterministic placeholder.
@@ -1964,6 +2021,16 @@ public struct PlayerShellView: View {
             // chrome below.
             if muteToastVisible {
                 GestureMuteToastView(theme: theme, muted: model.muted)
+                    .allowsHitTesting(false)
+            }
+
+            // Seek toast: ~0.7s half-screen dark-gradient + "10" + fading-arrows feedback after a
+            // double-tap seeks ±10s (`rb-ios-double-tap-seek-feedback`, design R46). Distinct
+            // half-screen edge-pinned shape from the centered mute toast immediately above, but
+            // same non-interactive / transient-`@State`-driven composition pattern.
+            if let toastZone = seekToastZone {
+                GestureSeekToastView(theme: theme, zone: toastZone)
+                    .transition(.opacity)
                     .allowsHitTesting(false)
             }
 

@@ -14,6 +14,13 @@ import LivebuyUI
 // It owns NO timer — `PlayerShellView` drives its presentation (transient @State,
 // auto-dismiss). Renders correctly standalone (demo / snapshot).
 //
+// Design source `sdk-components.jsx`'s `LBPGestureToast` renders THIS toast's `muted`/`unmuted`
+// (and several other) kinds AND the double-tap-seek `seekFwd`/`seekBack` kind from one shared
+// function. iOS reference-ui splits that into two separate `View`s instead — this one, and the
+// half-screen edge-pinned `GestureSeekToastView.swift` (`rb-ios-double-tap-seek-feedback`,
+// design R46) for `seekFwd`/`seekBack` — since the two are structurally unrelated shapes (a
+// centered pill vs. a half-screen gradient), not variants of one layout.
+//
 // iOS-14-safe SwiftUI only: `ZStack` / `HStack` / `Image(systemName:)` / `Text` /
 // `Capsule`. No Lazy* / ScrollView / AsyncImage / .foregroundStyle / .tint.
 
