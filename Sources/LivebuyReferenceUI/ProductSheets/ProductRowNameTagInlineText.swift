@@ -61,14 +61,47 @@ enum ProductRowNameTagInlineText {
     /// bare `Text(product.name)` — the pill/spacer images are marked `.alwaysOriginal` (both at
     /// the `UIImage` and the SwiftUI `Image` level) so an outer `.foregroundColor` does not tint
     /// them like a template icon.
+    ///
+    /// `nameFont` (`rb-ios-product-row-name-tag-vertical-align-fix`) MUST be the exact `UIFont`
+    /// the caller also applies via `.font(Font(nameFont))` to the returned `Text` — see
+    /// `productRowNameTagVerticalOffset`'s doc for why the pill needs this to compute its
+    /// vertical-alignment compensation.
     static func build(
-        name: String, pillView: AnyView, pillFallback: PillFallbackSpec
+        name: String, pillView: AnyView, pillFallback: PillFallbackSpec, nameFont: UIFont
     ) -> Text {
         let pillImage = renderPillImage(pillView: pillView, fallback: pillFallback)
         let spacerImage = renderSpacerImage()
+        let verticalOffset = productRowNameTagVerticalOffset(pillHeight: pillImage.size.height, nameFont: nameFont)
         return Text(Image(uiImage: pillImage.withRenderingMode(.alwaysOriginal)).renderingMode(.original))
+            .baselineOffset(verticalOffset)
             + Text(Image(uiImage: spacerImage.withRenderingMode(.alwaysOriginal)).renderingMode(.original))
             + Text(name)
+    }
+
+    // MARK: - Vertical alignment (design.md D1/D2, `rb-ios-product-row-name-tag-vertical-align-fix`)
+
+    /// The `.baselineOffset` needed to visually center the pill image against `nameFont`'s own
+    /// text, instead of the unbalanced default `Text(Image:)` placement.
+    ///
+    /// Empirically confirmed (design.md D3, throwaway diagnostic render + pixel scan, since public
+    /// API docs make no guarantee either way): SwiftUI's `Text(Image:)` embeds an image with its
+    /// BOTTOM edge pinned to the surrounding text's baseline, extending the image's full height
+    /// upward from there — the same convention as a plain CoreText/`NSTextAttachment` inline
+    /// attachment. Left uncompensated, a pill whose own height approaches or exceeds `nameFont`'s
+    /// line metrics (the 4 name-tag variants' 11pt text + 1pt vertical padding routinely does)
+    /// sits well above where the adjacent text visually centers — looking taller than the name
+    /// text and floating above it, exactly the defect this change fixes.
+    ///
+    /// This moves the pill's default visual center (`pillHeight / 2` above the baseline) to
+    /// `nameFont`'s own visual center between its ascender and descender — the same target
+    /// Android's `PlaceholderVerticalAlign.TextCenter` and Flutter's `PlaceholderAlignment.middle`
+    /// already reach natively. Zero SwiftUI / view dependency by design (`docs/unit-test-
+    /// discipline.md`'s "純函式抽出"), so it is unit-testable against plain `UIFont` fixtures
+    /// without rendering anything.
+    static func productRowNameTagVerticalOffset(pillHeight: CGFloat, nameFont: UIFont) -> CGFloat {
+        let nameFontCenterAboveBaseline = (nameFont.ascender - abs(nameFont.descender)) / 2
+        let pillDefaultCenterAboveBaseline = pillHeight / 2
+        return nameFontCenterAboveBaseline - pillDefaultCenterAboveBaseline
     }
 
     // MARK: - Pill rasterization

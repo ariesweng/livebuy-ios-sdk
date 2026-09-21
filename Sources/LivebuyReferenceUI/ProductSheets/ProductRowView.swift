@@ -266,6 +266,17 @@ public struct ProductRowView: View {
         }
     }
 
+    /// Single source of truth for the `.row` name `Text`'s font, at both call sites that need it
+    /// (`rb-ios-product-row-name-tag-vertical-align-fix`): the displayed `.font(Font(nameUIFont))`
+    /// modifier on the name `Text`/concatenated `Text`, AND the `UIFont` handed to
+    /// `ProductRowNameTagInlineText.build(...)` so it can compute the pill's vertical-alignment
+    /// compensation against the SAME metrics actually on screen — passing one `UIFont` value to
+    /// both, instead of two independently-written `14 * theme.fontScale` literals, means they
+    /// cannot drift apart.
+    private var nameUIFont: UIFont {
+        UIFont.systemFont(ofSize: 14 * theme.fontScale, weight: .semibold)
+    }
+
     /// Shared small-corner-radius pill for ALL FOUR name-tag variants (`rb-ios-product-
     /// row-name-tag-style` — checkpoint correction: the `.outSoon`/`.hot` cases originally
     /// reused the pre-existing `statusPill(_:_:)` helper, a full `Capsule()` — mismatched
@@ -487,11 +498,16 @@ public struct ProductRowView: View {
                         // why this is `Text(Image:)` concatenation, not a `UIViewRepresentable`
                         // bridge — the latter does not render under this repo's `ImageRenderer`-
                         // based snapshot harness).
+                        // `nameFont: nameUIFont` (rb-ios-product-row-name-tag-vertical-align-fix):
+                        // `build(...)` uses this SAME `UIFont` to compute the pill's vertical-
+                        // alignment `.baselineOffset` compensation — see `nameUIFont`'s doc for why
+                        // this must not be a second, independently-written font literal.
                         ProductRowNameTagInlineText.build(
                             name: product.name,
                             pillView: AnyView(nameTagView),
-                            pillFallback: nameTagFallback)
-                            .font(.system(size: 14 * theme.fontScale, weight: .semibold))
+                            pillFallback: nameTagFallback,
+                            nameFont: nameUIFont)
+                            .font(Font(nameUIFont))
                             .foregroundColor(theme.text)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)

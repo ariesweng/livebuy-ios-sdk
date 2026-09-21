@@ -5,6 +5,19 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.21.1] - 2026-09-21
+
+> **Patch。** 延續 `4.21.0`，本輪為純 bug fix，僅 iOS：1 項視覺對齊修復。無新增/移除公開
+> 符號、無行為預設值改變。**零 BREAKING**。完整敘述見
+> [`docs/release-notes/v4.21.1.md`](../docs/release-notes/v4.21.1.md)。
+
+### Fixed
+
+- **商品列表 sheet 名稱前膠囊垂直對齊**（reference-ui）：「直播價」/「搶購中」/「熱賣中」/
+  「即將售完」四種名稱前膠囊改用依實測膠囊高度與名稱字型 metrics 動態計算的
+  `.baselineOffset` 補償，修正膠囊視覺上比商品名稱字還高、沒有置中對齊的問題
+  （`Text(Image:)` 行內拼接改法自 `4.20.0` 遺留的副作用）。
+
 ## [4.21.0] - 2026-09-19
 
 > **Minor.** 自 `4.20.0` 以來累積 59 個相關 commit（4 個屬於上一輪 v4.20.0 發版收尾、2 個純
