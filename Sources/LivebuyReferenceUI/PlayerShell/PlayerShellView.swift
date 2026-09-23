@@ -1241,12 +1241,14 @@ public struct PlayerShellView: View {
 
     /// Video-area single-tap dispatch (`rb-ios-gesture-clean-mode-v2`, design R29 — SUPERSEDES
     /// the retired `handleLiveTap()` / `handleReplayTap()` / `registerLikeableTap()` trio and the
-    /// double-tap-to-like feature they protected). Every short tap toggles `cleanMode` — the
-    /// only question is WHEN:
+    /// double-tap-to-like feature they protected). Every short tap toggles `cleanMode` **while
+    /// actually live or seekable** — the awaitingLive preview is a deliberate exception (see the
+    /// `model.isUpcoming` early-return below, `rb-ios-clean-mode-upcoming-not-triggered`): the
+    /// only question for the two branches THIS doc block still covers is WHEN:
     ///
-    /// - **Not seekable** (a real live stream in progress, or its upcoming preview): toggles
-    ///   `cleanMode` IMMEDIATELY. There is no double-tap outcome to protect against here (design
-    ///   R29: "直播進行中完全沒有雙擊反應"), so no defer is needed.
+    /// - **Not seekable** (a real live stream in progress): toggles `cleanMode` IMMEDIATELY.
+    ///   There is no double-tap outcome to protect against here (design R29: "直播進行中完全沒有
+    ///   雙擊反應"), so no defer is needed.
     /// - **Seekable** (VOD or an already-ended live replay): DEFERS the toggle by
     ///   `doubleTapSeekWindow` (0.32s) via the injected `cleanModeTapSchedule`, storing the
     ///   returned cancel closure in `pendingCleanModeToggleCancel`. If a SECOND tap lands in the
@@ -1263,6 +1265,14 @@ public struct PlayerShellView: View {
     /// half-screen `GestureSeekToastView` (`showSeekToast(zone:)` + `seekToastForTesting?(zone)`)
     /// — the visual reaction to this seek, previously entirely absent.
     private func handleVideoTap(zone: TapZone) {
+        // 直播預告（awaitingLive）單擊 MUST NOT 觸發 `cleanMode`（rb-ios-clean-mode-upcoming-not-
+        // triggered，取代先前 rb-ios-clean-mode-upcoming-intro-coverage 的「非 seekable 立即切換」
+        // 涵蓋 upcoming 的行為）——`isSeekable` 對 upcoming 仍是 `false`（非 seekable 這件事本身沒
+        // 變，仍套用在真直播進行中），但 upcoming 現在提前 return，讓這個分支永遠碰不到下面的
+        // `cleanMode.toggle()`。真直播進行中（`isLive == true`）維持原行為不變。
+        if model.isUpcoming {
+            return
+        }
         guard Self.isSeekable(isLive: model.isLive, isUpcoming: model.isUpcoming,
                               isFinishedLiveReplay: model.isFinishedLiveReplay) else {
             cleanMode.toggle()
@@ -1304,6 +1314,36 @@ public struct PlayerShellView: View {
     private var usesLiveChrome: Bool {
         model.isLive || model.isFinishedLiveReplay
     }
+
+    // MARK: - LIVE bottom bar display gate (rb-ios-clean-mode-upcoming-not-triggered)
+
+    /// PURE: whether the LIVE bottom bar (`LiveBottomBarView`, slim/bag-only/full variant) should
+    /// be composed. `usesLiveChrome` (真直播 / 回放) is gated by `!cleanMode` — a short tap during
+    /// live playback toggles `cleanMode` and the bar hides accordingly. `isUpcoming`（直播預告
+    /// 倒數）與 `introPlaying`（開場影片）皆 UNGATED by `cleanMode` — upcoming 單擊不再觸發
+    /// `cleanMode`（見 `handleVideoTap` 的 early-return，rb-ios-clean-mode-upcoming-not-triggered，
+    /// 訂正先前 rb-ios-clean-mode-upcoming-intro-coverage 誤把 upcoming 併入 cleanMode 家族的
+    /// 判讀），所以底部 bar 在 upcoming 狀態下永遠顯示，與 `cleanMode` 完全無關。Unit-testable
+    /// without rendering a view.
+    static func showsLiveBottomBar(usesLiveChrome: Bool, isUpcoming: Bool, introPlaying: Bool,
+                                   cleanMode: Bool, composerPresented: Bool, isScrubbing: Bool) -> Bool {
+        ((usesLiveChrome && !cleanMode) || isUpcoming || introPlaying)
+            && !composerPresented && !isScrubbing
+    }
+
+    /// Whether the LIVE bottom bar should be composed for the current model snapshot + local
+    /// gesture state. See the static function's doc comment for the full parameter mapping.
+    private var showsLiveBottomBar: Bool {
+        Self.showsLiveBottomBar(usesLiveChrome: usesLiveChrome, isUpcoming: model.isUpcoming,
+                                introPlaying: model.introPlaying, cleanMode: cleanMode,
+                                composerPresented: composerPresented, isScrubbing: isScrubbing)
+    }
+
+    /// Test seam exposing the private `showsLiveBottomBar` computed property (`*ForTesting`
+    /// naming per `docs/unit-test-discipline.md` §3; mirrors the existing `showsLiveNowPillForTesting`
+    /// / `cleanModeExitButtonBottomInsetForTesting` precedents above) so a test can construct a
+    /// REAL `PlayerShellView` and assert the CALL-SITE wiring, not just the pure static function.
+    var showsLiveBottomBarForTesting: Bool { showsLiveBottomBar }
 
     /// The VOD main-chrome family — NOT live-chrome 家族（LIVE / 回放）/ upcoming(awaitingLive) /
     /// upcoming-intro. 純 VOD side rail + floating bag + (in the main state) header live here.
@@ -1875,12 +1915,14 @@ public struct PlayerShellView: View {
             // 上移，讓出底部 transport bar 空間。`isScrubbing` 只會在 `showsPlaybackProgressBar`
             // 為真時被觸發，故對 upcoming / introPlaying（永不與進度條共存）不受影響。
             //
-            // 乾淨模式（rb-ios-gesture-clean-mode-rewrite ADDED Requirement）隱藏 LIVE 底部
-            // bar —— 但範圍只限「因 usesLiveChrome 而顯示」的情況（真直播 / 已結束直播回放）；
-            // upcoming / introPlaying 那段 slim bar 不在本次乾淨模式規範範圍內，`&& !cleanMode`
-            // 只 AND 進 `usesLiveChrome` 那一支，不影響 `model.isUpcoming` / `model.introPlaying`
-            // 那兩支。
-            if ((usesLiveChrome && !cleanMode) || model.isUpcoming || model.introPlaying) && !composerPresented && !isScrubbing {
+            // 乾淨模式（rb-ios-gesture-clean-mode-rewrite ADDED Requirement，
+            // rb-ios-clean-mode-upcoming-intro-coverage 訂正）隱藏 LIVE 底部 bar —— 範圍涵蓋
+            // `usesLiveChrome`（真直播 / 已結束直播回放）**與** `model.isUpcoming`（直播預告
+            // 倒數）兩支，兩者皆是設計稿 `screens.jsx` `stateInLiveFamily` 的成員、皆吃
+            // `!cleanMode`（見 `showsLiveBottomBar` 的 doc comment）。`model.introPlaying`
+            // （開場影片播放中）設計稿沒有對應的可查證 state，維持既有行為、不受 `cleanMode`
+            // 影響（範圍刻意限定，見該 change 的 design.md）。
+            if showsLiveBottomBar {
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
                     LiveBottomBarView(

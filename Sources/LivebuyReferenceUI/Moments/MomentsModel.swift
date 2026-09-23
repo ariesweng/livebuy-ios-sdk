@@ -78,6 +78,12 @@ public final class MomentsModel: ObservableObject {
     /// (end-screen-no-countdown #6c).
     @Published public private(set) var endScreenVisible: Bool
 
+    /// This live's currently-known playback duration in raw seconds
+    /// (`DefaultEndScreenState.liveDurationSeconds`, `endscreen-live-duration-ios-template`);
+    /// `nil` = VOD, or no `/sdk/video/goods` poll response yet, or `enableStatReporting == false`.
+    /// NOT pre-formatted — `EndScreenView.liveDuration: String` formatting is the container's job.
+    @Published public private(set) var liveDurationSeconds: Int?
+
     // -- Surface 2: ErrorScreenView ← terminal error snapshot (design §3) -------
 
     /// Terminal player error snapshot (`DefaultErrorState.current`); nil when the
@@ -139,6 +145,7 @@ public final class MomentsModel: ObservableObject {
             next: t.endScreen.next,
             hot: t.endScreen.hot,
             endScreenVisible: t.endScreen.endScreenVisible,
+            liveDurationSeconds: t.endScreen.liveDurationSeconds,
             error: t.errorState.current,
             upcomingActive: t.upcoming.active,
             upcomingStartAt: t.upcoming.scheduledStartAt,
@@ -160,6 +167,7 @@ public final class MomentsModel: ObservableObject {
         next: [LBNavItem] = [],
         hot: [LBHotItem] = [],
         endScreenVisible: Bool = false,
+        liveDurationSeconds: Int? = nil,
         error: LBPlayerErrorState? = nil,
         upcomingActive: Bool = false,
         upcomingStartAt: String = "",
@@ -169,6 +177,7 @@ public final class MomentsModel: ObservableObject {
         self.next = next
         self.hot = hot
         self.endScreenVisible = endScreenVisible
+        self.liveDurationSeconds = liveDurationSeconds
         self.error = error
         self.upcomingActive = upcomingActive
         self.upcomingStartAt = upcomingStartAt
@@ -194,6 +203,7 @@ public final class MomentsModel: ObservableObject {
         next = t.endScreen.next
         hot = t.endScreen.hot
         endScreenVisible = t.endScreen.endScreenVisible
+        liveDurationSeconds = t.endScreen.liveDurationSeconds
         error = t.errorState.current
         upcomingActive = t.upcoming.active
         upcomingStartAt = t.upcoming.scheduledStartAt

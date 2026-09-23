@@ -398,6 +398,7 @@ public struct MomentsOverlayView: View {
                     theme: theme,
                     countdown: model.countdown,
                     next: model.next,
+                    liveDuration: model.liveDurationSeconds.map { PlaybackProgressBarView.formatTimestamp(Double($0)) } ?? "",
                     live: live,
                     onWatchNext: { onWatchNext?() },
                     onCancel: { onCancel?() },

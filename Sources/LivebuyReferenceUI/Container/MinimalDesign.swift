@@ -519,8 +519,19 @@ struct PlayerOverlayRootView: View {
             // `live:` (= runtime, not placeholder) loads the `.loading` cover background
             // (`model.loadingCover`); the snapshot / demo path keeps the solid `#0C0C10`
             // backdrop — the SAME flag `UpcomingCountdownView` uses (design provenance).
+            // `cleanMode:` forwarded from this root's own mirrored `@State` (rb-ios-clean-
+            // mode-upcoming-intro-coverage — wires the `.splash` skip-button-hide /
+            // expanded-progress-track branch to the real execution path). `introPosition:` /
+            // `introDuration:` / the intro interaction closures are NOT forwarded from here —
+            // `StartScreenHostView` already holds `shellModel` (`@ObservedObject`) and reads
+            // `model.position`/`model.duration`/`model.isPlaying` + wires the four intro
+            // interaction closures to `model.togglePlayPause()`/`model.seek(to:)` directly
+            // (rb-ios-intro-progress-bar-interactive — the earlier "no live-updating intro
+            // playback progress data source exists yet" limitation this comment used to note
+            // is resolved by `intro-player-seek-progress-core`).
             StartScreenHostView(model: shellModel, theme: theme,
-                                live: !paintsBackgroundPlaceholder, onSkip: onSkip)
+                                live: !paintsBackgroundPlaceholder, onSkip: onSkip,
+                                cleanMode: cleanMode)
         }
     }
 }
@@ -538,11 +549,61 @@ struct StartScreenHostView: View {
     /// demo) → solid `#0C0C10` backdrop. Same mechanism as `UpcomingCountdownView.live`.
     let live: Bool
     let onSkip: () -> Void
+    /// Forwarded from the root's mirrored `cleanMode` `@State` (rb-ios-clean-mode-upcoming-
+    /// intro-coverage). Default `false` keeps any other/older call site source-compatible.
+    var cleanMode: Bool = false
+
+    /// This host's OWN scrub state for the intro progress bar (rb-ios-intro-progress-bar-
+    /// interactive ADDED) — COMPLETELY SEPARATE from `PlayerShellView`'s private `isScrubbing`
+    /// `@State` (that one drives the VOD/LIVE render tree; this one drives this, independent,
+    /// StartScreen render tree). No bubbling needed: `StartScreenHostView` already holds
+    /// `model`, so it can drive both the bar's data and its interaction closures directly.
+    @State private var isScrubbing: Bool
+
+    /// Test-only seed for `isScrubbing`'s initial value (`*ForTesting` naming,
+    /// docs/unit-test-discipline.md §3), mirroring `PlayerShellView`'s existing
+    /// `isScrubbingForTesting` convention.
+    init(model: PlayerShellModel, theme: ReferenceUITheme, live: Bool,
+         onSkip: @escaping () -> Void, cleanMode: Bool = false,
+         isScrubbingForTesting: Bool = false) {
+        self.model = model
+        self.theme = theme
+        self.live = live
+        self.onSkip = onSkip
+        self.cleanMode = cleanMode
+        _isScrubbing = State(initialValue: isScrubbingForTesting)
+    }
+
+    /// The `StartScreenView` this host composes from the CURRENT `model` snapshot
+    /// (rb-ios-intro-progress-bar-interactive). Reads `model.position`/`model.duration`/
+    /// `model.isPlaying` directly (no extra bubbling from `PlayerShellView` needed —
+    /// `intro-player-seek-progress-core` already made these existing pure forwarders track
+    /// the opening MP4 correctly while `model.introPlaying == true`); wires the four intro
+    /// interaction closures the SAME way `PlayerShellView` wires the VOD expanded progress
+    /// bar (`onTogglePlayPause: { model.togglePlayPause() }` / `onScrub: { ratio in
+    /// model.seek(to: ratio * model.duration) }`).
+    private var startScreenView: StartScreenView {
+        StartScreenView(theme: theme, phase: model.startPhase,
+                        coverUrl: model.loadingCover, live: live, onSkip: onSkip,
+                        cleanMode: cleanMode,
+                        introPosition: model.position, introDuration: model.duration,
+                        isIntroPlaying: model.isPlaying, isIntroScrubbing: isScrubbing,
+                        onIntroTogglePlayPause: { model.togglePlayPause() },
+                        onIntroScrubStarted: { isScrubbing = true },
+                        onIntroScrub: { ratio in model.seek(to: ratio * model.duration) },
+                        onIntroScrubEnded: { isScrubbing = false })
+    }
+
+    /// Test-only seam (`*ForTesting` naming, docs/unit-test-discipline.md §3): the composed
+    /// `StartScreenView`, regardless of `model.startPhase` (so a test can assert the wiring —
+    /// `introPosition`/`introDuration`/`isIntroPlaying` reading from `model`, and the four
+    /// intro interaction closures being non-nil/forwarding — without needing `startPhase ==
+    /// .splash` to make `body` compose anything).
+    var startScreenViewForTesting: StartScreenView { startScreenView }
 
     var body: some View {
         if model.startPhase != .done {
-            StartScreenView(theme: theme, phase: model.startPhase,
-                            coverUrl: model.loadingCover, live: live, onSkip: onSkip)
+            startScreenView
         }
     }
 }

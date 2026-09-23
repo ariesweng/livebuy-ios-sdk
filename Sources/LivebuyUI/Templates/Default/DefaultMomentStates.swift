@@ -124,6 +124,14 @@ public final class DefaultEndScreenState {
     private(set) public var hot: [LBHotItem] = []
     private(set) public var countdown: LBEndScreenCountdown?
 
+    /// 這場直播目前已播出的時長，**原始秒數，未格式化**（`endscreen-live-duration-ios-template`）.
+    /// Direct pass-through of core `LBPlayerMomentState.liveDurationSeconds`
+    /// (`endscreen-live-duration-ios-core`). `nil` when VOD or no `/sdk/video/goods` poll has
+    /// landed yet for this video. template MUST NOT format this into `"HH:MM:SS"` — that is a
+    /// reference-ui concern (mirrors the `scheduledStartAt` "core/template don't format"
+    /// precedent).
+    private(set) public var liveDurationSeconds: Int?
+
     /// Whether the end screen should be shown at all — mirrors core
     /// `LBPlayerMomentState.endScreenShown` (true on live_end, REGARDLESS of next/hot).
     /// Orthogonal to `countdown`: `endScreenVisible == true && countdown == nil` ⟺ the
@@ -140,9 +148,10 @@ public final class DefaultEndScreenState {
     init() {}
 
     /// Ingest one moment-state end-screen snapshot. Diff-then-notify on the
-    /// (next ids, hot ids, countdown) tuple.
+    /// (next ids, hot ids, countdown, endScreenShown, liveDurationSeconds) tuple.
     func handleMoment(next: [LBNavItem], hot: [LBHotItem],
-                      countdownActive: Bool, remain: Int, endScreenShown: Bool) {
+                      countdownActive: Bool, remain: Int, endScreenShown: Bool,
+                      liveDurationSeconds: Int? = nil) {
         let total = resolveTotal(active: countdownActive, remain: remain)
         let newCountdown = (countdownActive && !next.isEmpty)
             ? LBEndScreenCountdown(remain: remain, total: total ?? remain)
@@ -151,11 +160,13 @@ public final class DefaultEndScreenState {
             || hot.map(\.id) != self.hot.map(\.id)
             || newCountdown != countdown
             || endScreenShown != endScreenVisible
+            || liveDurationSeconds != self.liveDurationSeconds
         guard changed else { return }
         self.next = next
         self.hot = hot
         self.countdown = newCountdown
         self.endScreenVisible = endScreenShown
+        self.liveDurationSeconds = liveDurationSeconds
         onMutation?()
     }
 

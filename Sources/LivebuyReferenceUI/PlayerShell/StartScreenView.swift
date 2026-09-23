@@ -51,8 +51,20 @@ import LivebuyUI
 //   • `.splash`    → the opening video plays through the NORMAL path with the family-1
 //                    subject chrome (LIVE / VOD) visible; the ONLY added UI is a
 //                    bottom-right「略過介紹」skip button (`onSkip`). NO 片頭 tag / muted
-//                    indicator / brand backdrop / lower-third card / progress bar (design
-//                    `LBPSkipIntroButton`; 開場不接管畫面 + 開場影片有聲).
+//                    indicator / brand backdrop / lower-third card (design
+//                    `LBPSkipIntroButton`; 開場不接管畫面 + 開場影片有聲). **ADDED
+//                    (rb-ios-clean-mode-upcoming-intro-coverage, functional extension — no
+//                    design-canvas coverage, see that change's proposal.md「Why」)**: while
+//                    `cleanMode == true` the skip button hides instead, and a FULLY
+//                    INTERACTIVE expanded progress track shows in its place — see that MARK
+//                    section below. **MODIFIED (rb-ios-intro-progress-bar-interactive)**: the
+//                    original delivery was a hand-drawn, read-only, `.allowsHitTesting(false)`
+//                    track (intro had no play/pause/seek routing in core at the time).
+//                    `intro-player-seek-progress-core` has since wired
+//                    `togglePlayPause()`/`seek(seconds:)`/`publishPlaybackProgress()` to the
+//                    intro player, so this track is now a REAL `PlaybackProgressBarView`
+//                    instance — pausable, playable, drag-to-seek, same as the VOD expanded
+//                    transport bar.
 //   • `.done`      → renders NOTHING (`EmptyView`).
 //
 // iOS-14-safe (design §"守住的不變式": iOS-14 樓地板): uses only `ZStack` / `VStack`
@@ -98,18 +110,93 @@ public struct StartScreenView: View {
     /// so demo / snapshot instances construct action-free.
     public let onSkip: (() -> Void)?
 
+    /// Clean-mode gesture state (rb-ios-clean-mode-upcoming-intro-coverage ADDED — functional
+    /// extension, no design-canvas coverage). Mirrors `PlayerShellView`'s private `cleanMode`
+    /// `@State` (short-tap toggle, `rb-ios-gesture-clean-mode-v2`) — this surface does NOT
+    /// detect the gesture itself, it only reads the resolved snapshot value, same one-way-data-
+    /// flow contract as `phase`. `true` while `.splash`: hides `skipIntroButton`, shows the
+    /// interactive expanded progress track instead. Default `false` keeps every existing call
+    /// site and every demo / snapshot baseline byte-identical.
+    public let cleanMode: Bool
+
+    /// Opening-video current playhead, seconds (rb-ios-clean-mode-upcoming-intro-coverage
+    /// ADDED, rb-ios-intro-progress-bar-interactive MODIFIED to be real data). Feeds the intro
+    /// progress bar's fill ratio while `cleanMode == true`. Distinct from
+    /// `PlayerShellModel.position` in NAME only — the host (`StartScreenHostView`) now feeds
+    /// this parameter FROM `model.position` directly, since `intro-player-seek-progress-core`
+    /// made that same published value correctly track the opening MP4's playhead while
+    /// `model.introPlaying == true` (a separate `introPlayer` engine, but `PlayerShellModel`'s
+    /// `position`/`duration`/`isPlaying` are pure forwarders that now route through it). Default
+    /// `0` (demo / snapshot / not-yet-wired call sites).
+    public let introPosition: Double
+
+    /// Opening-video total duration, seconds (rb-ios-clean-mode-upcoming-intro-coverage ADDED,
+    /// rb-ios-intro-progress-bar-interactive MODIFIED to be real data). Same provenance note as
+    /// `introPosition`. Default `0`.
+    public let introDuration: Double
+
+    /// Whether the opening video is currently playing (rb-ios-intro-progress-bar-interactive
+    /// ADDED). Drives the progress bar's play/pause icon (`PlaybackProgressBarView.isPlaying`).
+    /// The host feeds this FROM `model.isPlaying` — same provenance note as `introPosition`.
+    /// Default `false`.
+    public let isIntroPlaying: Bool
+
+    /// `true` while the finger is actually down on the intro progress bar
+    /// (rb-ios-intro-progress-bar-interactive ADDED). Drives the drag-time timestamp readout —
+    /// same role as `PlaybackProgressBarView.isScrubbing` at the VOD call site, but this is a
+    /// COMPLETELY SEPARATE piece of state (`StartScreenHostView` owns its own `@State`, not
+    /// shared with `PlayerShellView`'s `isScrubbing` — two independent render trees). Default
+    /// `false`.
+    public let isIntroScrubbing: Bool
+
+    /// Intro progress bar play/pause tap → host-wired `model.togglePlayPause()`
+    /// (rb-ios-intro-progress-bar-interactive ADDED). `nil` → inert (demo / snapshot).
+    public let onIntroTogglePlayPause: (() -> Void)?
+
+    /// Intro progress bar touch-down on the track → host reports scrub start
+    /// (rb-ios-intro-progress-bar-interactive ADDED). `nil` → inert.
+    public let onIntroScrubStarted: (() -> Void)?
+
+    /// Intro progress bar drag moved → the new ratio `[0, 1]` (rb-ios-intro-progress-bar-
+    /// interactive ADDED). Host forwards to `model.seek(to: ratio * model.duration)`. `nil` →
+    /// inert (demo / snapshot; the visual still tracks locally, same as
+    /// `PlaybackProgressBarView`'s own `dragRatio`).
+    public let onIntroScrub: ((Double) -> Void)?
+
+    /// Intro progress bar finger lifted → host reports scrub end
+    /// (rb-ios-intro-progress-bar-interactive ADDED). `nil` → inert.
+    public let onIntroScrubEnded: (() -> Void)?
+
     public init(
         theme: ReferenceUITheme,
         phase: LBStartScreenPhase,
         coverUrl: String = "",
         live: Bool = false,
-        onSkip: (() -> Void)? = nil
+        onSkip: (() -> Void)? = nil,
+        cleanMode: Bool = false,
+        introPosition: Double = 0,
+        introDuration: Double = 0,
+        isIntroPlaying: Bool = false,
+        isIntroScrubbing: Bool = false,
+        onIntroTogglePlayPause: (() -> Void)? = nil,
+        onIntroScrubStarted: (() -> Void)? = nil,
+        onIntroScrub: ((Double) -> Void)? = nil,
+        onIntroScrubEnded: (() -> Void)? = nil
     ) {
         self.theme = theme
         self.phase = phase
         self.coverUrl = coverUrl
         self.live = live
         self.onSkip = onSkip
+        self.cleanMode = cleanMode
+        self.introPosition = introPosition
+        self.introDuration = introDuration
+        self.isIntroPlaying = isIntroPlaying
+        self.isIntroScrubbing = isIntroScrubbing
+        self.onIntroTogglePlayPause = onIntroTogglePlayPause
+        self.onIntroScrubStarted = onIntroScrubStarted
+        self.onIntroScrub = onIntroScrub
+        self.onIntroScrubEnded = onIntroScrubEnded
     }
 
     // MARK: - Body (phase dispatch — mirrors the moments.jsx start components' branches)
@@ -201,18 +288,56 @@ public struct StartScreenView: View {
     /// removed per the latest design — the intro now plays unmuted with chrome, not a
     /// muted brand splash).
     private var splashScreen: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            HStack(spacing: 0) {
+        ZStack {
+            VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                skipIntroButton
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    // 乾淨模式隱藏「略過介紹」(rb-ios-clean-mode-upcoming-intro-coverage ADDED —
+                    // 功能擴充，design 稿本無此規範，見該 change proposal.md「Why」).
+                    if !cleanMode {
+                        skipIntroButton
+                    }
+                }
+            }
+            .padding(.trailing, Self.skipTrailing)
+            .padding(.bottom, Self.skipBottom)
+
+            // 乾淨模式展開進度條 (rb-ios-clean-mode-upcoming-intro-coverage ADDED, rb-ios-intro-
+            // progress-bar-interactive MODIFIED)：直接組合真正的 `PlaybackProgressBarView` 元件
+            // 實例——core 層 `intro-player-seek-progress-core` 已補齊開場影片的 play/pause/seek
+            // 路由與進度發布，此元件的無條件 play/pause 鈕與無條件 `DragGesture`（上一批 design.md
+            // 認定「無法適配」的兩點）現在剛好就是這次要的行為，不再手繪一份唯讀版本。`isExpanded`
+            // 恆為 `true`——開場沒有「未展開細線態」這個概念，只在 `cleanMode == true` 才出現。
+            // 「退出乾淨模式」小圓鈕已由 `PlayerShellView` 既有、無條件於 `cleanMode == true` 時渲
+            // 染的按鈕涵蓋，這裡不重複。
+            if cleanMode {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    PlaybackProgressBarView(
+                        theme: theme,
+                        position: introPosition,
+                        duration: introDuration,
+                        isPlaying: isIntroPlaying,
+                        isScrubbing: isIntroScrubbing,
+                        isExpanded: true,
+                        onTogglePlayPause: onIntroTogglePlayPause,
+                        onScrubStarted: onIntroScrubStarted,
+                        onScrub: onIntroScrub,
+                        onScrubEnded: onIntroScrubEnded)
+                }
             }
         }
-        .padding(.trailing, Self.skipTrailing)
-        .padding(.bottom, Self.skipBottom)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(LBAccessibilityID.momentStart)
     }
+
+    // MARK: - .splash cleanMode — interactive intro progress track (rb-ios-clean-mode-upcoming-
+    //         intro-coverage ADDED as a hand-drawn read-only track, rb-ios-intro-progress-bar-
+    //         interactive MODIFIED to directly compose the real `PlaybackProgressBarView`
+    //         instance instead — see `splashScreen` above for the composition. No pure-function
+    //         ratio helper or hand-drawn view lives here anymore: `PlaybackProgressBarView` owns
+    //         its own `progressRatio`/drag/token logic, reused as-is.)
 
     /// Bottom-right「略過介紹」skip button (design `LBPSkipIntroButton`). A translucent
     /// blurred capsule with a soft shadow. The label is STATIC「略過介紹」— the design's
@@ -296,9 +421,16 @@ public extension StartScreenView {
     /// / snapshot tests render statically.
     static func demo(
         theme: ReferenceUITheme = ReferenceUIThemePalette.minimal,
-        phase: LBStartScreenPhase = .splash
+        phase: LBStartScreenPhase = .splash,
+        cleanMode: Bool = false,
+        introPosition: Double = 0,
+        introDuration: Double = 0,
+        isIntroPlaying: Bool = false,
+        isIntroScrubbing: Bool = false
     ) -> StartScreenView {
-        StartScreenView(theme: theme, phase: phase)
+        StartScreenView(theme: theme, phase: phase, cleanMode: cleanMode,
+                        introPosition: introPosition, introDuration: introDuration,
+                        isIntroPlaying: isIntroPlaying, isIntroScrubbing: isIntroScrubbing)
     }
 }
 

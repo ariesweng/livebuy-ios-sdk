@@ -127,8 +127,15 @@ public struct PlaybackProgressBarView: View {
             }
             .padding(.horizontal, isExpanded ? Self.transportHorizontalPadding : 0)
         }
-        // Reset the local drag ratio once the bar is fully back to idle so the NEXT scrub starts
-        // clean rather than briefly flashing a stale ratio before the first `onChanged` fires.
+        // rb-ios-intro-progress-bar-followup-fix: this is now a DEFENSIVE FALLBACK only — the
+        // MAIN reset path is `endScrub()` (fires synchronously on `DragGesture.onEnded`,
+        // independent of `isExpanded`; see below). This `.onChange` still matters for the one
+        // case `endScrub()` cannot cover: a scrub interrupted by the app backgrounding (incl.
+        // auto-PiP) delivers `touchesCancelled`, which `DragGesture` has no callback for at all —
+        // `PlayerShellView.handleDidEnterBackground()` ends the scrub by changing the
+        // `isScrubbing`/`isExpanded` PROPS fed into a new render of this view, never by invoking
+        // this view's own gesture closures. Both resets are idempotent no-ops once `dragRatio`
+        // is already `nil`, so they safely coexist (see design.md D1).
         .onChange(of: isExpanded) { expanded in
             if !expanded { dragRatio = nil }
         }
@@ -146,6 +153,13 @@ public struct PlaybackProgressBarView: View {
                 .frame(width: Self.playPauseButtonSize, height: Self.playPauseButtonSize)
         }
         .buttonStyle(PlainButtonStyle())
+        // rb-ios-intro-progress-bar-followup-fix: enlarge the tap target without touching any
+        // rendered pixel — same `.contentShape(Rectangle().inset(by: -N))` pattern already used
+        // elsewhere in this module (WinClaimModalView / NowIntroducingCarouselView /
+        // LiveOverlayChromeView). `N` (`playPauseHitAreaExpansion`) is kept < `transportSpacing`
+        // (see that token's doc comment) so the expanded hit-rect cannot reach into
+        // `trackAndFill`'s own (unexpanded) `contentShape`.
+        .contentShape(Rectangle().inset(by: -Self.playPauseHitAreaExpansion))
         .accessibilityIdentifier(LBAccessibilityID.playbackProgressPlayPause)
     }
 
@@ -242,7 +256,30 @@ public struct PlaybackProgressBarView: View {
         onScrubStarted?()
     }
 
-    private func endScrub() {
+    /// (default) internal, not `private` — a test can call this directly on a freshly-constructed
+    /// struct value to prove the SYNCHRONOUS, state-independent side effect it still has (invoking
+    /// `onScrubEnded?()` — a plain closure capture, reliable to observe regardless of view
+    /// installation). The `dragRatio = nil` reset itself, below, is NOT independently testable
+    /// this way: SwiftUI's `@State` on a struct value that was never installed into a live view
+    /// hierarchy behaves as a constant binding fixed to its `init`-time value — writes attempted
+    /// before installation are silently discarded (confirmed empirically while authoring this fix:
+    /// both a raw post-call property read AND a render-after-the-call pixel comparison failed to
+    /// observe the mutation, on a value that was never installed). This is the same class of gap
+    /// `PlayerShellScrubBackgroundResetTests.swift` documents for its own async `.onReceive` path;
+    /// this reset is verified the same way that file's boundary note describes: source inspection
+    /// (see below) + successful build + the full existing `LivebuyReferenceUITests` suite passing
+    /// byte-identical (this component's rendering output for every EXISTING call shape is
+    /// unchanged — only a new, real-device-only interactive path is added).
+    ///
+    /// rb-ios-intro-progress-bar-followup-fix: resets `dragRatio` to `nil` FIRST — this is the
+    /// MAIN reset path (fires on every normal finger-lift, independent of `isExpanded`). Fixes
+    /// the intro/clean-mode caller (`StartScreenView`), which hardcodes `isExpanded: true` (no
+    /// "collapsed thin-line" concept during intro playback), so the OTHER reset mechanism
+    /// (`.onChange(of: isExpanded)`, kept below in `body` as a defensive fallback for the
+    /// backgrounding-interruption path — see its comment) never used to fire there, permanently
+    /// pinning `dragRatio` after the user's first drag.
+    func endScrub() {
+        dragRatio = nil
         onScrubEnded?()
     }
 
@@ -256,6 +293,13 @@ public struct PlaybackProgressBarView: View {
     static let transportHorizontalPadding: CGFloat = 12
     static let playPauseButtonSize: CGFloat = 28
     static let playPauseIconSize: CGFloat = 14
+    /// rb-ios-intro-progress-bar-followup-fix: how far `playPauseButton`'s tap target expands
+    /// outward on all 4 edges beyond its visual `playPauseButtonSize` frame. MUST stay strictly
+    /// less than `transportSpacing` (10pt at the time this was measured — re-check the live
+    /// value if it has since changed) so the expanded hit-rect never reaches `trackAndFill`'s own
+    /// (unexpanded) `contentShape`, which begins exactly at the end of that gap. `4` leaves a 6pt
+    /// buffer before the track's hit area (verified via `PlaybackProgressBarDragResetFollowupTests`).
+    static let playPauseHitAreaExpansion: CGFloat = 4
     static let trackHeight: CGFloat = 3
     static let expandedTrackBackgroundOpacity: Double = 0.35
     static let handleSize: CGFloat = 14

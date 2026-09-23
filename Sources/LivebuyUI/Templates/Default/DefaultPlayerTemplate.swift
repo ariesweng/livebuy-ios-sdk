@@ -827,7 +827,8 @@ public final class DefaultPlayerTemplate {
                                    hot: s.hotItems,
                                    countdownActive: s.autoNextCountdownActive,
                                    remain: s.autoNextRemainingSeconds,
-                                   endScreenShown: s.endScreenShown)
+                                   endScreenShown: s.endScreenShown,
+                                   liveDurationSeconds: s.liveDurationSeconds)
             // suppress-product-overlay-during-intro-ios-template: while the intro MP4
             // preroll is playing (`s.startScreenActive`), the exposed products/activeProduct
             // are suppressed to []/nil (the raw data is still recorded internally and

@@ -5,6 +5,37 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.22.0] - 2026-09-23
+
+> **Minor。** 自 `4.21.1` 以來累積 57 個相關 commit，歸為 6 個分類，其中 4 個涉及 iOS（開場
+> 影片乾淨模式全面重做、直播結束畫面顯示真實時長、直播結束引擎偵測缺口、直播預告乾淨模式訂正）。
+> **零公開 API BREAKING**。完整敘述見
+> [`docs/release-notes/v4.22.0.md`](../docs/release-notes/v4.22.0.md)。
+
+### Added
+
+- **直播結束畫面顯示真實直播時長**（core + reference-ui）：`LBPlayerMomentState` 新增
+  `liveDurationSeconds: Int?`（來源 `StatContextStore.liveTime(videoId:)`），經 view-model 層
+  遞送，`EndScreen` 空狀態的「直播時長：」行終於能顯示真實值（原永遠 `--:--:--` fallback）。
+  `nil` 情境（VOD / 尚無資料 / `enableStatReporting == false`）維持既有 fallback 不變。
+- **開場影片（intro MP4）乾淨模式展開進度條改為完全可互動**：可暫停/播放、可拖曳 seek（原為
+  唯讀展示）。`togglePlayPause()` / `seek()` / `seekBy()` / 進度回報皆補齊 intro 播放期間的
+  正確路由；乾淨模式同時隱藏右下角略過鈕。
+
+### Fixed
+
+- **直播結束由播放引擎（IVS）偵測到時，先前不會晉升結束畫面子狀態**：真機/模擬器對真實直播
+  實測發現，若引擎自己偵測到串流終止（早於 5 秒輪詢偵測 `live_end==1`），`playerState` 只停在
+  `ended`，結束畫面永遠不出現；比照既有輪詢路徑行為修正。
+- **直播預告（awaitingLive）單擊訂正為完全不觸發乾淨模式**：上一批誤把使用者原始回報當作「單擊
+  沒反應是 bug」實作成「單擊觸發乾淨模式」，事後澄清這其實描述的是期望行為——直播預告本就不該
+  支援乾淨模式，本輪整段訂正回正確方向。
+- **開場影片乾淨模式展開進度條拖動放開後失去與播放進度同步**：重置邏輯原本只依賴監看
+  `isExpanded` 變化，但開場呼叫端永遠不會觸發這個變化，導致拖曳一次後畫面永久卡死；改為放開
+  手指當下直接重置。
+- **開場影片乾淨模式展開進度條播放/暫停按鈕熱區加大**：不改變視覺、不與進度條軌道觸控範圍
+  重疊。
+
 ## [4.21.1] - 2026-09-21
 
 > **Patch。** 延續 `4.21.0`，本輪為純 bug fix，僅 iOS：1 項視覺對齊修復。無新增/移除公開
