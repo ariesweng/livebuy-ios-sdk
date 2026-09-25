@@ -1197,6 +1197,15 @@ public final class DefaultPlayerTemplate {
         if Self.addToCartRequiresLoginLocally(requireLogin: Livebuy.shared?.requireLoginForAddToCart ?? false,
                                                isLoggedIn: Livebuy.isLoggedIn) {
             applyAddNeedsLogin()
+            // cart-add-auth-required-parity-template: also fire the cross-platform
+            // `AUTH_REQUIRED` event so a purely headless host (no `LivebuyUI` attached)
+            // can observe this proactive gate too — `applyAddNeedsLogin()` above only
+            // flips the `LivebuyUI`-local `addToCartNeedsLogin` flag, which a headless
+            // host has no way to read. Unconditional and independent of the call above:
+            // `addToCartNeedsLogin` is already set regardless of this call's return value
+            // (mirrors the backend-401 branch below, which likewise never inspects it).
+            _ = Livebuy.dispatchAuthRequired(triggerAction: "cart_add",
+                                              videoId: currentVideoId ?? player?.channel?.id)
             return
         }
         // Guard 1 — sold-out / no stock.

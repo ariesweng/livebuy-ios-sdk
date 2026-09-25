@@ -60,26 +60,39 @@ public struct CarouselHeaderView: View {
     /// layer NEVER navigates / opens the player itself.
     private let onSeeMore: (() -> Void)?
 
+    /// Host-facing display switch (rb-ios-widget-carousel-header-visibility D1):
+    /// `true` (default) → unchanged behavior. `false` → the WHOLE header row
+    /// (title + subtitle + 「查看更多」) never renders, regardless of
+    /// `hasHeaderContent`. Distinct from `hasHeaderContent` below — this is the
+    /// HOST's stated intent, not a content-derived signal. Final gate:
+    /// `showsHeader && hasHeaderContent`.
+    public let showsHeader: Bool
+
     public init(
         theme: ReferenceUITheme,
         title: String = "精選影片",
         subtitle: String? = nil,
-        onSeeMore: (() -> Void)? = nil
+        onSeeMore: (() -> Void)? = nil,
+        showsHeader: Bool = true
     ) {
         self.theme = theme
         self.title = title
         self.subtitle = subtitle
         self.onSeeMore = onSeeMore
+        self.showsHeader = showsHeader
     }
 
-    /// Whether the header shows — `title` non-empty OR a `subtitle` exists
-    /// (mirrors `LBPCarousel`'s `(title || subtitle) && (...)`, widgets.jsx 208).
-    private var showsHeader: Bool {
+    /// Whether the header HAS CONTENT to show — `title` non-empty OR a
+    /// `subtitle` exists (mirrors `LBPCarousel`'s `(title || subtitle) && (...)`,
+    /// widgets.jsx 208). Renamed from the former `showsHeader` (rb-ios-widget-
+    /// carousel-header-visibility D1) to free that name for the host-facing
+    /// switch above — this property is purely content-derived, not host intent.
+    private var hasHeaderContent: Bool {
         !title.isEmpty || (subtitle?.isEmpty == false)
     }
 
     public var body: some View {
-        if showsHeader {
+        if showsHeader && hasHeaderContent {
             headerRow
         }
     }

@@ -72,6 +72,7 @@ public struct MinimalDesign: ReferenceUIDesign {
             ScrollableCarouselView(
                 model: context.model,
                 theme: context.theme,
+                showsHeader: context.showsHeader,
                 live: context.live,
                 onSeeMore: context.onSeeMore,
                 onTapVideo: context.onTapVideo))

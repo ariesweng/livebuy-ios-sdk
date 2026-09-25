@@ -45,6 +45,12 @@ public struct LivebuyWidgetConfig {
     /// push its own see-all / 影音商城 page.
     public var onSeeMore: (() -> Void)?
 
+    /// Carousel header-row display switch (rb-ios-widget-carousel-header-visibility,
+    /// opt-out). DEFAULT: `true` (unchanged behavior — the「精選影片」header row +「查看
+    /// 更多」link show as before). `false` → the WHOLE header row is hidden; the card
+    /// strip is unaffected. Grid mode (`.grid`) has no header concept and ignores this.
+    public var showsHeader: Bool = true
+
     /// Called after the first load with the ordered video feed, so a host can keep its own
     /// list state in sync (e.g. a floating live-entry preview). DEFAULT: `nil`.
     public var onVideosChanged: (([LBVideoItem]) -> Void)?
@@ -133,6 +139,15 @@ final class LivebuyWidgetController: ObservableObject {
     /// finish first — otherwise `loadFirstPage()` would hit `requireAPIClient()` and `fatalError`.
     /// With a valid shop + credentials this shows REAL `/sdk/widget` videos; it only falls back
     /// to demo fixtures when the live fetch is empty AND the host opted in.
+    ///
+    /// Brackets the `template?.reload()` call with `model.setFirstLoadInFlight(...)`
+    /// (rb-ios-widget-loading-placeholder — see `WidgetModel.setFirstLoadInFlight`'s doc
+    /// comment for why this is necessary rather than relying on the template's own
+    /// diff-then-notify observer): `true` immediately before starting the reload, `false`
+    /// immediately after it returns, UNCONDITIONALLY. Deterministic (no Swift-concurrency
+    /// timing assumption) and scoped to ONLY this one-time first load — `autoRefreshTick()`
+    /// and `requestLoadMore()` never touch this seam, so the loading placeholder never
+    /// reappears for periodic refresh / grid pagination.
     @MainActor
     func loadIfNeeded() async {
         guard !didLoad else { return }
@@ -144,7 +159,11 @@ final class LivebuyWidgetController: ObservableObject {
             waited += 1
         }
 
-        if Livebuy.shared != nil { await template?.reload() }
+        if Livebuy.shared != nil {
+            model.setFirstLoadInFlight(true)
+            await template?.reload()
+            model.setFirstLoadInFlight(false)
+        }
 
         if lbWidgetShouldUseDemoFallback(
             videosEmpty: model.videos.isEmpty, enabled: config.showsDemoFallbackWhenEmpty) {
@@ -318,7 +337,8 @@ public struct LivebuyWidget: View {
             //   DEFAULT in-app player (effectiveOnTapVideo).
             onTapVideo: externalLiveAwareTap(effectiveOnTapVideo),
             onSeeMore: config.onSeeMore,
-            onLoadMore: { controller.requestLoadMore() })
+            onLoadMore: { controller.requestLoadMore() },
+            showsHeader: config.showsHeader)
         switch mode {
         case .grid:
             return resolveDesign().widgetGrid(context)

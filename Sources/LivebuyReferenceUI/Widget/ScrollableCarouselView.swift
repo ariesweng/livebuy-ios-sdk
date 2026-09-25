@@ -90,6 +90,12 @@ public struct ScrollableCarouselView: View {
     /// Optional section subtitle, forwarded to `CarouselHeaderView`.
     public let subtitle: String?
 
+    /// Host-facing header-row display switch (rb-ios-widget-carousel-header-
+    /// visibility), forwarded UNTOUCHED to `CarouselHeaderView`. DEFAULT `true`
+    /// (unchanged behavior) — `false` hides the WHOLE header row (title +
+    /// subtitle + 「查看更多」), the card strip is unaffected.
+    public let showsHeader: Bool
+
     /// Card width (pt), forwarded to `CarouselRowView`. Defaults to the design's 132.
     public let cardWidth: CGFloat
 
@@ -111,6 +117,7 @@ public struct ScrollableCarouselView: View {
         theme: ReferenceUITheme,
         title: String = "精選影片",
         subtitle: String? = nil,
+        showsHeader: Bool = true,
         cardWidth: CGFloat = 132,
         live: Bool = false,
         onSeeMore: (() -> Void)? = nil,
@@ -120,6 +127,7 @@ public struct ScrollableCarouselView: View {
         self.resolvedTheme = theme
         self.title = title
         self.subtitle = subtitle
+        self.showsHeader = showsHeader
         self.cardWidth = cardWidth
         self.live = live
         self.onSeeMore = onSeeMore
@@ -133,7 +141,8 @@ public struct ScrollableCarouselView: View {
                 theme: theme,
                 title: title,
                 subtitle: subtitle,
-                onSeeMore: onSeeMore)
+                onSeeMore: onSeeMore,
+                showsHeader: showsHeader)
 
             // Wrapper-owned horizontal scroll around the FULL strip
             // (`maxCards: nil` → ALL videos; intrinsic width via the row's

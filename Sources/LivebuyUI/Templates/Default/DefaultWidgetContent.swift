@@ -73,11 +73,18 @@ public struct LBWidgetContent: Equatable {
     /// deliberately does NOT substitute the backend default. Applying a default
     /// is the reference-ui layer's job (widget-product-card-content-template D2).
     public let productCard: String?
+    /// `isLoading` — widget-loading-placeholder-ios-template. `true` while the FIRST page is
+    /// in flight (`currentPage == 0 && isFetching == true`); derived from core
+    /// `LivebuyWidgetCore`'s existing `currentPage` / `isFetching` — no core field added. See
+    /// `LBWidgetContent.deriveIsLoading(currentPage:isFetching:)`: pagination (`requestLoadMore`,
+    /// which only runs once `currentPage >= 1`) MUST NOT flip this back to `true` — it is a
+    /// distinct, already-handled UI state (append to an already-rendered list).
+    public let isLoading: Bool
 
     public init(videos: [LBVideoItem], mode: LBWidgetContentMode,
                 currentPage: Int, lastPage: Int, liveVideo: LBVideoItem?,
                 widgetColor: Int, widgetBgcolor: String?,
-                productCard: String? = nil) {
+                productCard: String? = nil, isLoading: Bool = false) {
         self.videos = videos
         self.mode = mode
         self.currentPage = currentPage
@@ -86,16 +93,27 @@ public struct LBWidgetContent: Equatable {
         self.widgetColor = widgetColor
         self.widgetBgcolor = widgetBgcolor
         self.productCard = productCard
+        self.isLoading = isLoading
     }
 
     /// The empty / not-loaded default snapshot (core defaults: `currentPage = 0`,
     /// `lastPage = 1`, `widgetColor = 1`, `widgetBgcolor = nil`,
-    /// `productCard = nil` — NOT the backend default `"inside"`). Mode is supplied
-    /// since it depends on the widget's configured `WidgetMode`.
+    /// `productCard = nil` — NOT the backend default `"inside"`; `isLoading = false` — not yet
+    /// attached / not yet loading). Mode is supplied since it depends on the widget's
+    /// configured `WidgetMode`.
     static func empty(mode: LBWidgetContentMode) -> LBWidgetContent {
         LBWidgetContent(videos: [], mode: mode, currentPage: 0, lastPage: 1,
                         liveVideo: nil, widgetColor: 1, widgetBgcolor: nil,
-                        productCard: nil)
+                        productCard: nil, isLoading: false)
+    }
+
+    /// Pure derivation: core `currentPage` + `isFetching` → the "first page is loading"
+    /// signal (widget-loading-placeholder-ios-template). `currentPage == 0` gates out
+    /// `requestLoadMore` (which only ever runs once `currentPage >= 1`), so a load-more
+    /// fetch never flips this back to `true` — only the FIRST `loadFirstPage()` fetch does.
+    /// Pure for unit testing.
+    static func deriveIsLoading(currentPage: Int, isFetching: Bool) -> Bool {
+        currentPage == 0 && isFetching
     }
 
     /// Per-video diff signature for the snapshot equality guard. Beyond the stable
@@ -142,6 +160,7 @@ public struct LBWidgetContent: Equatable {
             && lhs.widgetColor == rhs.widgetColor
             && lhs.widgetBgcolor == rhs.widgetBgcolor
             && lhs.productCard == rhs.productCard
+            && lhs.isLoading == rhs.isLoading
             && lhs.liveVideo.map(videoDiffSignature) == rhs.liveVideo.map(videoDiffSignature)
             && lhs.videos.map(videoDiffSignature) == rhs.videos.map(videoDiffSignature)
     }
@@ -194,7 +213,9 @@ public final class DefaultWidgetContent {
             liveVideo: widget.liveVideo,
             widgetColor: widget.widgetColor,
             widgetBgcolor: widget.widgetBgcolor,
-            productCard: widget.productCard)
+            productCard: widget.productCard,
+            isLoading: LBWidgetContent.deriveIsLoading(currentPage: widget.currentPage,
+                                                        isFetching: widget.isFetching))
         guard next != current else { return }
         current = next
         onMutation?()

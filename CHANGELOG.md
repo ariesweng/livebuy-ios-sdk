@@ -5,6 +5,75 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.23.0] - 2026-09-25
+
+> **Minor。** 自 `4.22.0` 以來累積 11 個相關 commit，歸為 6 個主題。**含 1 項 ⚠️ BREAKING**
+> （行為性、非原始碼破壞性——見下方 BREAKING 段），比照既有先例（v4.9.0/v4.13.0/v4.16.0/
+> v4.17.0/v4.18.0 等皆含 BREAKING 仍判定 minor）維持 minor。完整敘述見
+> [`docs/release-notes/v4.23.0.md`](../docs/release-notes/v4.23.0.md)。
+
+### ⚠️ BREAKING（行為性，非原始碼破壞性）
+
+- **`subscribe` 的登入後重試機制變更**：`toggleSubscribe()` 觸發的 `AUTH_REQUIRED` 原本掛在
+  `PendingAuthStore` 的「`setUser()` 後 30 秒內自動重新 dispatch 同一事件」機制上——這個
+  機制自 2026-05-22 起就存在、已包含在多個已發布 tag（含 `v4.0.0`）內，寫進了已上線的
+  `event-interceptor` spec 承諾文字。本版移除這個自動 replay 承諾，改為 host 需明確呼叫
+  `retryPendingAction(token:)`。**不影響任何 public 符號簽章**（`PendingAuthStore` 本身非
+  public），純粹是**觀察行為**改變：若 host 曾依賴這個自動 replay，現在不會再自動發生。
+  實務影響評估低——舊行為本身「實際上不會重新呼叫訂閱 API，只是再發一次通知」，從未真正
+  完成過重試，唯一差異是 host 會不會再收到一次事件。
+
+### Added
+
+- **AUTH_REQUIRED 覆蓋率補齊 + 登入後明確重試機制**（core）：
+  - `cart_add` 被動接（後端空 `buy_no`）的 `AUTH_REQUIRED` payload 補齊 `video_id`（先前
+    在 Player context 下被結構性丟棄）。
+  - `comment_send` 401（`chatRequiresLogin`）現在也 dispatch `AUTH_REQUIRED`（先前只走
+    既有 chat 錯誤管道，`AUTH_REQUIRED` 是額外可攔截的訊號，不取代既有行為）。
+  - `comment_send` 新增對稱的 opt-in 主動擋：`configure(requireLoginForCommentSend:)`
+    （預設 `false`）。
+  - 新增 **public** API `Livebuy.dispatchAuthRequired(triggerAction:videoId:productId:)`，
+    讓 template 層（及未來呼叫方）可主動觸發 `AUTH_REQUIRED`——`cart_add` 主動擋
+    （`DefaultPlayerTemplate.addToCart()`）現在會呼叫它，讓純 headless host 也能收到通知
+    （先前只有走 `LivebuyUI` 的 host 讀得到 `addToCartNeedsLogin`）。
+  - 新增「登入後明確重試」機制：`registerPendingRetry(_:)` / `retryPendingAction(token:)` /
+    `discardPendingAction(token:)` 三個 public API，涵蓋 `cart_add` 被動接／`comment_send`
+    被動接／`comment_send` 主動擋／`coupon_claim`（award-claim）主動擋四個 dispatch 點——
+    明確呼叫、不設時限（取代上方 BREAKING 段提到的舊 30 秒自動機制）。
+  - 新增 opt-in 旗標 `configure(requireLoginForAwardClaim:)`（領獎/優惠券前必須登入）——
+    **本版內新增又於同一批次內移除**，最終未對外發布過（見下方「移除」段），純內部演進、
+    不影響本版最終行為。
+- **中獎自動加購登入閘**（core，`award-auto-cart-login-gate`）：`requestAwardClaim` 在
+  `requireLoginForAddToCart` 開啟、獎品為 `product` 型、且使用者未登入時，改為在送出領獎
+  請求（SDK 內部處理）之前擋下（避免先燒券、事後才讓使用者發現拿不到商品）——不呼叫 claim
+  API、不派發 `AWARD_CLAIM_RESULT`，改派帶 `retry_token` 的 `AUTH_REQUIRED`
+  （`trigger_action: award_auto_cart`），可用 `retryPendingAction(token:)` 重試同一次領獎
+  意圖。`discount` 型獎品完全不受影響、行為不變。
+- **播放器初始 seek**（core + reference-ui，`player-load-initial-seek`）：
+  `load(videoId:startAt:)` 新增可選初始 seek 秒數參數，讓 host 從商品頁直接打開指定影片並
+  跳到指定時間點。只對主內容生效（intro-aware，等 intro 播完才套用）、直播靜默丟棄、每次
+  `load()` 呼叫覆蓋殘留值、一次性套用後即清空。drop-in 容器 `LivebuyPlayerConfig` 新增對應
+  欄位 `initialSeekSeconds`，只在容器首次建立套用，換片路徑不套用。
+- **事件補播放進度**（core，`event-progress-timestamp`）：帶 `video_id`-shaped key
+  （`video_id`/`from_video_id`/`to_video_id`）的通知事件，additive 新增 `position`
+  （`Double`，秒）欄位。`VIDEO_SWITCH` 為特例，帶的是切換前 FROM 影片的最後位置。純加法，
+  不影響既有 key／值／派發時機／攔截語意。
+- **輪播/影音商城 widget 首次載入佔位**（template + reference-ui）：`LBWidgetContent` 新增
+  衍生欄位 `isLoading`；`CarouselView`/`VideoShopGridView` 首次載入時顯示品牌 loading 動畫
+  佔位（同高骨架），取代先前完全無佔位、資料一到才彈出完整高度造成的版面跳動；確認為空清單
+  時整個 widget（含 header）不渲染，取代先前的「目前沒有影片」文字。
+- **輪播 widget header 列新增 `showsHeader` opt-out 開關**（reference-ui）：
+  `LivebuyWidgetConfig.showsHeader`（預設 `true`，行為不變），讓 host 可選擇隱藏「精選影片」
+  標題列 + 查看更多連結整列，只保留卡片列本身。
+
+### Removed
+
+- **移除從未發布過的 `requireLoginForAwardClaim`**（`award-claim-login-gate` 退場）：這個
+  旗標在本批次內新增又移除，最終**未曾出現在任何已發布正式版本**，退場不構成對外 breaking
+  change。改用場景更精準的「中獎自動加購登入閘」（見上方）達成類似效果——差別是後者只在
+  `product` 型獎品自動加購時擋，且重用既有 `requireLoginForAddToCart` 全域旗標，不新增獨立
+  旗標。
+
 ## [4.22.0] - 2026-09-23
 
 > **Minor。** 自 `4.21.1` 以來累積 57 個相關 commit，歸為 6 個分類，其中 4 個涉及 iOS（開場

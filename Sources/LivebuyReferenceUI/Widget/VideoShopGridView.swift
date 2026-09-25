@@ -177,47 +177,90 @@ public struct VideoShopGridView: View {
 
     @ViewBuilder
     public var body: some View {
-        if hostScrollable {
-            // HOST-SCROLL EMBEDDING mode: a plain `VStack` root with INTRINSIC height.
-            // `GeometryReader` has no intrinsic height — inside a host vertical
-            // `ScrollView` (an unbounded height proposal) it collapses to zero — so
-            // this mode takes the embed width as the explicit `containerWidth` input
-            // instead of measuring it. Still NEVER a ScrollView / Lazy* in here; the
-            // vertical scroll container is the HOST's.
-            content(containerWidth: containerWidth)
-                .frame(maxWidth: .infinity, alignment: .top)
-                .background(theme.background)
+        // rb-ios-widget-loading-placeholder — three-way display state (design D4): CONFIRMED
+        // EMPTY (not loading, no videos) hides the WHOLE surface. LOADING swaps the grid for a
+        // placeholder row (`content(containerWidth:)` below); CONTENT is the existing
+        // unchanged rendering.
+        switch WidgetSurfaceDisplayState.resolve(isLoading: model.isLoading, hasCards: !model.videos.isEmpty) {
+        case .empty:
+            EmptyView()
+        case .loading, .content:
+            if hostScrollable {
+                // HOST-SCROLL EMBEDDING mode: a plain `VStack` root with INTRINSIC height.
+                // `GeometryReader` has no intrinsic height — inside a host vertical
+                // `ScrollView` (an unbounded height proposal) it collapses to zero — so
+                // this mode takes the embed width as the explicit `containerWidth` input
+                // instead of measuring it. Still NEVER a ScrollView / Lazy* in here; the
+                // vertical scroll container is the HOST's.
+                content(containerWidth: containerWidth)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .background(theme.background)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(LBAccessibilityID.widgetGrid)
+            } else {
+                // GeometryReader makes the 2-column grid FOLLOW the live embed width — a host
+                // page, an iPad column, or a host-controlled embed need not be 360pt wide, and
+                // the per-cell width is derived from the real container width rather than a
+                // hardcoded canvas. GeometryReader is iOS-13+ and, UNLIKE ScrollView / Lazy*,
+                // is a plain layout container (not a scroll container), so it renders correctly
+                // under the `ImageRenderer` snapshot path. The per-surface snapshot test frames
+                // the view at a fixed width, so the baseline stays byte-deterministic while a
+                // live host of any width still gets evenly-filled columns.
+                GeometryReader { proxy in
+                    content(containerWidth: proxy.size.width)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .background(theme.background)
+                }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(LBAccessibilityID.widgetGrid)
-        } else {
-            // GeometryReader makes the 2-column grid FOLLOW the live embed width — a host
-            // page, an iPad column, or a host-controlled embed need not be 360pt wide, and
-            // the per-cell width is derived from the real container width rather than a
-            // hardcoded canvas. GeometryReader is iOS-13+ and, UNLIKE ScrollView / Lazy*,
-            // is a plain layout container (not a scroll container), so it renders correctly
-            // under the `ImageRenderer` snapshot path. The per-surface snapshot test frames
-            // the view at a fixed width, so the baseline stays byte-deterministic while a
-            // live host of any width still gets evenly-filled columns.
-            GeometryReader { proxy in
-                content(containerWidth: proxy.size.width)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .background(theme.background)
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier(LBAccessibilityID.widgetGrid)
         }
     }
 
     /// The shared grid + footer column (both rendering modes — the modes differ only
     /// in the root container / cap, never in the pixels).
+    ///
+    /// rb-ios-widget-loading-placeholder: while `model.isLoading == true` this swaps the real
+    /// grid + footer for `loadingGridRow` — no footer during the first load (`currentPage`
+    /// stays `0` while loading, so `hasMore` would otherwise misleadingly read `true` and show
+    /// the「載入更多影片…」affordance before any page has ever loaded).
+    @ViewBuilder
     private func content(containerWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
-            grid(containerWidth: containerWidth)
-            footer
+            if model.isLoading {
+                loadingGridRow(cellWidth: cellWidth(forContainerWidth: containerWidth))
+            } else {
+                grid(containerWidth: containerWidth)
+                footer
+            }
         }
         .padding(.horizontal, Self.gridPadding)
         .padding(.top, Self.gridPadding)
     }
+
+    /// LOADING placeholder row (rb-ios-widget-loading-placeholder, design D3): TWO
+    /// `.hidden()` real `CarouselCardView` cells (the same 2-col rhythm as a real grid row,
+    /// same `live: false` sizer convention `cardWindow`'s carousel counterpart already uses)
+    /// size the row to the SAME height as a real grid row — never a hardcoded pixel constant
+    /// — with a centered `LoadingMarkAnimationView` overlay (the existing reference-ui brand
+    /// PNG-sequence loader, already used by `StartScreenView`; reused as-is, no new spinner).
+    private func loadingGridRow(cellWidth: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: Self.gridGap) {
+            CarouselCardView(item: Self.sizingCard, theme: theme, width: cellWidth,
+                             productCard: model.productCard)
+            CarouselCardView(item: Self.sizingCard, theme: theme, width: cellWidth,
+                             productCard: model.productCard)
+        }
+        .hidden()
+        .frame(maxWidth: .infinity, alignment: .center)
+        .overlay(LoadingMarkAnimationView())
+    }
+
+    /// A fixed deterministic `LBVideoItem` used ONLY to size `loadingGridRow`'s hidden sizer
+    /// cells — never displayed (the row is `.hidden()`). `productCard` still governs whether
+    /// the sizer includes the `below`-mode product row, so the loading placeholder's height
+    /// stays correct across all three `product_card` display modes.
+    private static let sizingCard = LBVideoItem.demo(id: "grid-loading-sizer")
 
     // MARK: - 2-column grid (PLAIN VStack of HStack rows — NEVER LazyVGrid)
     //

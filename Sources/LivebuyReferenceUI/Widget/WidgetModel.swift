@@ -105,6 +105,19 @@ public final class WidgetModel: ObservableObject {
     /// `LBProductCardMode.normalized(_:)`, consumed by `CarouselCardView`.
     @Published public private(set) var productCard: String?
 
+    /// "First page load in flight" — mirrored from template `content.current.isLoading`
+    /// (widget-loading-placeholder-ios-template: `currentPage == 0 && isFetching`). The
+    /// `CarouselView` / `VideoShopGridView` surfaces read this to draw a centered
+    /// `LoadingMarkAnimationView` placeholder sized to a real card row instead of an empty
+    /// gap (rb-ios-widget-loading-placeholder).
+    ///
+    /// On the LIVE binding this value is ALSO set deterministically by
+    /// `LivebuyWidgetController.loadIfNeeded()` via `setFirstLoadInFlight(_:)` below,
+    /// bracketing its one-time `await template?.reload()` call — see that method's doc
+    /// comment for why the template's own diff-then-notify observer cannot be trusted alone
+    /// to surface this signal on the production call path.
+    @Published public private(set) var isLoading: Bool
+
     // MARK: - Live binding
 
     /// The bound template, when constructed from a live widget. nil for demo /
@@ -157,7 +170,8 @@ public final class WidgetModel: ObservableObject {
             liveVideo: WidgetVisibility.visibleLive(c.liveVideo),
             widgetColor: c.widgetColor,
             widgetBgcolor: c.widgetBgcolor,
-            productCard: c.productCard
+            productCard: c.productCard,
+            isLoading: c.isLoading
         )
     }
 
@@ -177,7 +191,8 @@ public final class WidgetModel: ObservableObject {
         liveVideo: LBVideoItem? = nil,
         widgetColor: Int = 1,
         widgetBgcolor: String? = nil,
-        productCard: String? = nil
+        productCard: String? = nil,
+        isLoading: Bool = false
     ) {
         self.videos = videos
         self.mode = mode
@@ -187,6 +202,7 @@ public final class WidgetModel: ObservableObject {
         self.widgetColor = widgetColor
         self.widgetBgcolor = widgetBgcolor
         self.productCard = productCard
+        self.isLoading = isLoading
     }
 
     deinit {
@@ -216,5 +232,34 @@ public final class WidgetModel: ObservableObject {
         widgetColor = c.widgetColor
         widgetBgcolor = c.widgetBgcolor
         productCard = c.productCard
+        isLoading = c.isLoading
+    }
+
+    // MARK: - First-load-in-flight seam (rb-ios-widget-loading-placeholder)
+    //
+    // NOT `public` — this is an internal seam for `LivebuyWidgetController.loadIfNeeded()`
+    // ONLY (same module). Hosts read `isLoading` (above); they MUST NOT call this.
+    //
+    // WHY THIS EXISTS: the template's own diff-then-notify observer (`refresh(from:)` above,
+    // fired via `template.addObserver`) is NOT sufficient by itself to surface "first load in
+    // flight" on the real production call path. `DefaultWidgetTemplate.reload()` only calls
+    // its internal `refreshContent()` ONCE, after `await widget.loadFirstPage()` has fully
+    // completed — by then core has already reset `isFetching` back to `false` via `defer`, so
+    // `content.current.isLoading` is never observably `true` through that path. Worse, if the
+    // fetch fails and the (already-empty) snapshot doesn't change, `DefaultWidgetContent`'s
+    // diff-then-notify guard means the observer never fires at all, so `refresh(from:)` above
+    // is never even called.
+    //
+    // `LivebuyWidgetController.loadIfNeeded()` (the ONLY call site) works around this
+    // deterministically — NOT via any Swift-concurrency timing assumption — by bracketing its
+    // one-time `await template?.reload()` call: `setFirstLoadInFlight(true)` immediately
+    // before starting the reload, `setFirstLoadInFlight(false)` immediately after it returns,
+    // UNCONDITIONALLY (regardless of whether the template's own observer fired in between). If
+    // the observer DID fire (the normal success path), it re-asserts the same final value
+    // (`false`, since `isFetching` has reverted) — idempotent, no conflict. Scoped to
+    // `loadIfNeeded()` only: the 30s periodic `autoRefreshTick()` and grid pagination's
+    // `requestLoadMore()` never call this, so the placeholder never reappears for those.
+    func setFirstLoadInFlight(_ value: Bool) {
+        isLoading = value
     }
 }

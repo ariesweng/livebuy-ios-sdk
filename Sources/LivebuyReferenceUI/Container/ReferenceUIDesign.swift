@@ -206,6 +206,11 @@ public struct WidgetSurfaceContext {
     public let onTapVideo: ((LBVideoItem) -> Void)?
     public let onSeeMore: (() -> Void)?
     public let onLoadMore: () -> Void
+    /// Host-facing carousel header-row display switch (rb-ios-widget-carousel-
+    /// header-visibility), forwarded to `MinimalDesign.widgetCarousel` →
+    /// `ScrollableCarouselView` → `CarouselHeaderView`. DEFAULT `true` (unchanged
+    /// behavior). Grid surfaces (`widgetGrid`) ignore this — grid has no header.
+    public let showsHeader: Bool
 
     public init(
         model: WidgetModel,
@@ -213,7 +218,8 @@ public struct WidgetSurfaceContext {
         live: Bool,
         onTapVideo: ((LBVideoItem) -> Void)?,
         onSeeMore: (() -> Void)?,
-        onLoadMore: @escaping () -> Void
+        onLoadMore: @escaping () -> Void,
+        showsHeader: Bool = true
     ) {
         self.model = model
         self.theme = theme
@@ -221,6 +227,7 @@ public struct WidgetSurfaceContext {
         self.onTapVideo = onTapVideo
         self.onSeeMore = onSeeMore
         self.onLoadMore = onLoadMore
+        self.showsHeader = showsHeader
     }
 }
 

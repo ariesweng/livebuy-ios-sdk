@@ -148,17 +148,28 @@ public struct CarouselView: View {
         !title.isEmpty || (subtitle?.isEmpty == false)
     }
 
+    @ViewBuilder
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showsHeader {
-                header
+        // rb-ios-widget-loading-placeholder — three-way display state (design D4):
+        // CONFIRMED EMPTY (not loading, no cards) hides the WHOLE surface, header included
+        // (mirrors widgets.jsx `!loading && items.length === 0 → return null`; replaces the
+        // old text-row `emptyRow`). LOADING keeps the header and swaps the card row for a
+        // placeholder (`cardRow` below); CONTENT is the existing unchanged rendering.
+        switch WidgetSurfaceDisplayState.resolve(isLoading: model.isLoading, hasCards: !cards.isEmpty) {
+        case .empty:
+            EmptyView()
+        case .loading, .content:
+            VStack(alignment: .leading, spacing: 0) {
+                if showsHeader {
+                    header
+                }
+                cardRow
             }
-            cardRow
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.background)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(LBAccessibilityID.widgetCarousel)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.background)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(LBAccessibilityID.widgetCarousel)
     }
 
     // MARK: - Header row (title + subtitle + 查看更多 ›)
@@ -188,8 +199,8 @@ public struct CarouselView: View {
 
     @ViewBuilder
     private var cardRow: some View {
-        if cards.isEmpty {
-            emptyRow
+        if model.isLoading {
+            loadingRow
         } else {
             cardWindow
                 .padding(.bottom, 6)
@@ -244,18 +255,25 @@ public struct CarouselView: View {
         Array(model.videos.prefix(Self.maxCards))
     }
 
-    /// Empty-state line (no videos in the carousel content).
-    private var emptyRow: some View {
-        HStack {
-            Spacer(minLength: 0)
-            Text(Self.emptyLabel)
-                .font(.system(size: 13 * theme.fontScale))
-                .foregroundColor(theme.text.opacity(0.45))
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 40)
-        .padding(.horizontal, 16)
+    /// LOADING placeholder row (rb-ios-widget-loading-placeholder, design D3): a `.hidden()`
+    /// real `CarouselCardView` sizes the row to the SAME height as a real card — the SAME
+    /// sizer technique `cardWindow` already uses below, never a hardcoded pixel constant — with
+    /// a centered `LoadingMarkAnimationView` overlay (the existing reference-ui brand
+    /// PNG-sequence loader, already used by `StartScreenView`; reused as-is, no new spinner).
+    private var loadingRow: some View {
+        CarouselCardView(item: Self.sizingCard, theme: theme, width: cardWidth,
+                         productCard: model.productCard)
+            .hidden()
+            .frame(maxWidth: .infinity, alignment: .center)
+            .overlay(LoadingMarkAnimationView())
+            .padding(.bottom, 6)
     }
+
+    /// A fixed deterministic `LBVideoItem` used ONLY to size `loadingRow`'s hidden sizer card
+    /// — never displayed (the card is `.hidden()`). `productCard` still governs whether the
+    /// sizer includes the `below`-mode product row, so the loading placeholder's height stays
+    /// correct across all three `product_card` display modes.
+    private static let sizingCard = LBVideoItem.demo(id: "carousel-loading-sizer")
 
     // MARK: - Fixed presentation constants
 
@@ -267,9 +285,10 @@ public struct CarouselView: View {
     // MARK: - Fixed localized copy (static presentation strings)
     //
     // 「查看更多 ›」moved to `CarouselHeaderView.seeMoreLabel` with the header
-    // decomposition (rb-ios-widget-host-scroll).
-
-    static let emptyLabel = "目前沒有影片"
+    // decomposition (rb-ios-widget-host-scroll). The former「目前沒有影片」empty-state text
+    // row (`emptyLabel` / `emptyRow`) is REMOVED (rb-ios-widget-loading-placeholder) — a
+    // confirmed-empty list now hides the whole surface (see `body` / `DisplayState`) instead
+    // of showing a text row.
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)

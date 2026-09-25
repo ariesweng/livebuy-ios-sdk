@@ -282,6 +282,18 @@ public struct LivebuyPlayerConfig {
     /// never instantiates concrete surface types itself. Backend-selected design is a follow-up.
     public var design: ReferenceUIDesign = MinimalDesign()
 
+    /// One-shot initial seek target (seconds) for THIS `LivebuyPlayer` instance's FIRST load —
+    /// e.g. host opens a specific video straight from a product page and wants playback to jump
+    /// to a product-intro timestamp without the host driving the underlying
+    /// `LivebuyPlayerViewController` itself. Pure forward to core `load(videoId:startAt:)`
+    /// (`player-load-initial-seek-core`); reference-ui does not re-implement any of its
+    /// consume/clear logic (intro-aware, live silently dropped, one-shot). Default `nil` — no
+    /// initial seek, byte-identical to pre-existing behavior. Applied ONLY at the container's
+    /// FIRST build (`startPlayback`); every in-place switch path (host `videoId` prop change,
+    /// live-now / watch-next / hot-pick / retry / recommendation switch-video) intentionally
+    /// does NOT forward this value — see `rb-ios-player-initial-seek` design.md D1.
+    public var initialSeekSeconds: Double?
+
     public init() {}
 }
 
@@ -544,7 +556,19 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
     /// clobbers an in-place switch the viewer made via hot-pick / watch-next / swipe. Reload
     /// in place; the overlay models re-publish on `load` (the proven onPickHot pattern).
     public func updateUIViewController(_ vc: UINavigationController, context: Context) {
-        let coordinator = context.coordinator
+        updatePlayer(coordinator: context.coordinator)
+    }
+
+    /// The cover-guard + in-place reload extracted out of `updateUIViewController(_:context:)` so
+    /// it is directly testable without a real SwiftUI `Context`
+    /// (`UIViewControllerRepresentableContext` has no public initializer) — same technique this
+    /// file already uses for `dismantleUIViewController`, whose SwiftUI protocol requirement
+    /// takes `Coordinator` directly. Pure extraction, zero behavior change (design D2).
+    ///
+    /// Deliberately calls `player.load(videoId:)` WITHOUT `startAt` — `initialSeekSeconds` is a
+    /// one-shot intent for the container's FIRST build only (`startPlayback`), never for a
+    /// host-driven in-place switch (rb-ios-player-initial-seek).
+    func updatePlayer(coordinator: Coordinator) {
         guard let player = coordinator.player,
               coordinator.coverVideoId != videoId else { return }
         coordinator.coverVideoId = videoId
@@ -772,12 +796,19 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
     }
 
     /// Seed coordinator state, load the cover video, wrap in a nav controller (bar hidden).
-    private func startPlayback(player: LivebuyPlayerViewController,
-                               coordinator: Coordinator) -> UINavigationController {
+    ///
+    /// `internal` (not `private`) so `LivebuyPlayerInitialSeekTests` can call it directly with a
+    /// real `LivebuyPlayerViewController` + `Coordinator()` — `startPlayback` needs no SwiftUI
+    /// `Context`, so this is a pure access-level widening with zero behavior change (design D2).
+    func startPlayback(player: LivebuyPlayerViewController,
+                       coordinator: Coordinator) -> UINavigationController {
         coordinator.player = player
         coordinator.coverVideoId = videoId
         coordinator.currentVideoId = videoId
-        player.load(videoId: videoId)
+        // rb-ios-player-initial-seek: forward the one-shot initial seek intent ONLY here — the
+        // container's FIRST build. Every other `load(videoId:...)` call site in this file (in-place
+        // switches) deliberately omits `startAt` — see `LivebuyPlayerConfig.initialSeekSeconds`.
+        player.load(videoId: videoId, startAt: config.initialSeekSeconds)
 
         let nav = UINavigationController(rootViewController: player)
         nav.setNavigationBarHidden(true, animated: false)
