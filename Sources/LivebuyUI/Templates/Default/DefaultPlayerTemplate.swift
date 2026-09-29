@@ -367,6 +367,11 @@ public final class DefaultPlayerTemplate {
     /// NEVER builds an HTTP request itself. Returns the `LBCartResult` on success.
     private let addToCartRequester: (LBCartRequest) async throws -> LBCartResult
 
+    /// Injected retry-token registrar for the proactive add-to-cart login gate
+    /// (`ios-cart-add-proactive-gate-retry-token-template`). Default is core's
+    /// `Livebuy.registerPendingRetry`; tests inject a spy for a deterministic token.
+    private let registerPendingRetryProvider: (@escaping () -> Void) -> String
+
     // MARK: - Change notification (expose-default-template-bindable-state)
 
     /// Coalesced "host-bindable state changed" notification. Fires EXACTLY ONCE
@@ -427,6 +432,7 @@ public final class DefaultPlayerTemplate {
         setAwaitGoods: ((String, Bool) -> Void)? = nil,
         setNoticeGoods: ((String, Bool) -> Void)? = nil,
         addToCartRequester: ((LBCartRequest) async throws -> LBCartResult)? = nil,
+        registerPendingRetryProvider: ((@escaping () -> Void) -> String)? = nil,
         feedSnapshotCache: VideoFeedSnapshotCache = .shared
     ) {
         self.player = player
@@ -440,6 +446,7 @@ public final class DefaultPlayerTemplate {
         self.addToCartRequester = addToCartRequester ?? { _ in
             throw LBProductSheetError.noRequester
         }
+        self.registerPendingRetryProvider = registerPendingRetryProvider ?? { Livebuy.registerPendingRetry($0) }
         self.activityFeed = DefaultActivityFeed()
         self.winClaim = DefaultWinClaim(requester: player)
         self.activeEvent = DefaultActiveEvent(provider: player)
@@ -1204,8 +1211,7 @@ public final class DefaultPlayerTemplate {
             // host has no way to read. Unconditional and independent of the call above:
             // `addToCartNeedsLogin` is already set regardless of this call's return value
             // (mirrors the backend-401 branch below, which likewise never inspects it).
-            _ = Livebuy.dispatchAuthRequired(triggerAction: "cart_add",
-                                              videoId: currentVideoId ?? player?.channel?.id)
+            dispatchProactiveCartAddAuthRequired()
             return
         }
         // Guard 1 — sold-out / no stock.
@@ -1256,6 +1262,25 @@ public final class DefaultPlayerTemplate {
                 }
             }
         }
+    }
+
+    /// Proactive-gate `AUTH_REQUIRED` dispatch carrying a retry token
+    /// (`ios-cart-add-proactive-gate-retry-token-template`). Registers a closure that
+    /// re-runs `addToCart()` on the main thread (the gate re-evaluates then: logged in →
+    /// normal flow; still guest → re-dispatch with a fresh token; sheet closed → the
+    /// `guard let detail` makes it a no-op). Never auto-replayed by the SDK.
+    private func dispatchProactiveCartAddAuthRequired() {
+        let token = registerPendingRetryProvider { [weak self] in
+            Self.runOnMain { self?.addToCart() }
+        }
+        _ = Livebuy.dispatchAuthRequired(triggerAction: "cart_add",
+                                          videoId: currentVideoId ?? player?.channel?.id,
+                                          retryToken: token)
+    }
+
+    /// `retryPendingAction` may be called from any thread; template state is main-thread.
+    static func runOnMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
     /// Success branch (main thread): mini-cart peek + cart CTA count → ONE coalesced

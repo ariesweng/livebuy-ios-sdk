@@ -5,6 +5,28 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.25.0] - 2026-09-29
+
+> **Minor（iOS + Android lockstep）。** 版號跳過 `4.24.0`：`v4.24.0` 已是 Android-only 版號，兩端對齊 `4.25.0`（iOS 自 `4.23.0` 直接升級，期間無其他 iOS 功能變更）。純新增、**無 BREAKING**。完整敘述見
+> [`docs/release-notes/v4.25.0.md`](../docs/release-notes/v4.25.0.md)。
+
+### Added
+
+- **drop-in 主動加購登入閘帶 `retry_token`**（template）：`requireLoginForAddToCart` 為 true 且訪客
+  點加購時，drop-in 先註冊「登入後重跑同一次加購」的 closure，再派發
+  `AUTH_REQUIRED(trigger_action="cart_add")` 並帶 `retry_token`。host 登入後呼叫
+  `retryPendingAction(token)` 重跑同一次加購；放棄則 `discardPendingAction(token)`。SDK 仍不自動
+  replay。被動接（後端回空 `buy_no`）、`comment_send`、`subscribe` 的 token 行為不變。
+
+### Changed
+
+- 無公開符號變更（新增的注入點皆 internal；所用 public API 早已於 iOS `4.23.0` / Android `4.24.0`
+  出貨）。既有 listener 不讀 `retry_token` 即無感。
+
+### Fixed
+
+- （無）
+
 ## [4.23.0] - 2026-09-25
 
 > **Minor。** 自 `4.22.0` 以來累積 11 個相關 commit，歸為 6 個主題。**含 1 項 ⚠️ BREAKING**
