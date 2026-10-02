@@ -819,12 +819,11 @@ struct LBChatLineRow: View {
     /// `roleBubble` (host / AI / reply, `hasRole == true`) keeps its own independent
     /// name-row layout and is unaffected.
     ///
-    /// The colon SHALL carry the SAME `.font()` / `.foregroundColor()` as the nickname
-    /// (`rb-ios-chat-colon-font-baseline-fix`): `moments.jsx` `LBChatLine` (line ~434)
-    /// puts the colon literally INSIDE the same `<span>` as `m.user` — `{m.user}{!isHost
-    /// && '：'}` — sharing that span's `opacity` / `fontWeight`, with `fontSize: 11.5`
-    /// inherited from the shared `ACT_BUBBLE` for every child (nickname / colon / body
-    /// alike). Before this fix `Text("：")` had NO `.font()` modifier at all — SwiftUI
+    /// The colon SHALL carry the SAME `.font()` as the nickname
+    /// (`rb-ios-chat-colon-font-baseline-fix`) — the font ONLY; its COLOR is white, not the
+    /// nickname's pink (see "The COLON is white" below): in `moments.jsx` `LBChatLine`
+    /// `fontSize: 11.5` is inherited from the shared `ACT_BUBBLE` by every child (nickname /
+    /// colon / body alike). Before this fix `Text("：")` had NO `.font()` modifier at all — SwiftUI
     /// keeps each concatenated `Text` segment's OWN styling (a segment never inherits a
     /// neighboring segment's `.font()`), so an un-styled segment falls back to the
     /// ambient/environment default font (~17pt system body), not the `11.5 *
@@ -844,7 +843,8 @@ struct LBChatLineRow: View {
     /// nickname's pink. `pink-nickname-full-lines` landed this whole block by giving BOTH
     /// the nickname `Text` AND the colon `Text` the same `.foregroundColor(guestRoleNameColor)`,
     /// mis-reading `moments.jsx`'s `LBChatLine` as one shared style. Re-checking the actual
-    /// markup (lines ~429-452) shows the nickname and colon are two INDEPENDENT `<span>`s:
+    /// markup (the general-viewer branch of `LBChatLine`) shows the nickname and colon are
+    /// two INDEPENDENT `<span>`s:
     /// `<span style={{ color: '#FBB0B7' }}>{m.user}</span>` next to a sibling
     /// `<span style={{ color: '#fff' }}>：</span>` — the colon's color never varies with
     /// `isHost`, it is always the shared white span. Only the FONT SIZE (`11.5 *

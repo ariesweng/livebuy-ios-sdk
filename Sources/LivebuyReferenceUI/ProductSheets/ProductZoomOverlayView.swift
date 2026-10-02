@@ -175,10 +175,18 @@ public struct ProductZoomOverlayView: View {
                 .foregroundColor(.white.opacity(0.92))
             if live, let url = Self.displayPhotoURL(
                 overridePhotoURL: overridePhotoURL, detail: detail, selectedSpec: selectedSpec) {
-                RemoteStillImageView(url: url, contentMode: .scaleAspectFill)
+                // Requested for the MAGNIFIED size so the 2.4× zoom stays sharp
+                // (rb-ios-remote-image-downsampling).
+                RemoteStillImageView(url: url, contentMode: .scaleAspectFill, zoomScale: Self.zoomed)
             }
         }
     }
+
+    /// Test-only hook exposing the SAME `productImage` subtree `body` renders, so unit tests can
+    /// assert structurally whether (and with which `zoomScale`) a `RemoteStillImageView` is
+    /// built (rb-ios-remote-image-downsampling). Follows the `avatarForTesting` precedent.
+    /// Production code never calls this.
+    var productImageForTesting: some View { productImage }
 
     /// The photo URL to magnify: `overridePhotoURL` (trimmed) when it is non-nil and non-blank
     /// after trimming, otherwise the pre-existing resolved-primary path unchanged

@@ -5,6 +5,35 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.26.0] - 2026-10-02
+
+> **Minor（iOS + Android lockstep）。** 上架審查相關批次。**零公開符號移除／改簽章**；有行為變更（見
+> Changed）。完整敘述見 [`docs/release-notes/v4.26.0.md`](../docs/release-notes/v4.26.0.md)。
+
+### Added
+
+- **隱私清單 `PrivacyInfo.xcprivacy`**（core）：xcframework 每個 slice 的 framework bundle 根目錄皆含
+  一份。required-reason API 只有 `UserDefaults`（`CA92.1`）；`NSPrivacyTracking = false`；collected
+  data 七類（User ID、Name、Email Address、Other User Content、Product Interaction、Purchase History、
+  Other Diagnostic Data，皆 `Tracking = false`）。不改 runtime 行為。
+
+### Changed
+
+- **遠端圖片依顯示框降採樣解碼**（reference-ui）：ImageIO，不新增相依；記憶體快取有成本上限；放大
+  燈箱以「框 × 放大倍率」解碼。
+- **圖片下載改走 reference-ui 自己的 `URLSession` 與磁碟快取**（reference-ui）：不使用、不修改 host 的
+  `URLSession.shared`／`URLCache.shared`；磁碟快取在 Caches 目錄（`tv.livebuy.referenceui.images`，
+  上限 150 MB）；不帶也不存 cookie；逾時 10 秒。⚠️ 行為變更：磁碟快取 7 天過期、期間不做 HTTP 重新
+  驗證，存不存不看回應的快取標頭。
+- **圖片 session 不使用共用憑證儲存**（reference-ui）：圖片主機要求 HTTP 驗證時直接失敗（維持
+  placeholder）、不提供 client certificate、TLS 伺服器信任維持系統預設、proxy 挑戰仍提供 host 存的
+  proxy 憑證。⚠️ 行為變更：原本靠共用憑證儲存裡的圖片主機帳密才載得出來的圖會載不出來。
+- 尚未取得版面（尺寸為零）的圖片 view 不發請求；預取暖的是「介紹中」商品卡縮圖尺寸。
+
+### Fixed
+
+- （無）
+
 ## [4.25.0] - 2026-09-29
 
 > **Minor（iOS + Android lockstep）。** 版號跳過 `4.24.0`：`v4.24.0` 已是 Android-only 版號，兩端對齊 `4.25.0`（iOS 自 `4.23.0` 直接升級，期間無其他 iOS 功能變更）。純新增、**無 BREAKING**。完整敘述見

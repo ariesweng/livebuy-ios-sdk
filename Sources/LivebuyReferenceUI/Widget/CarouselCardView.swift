@@ -1225,32 +1225,6 @@ final class PreviewPlaybackController {
     }
 }
 
-/// A minimal async still loader for the static `cover` thumbnail — a `UIImageView`
-/// (scaleAspectFill, clipped) filled by a cancellable `URLSession` data task. Kept as
-/// a `UIViewRepresentable` (not `AsyncImage`) to hold the iOS-14 floor without an
-/// `@available` branch and to centralize the empty-string guard at the call site.
-/// Process-wide decoded-image cache for reference-ui remote still images. The same
-/// product / cover URL is used across carousel / grid / floating; without a cache
-/// every appearance + every `template.reload()` re-fetches and re-decodes from
-/// scratch (placeholder flicker). Mirrors the host's `RemoteImageCache`. iOS-14-safe.
-enum ReferenceUIImageCache {
-    static let shared = NSCache<NSURL, UIImage>()
-
-    /// Decode `data` as an image and store it in `shared` under `url`. Returns the decoded
-    /// image, or `nil` (no cache write) when `data` is missing / undecodable. SINGLE choke
-    /// point for the decode+cache-write step — used by BOTH `RemoteStillImageView
-    /// .Coordinator.load`'s network-completion path AND `ReferenceUIImagePrefetch.prefetch`
-    /// (rb-ios-product-image-loading-polish), so the two call sites can never drift on
-    /// decode/cache semantics. `internal` (not `private`) so `@testable import` test files can
-    /// exercise it directly with in-memory `Data`, no network round trip needed.
-    @discardableResult
-    static func decodeAndStore(_ data: Data?, for url: URL) -> UIImage? {
-        guard let data = data, let image = UIImage(data: data) else { return nil }
-        shared.setObject(image, forKey: url as NSURL)
-        return image
-    }
-}
-
 /// Shared placeholder gradient tokens for PRODUCT PHOTO chips (loading / no-photo /
 /// snapshot-deterministic state) — `CarouselCardView`'s widget product thumb,
 /// `ProductZoomOverlayView`, `MiniCartView`, `ProductDetailSheetView`'s gallery placeholder.
@@ -1278,35 +1252,62 @@ enum ReferenceUIProductPlaceholderPalette {
 /// `.frame`) that intrinsic size stretches the SwiftUI layout to the image's pixels
 /// — overflowing the screen. Reporting `noIntrinsicMetric` makes the view take the
 /// proposed size (the screen) instead. Fixed-frame call sites are unaffected.
+///
+/// It also tells its owner whenever layout has (re)sized it (`onLayout`) — that is how
+/// `RemoteStillImageView` learns the frame it must decode for (rb-ios-remote-image-
+/// downsampling). Observing layout this way cannot change layout.
 final class FlexibleImageView: UIImageView {
+    var onLayout: (() -> Void)?
+
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
     }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
+    }
 }
 
+/// A minimal async still loader for remote images (cover / product photo / shop logo) — a
+/// `UIImageView` filled through a `ReferenceUIImageLoading` (production:
+/// `ReferenceUIImagePipeline`). Kept as a `UIViewRepresentable` (not `AsyncImage`) to hold the
+/// iOS-14 floor without an `@available` branch.
+///
+/// The image is decoded for the frame this view actually occupies (in device pixels), not at
+/// the source's resolution — see `ReferenceUIRemoteImage.swift` (rb-ios-remote-image-
+/// downsampling). The frame is only known after layout, so the request is issued from the
+/// first layout pass; until then the view shows whatever is already in memory for the URL.
 struct RemoteStillImageView: UIViewRepresentable {
     let url: URL
     /// contentMode for the loaded image. Default `.scaleAspectFit` shows the COMPLETE image
     /// (no crop) — the widget card's cover / product thumb want the whole image visible. The
     /// Upcoming moment background passes `.scaleAspectFill` to fill the full screen.
     var contentMode: UIView.ContentMode = .scaleAspectFit
-    /// Fires once per successful load with the decoded image's NATIVE SIZE IN POINTS
-    /// (`UIImage.size` — already scale-corrected; do NOT divide by `UIScreen.main.scale` again,
-    /// that would systematically shrink every reported size by the device's scale factor).
-    /// Fired synchronously on a `ReferenceUIImageCache` cache hit, or on the main queue after a
-    /// successful `URLSession` decode. Additive, defaults to `nil` — every EXISTING call site
-    /// (none of which pass this) is byte-identical (rb-ios-product-detail-main-image-scale-down-
-    /// letterbox).
+    /// How far the caller magnifies this view at draw time (`.scaleEffect`). The image is
+    /// requested for `frame × zoomScale` so it stays sharp when magnified. `1` everywhere
+    /// except the zoom lightbox.
+    var zoomScale: CGFloat = 1
+    /// Fires each time an image that is good enough for THIS view's frame is delivered, with
+    /// that image's decoded size (`UIImage.size` of a scale-1 image — do NOT divide by the
+    /// screen scale). The size is the source's own when the source is no larger than the
+    /// frame, otherwise a downsampled size that still covers the frame with the source's
+    /// aspect ratio — so `ProductDetailSheetView.scaleDownFit` computes the same letterbox as
+    /// it would from the source size. A SMALLER image left in memory by another surface (a
+    /// list thumbnail, a prefetch) may be shown while the right one loads, but is never
+    /// reported here. Deferred one run-loop tick on the synchronous memory-hit path (see
+    /// `Coordinator.report`). Defaults to `nil`.
     var onImageLoaded: ((CGSize) -> Void)? = nil
+    /// Where images come from. Production default; tests inject a fake.
+    var loader: ReferenceUIImageLoading = ReferenceUIImagePipeline.shared
 
     /// Applies `image` to `imageView` with a short cross-dissolve fade (`rb-ios-product-image-
-    /// loading-polish`, 150–200ms, default 180ms) — the NETWORK-completion path's transition.
-    /// `UIView.transition(...)` (NOT SwiftUI's `.transition(.opacity)`, which does not apply to
-    /// this `UIViewRepresentable`'s internal `UIImageView` content swap) is the idiomatic UIKit
-    /// mechanism for animating an image-view content change. `internal` (not `private`) so it is
-    /// directly unit-testable with a bare `UIImageView` — no network round trip needed. NOT used
-    /// by the cache-hit path (`load`'s early-return branch below), which stays a synchronous,
-    /// unanimated assignment.
+    /// loading-polish`, 150–200ms, default 180ms) — the BACKGROUND-load completion path's
+    /// transition. `UIView.transition(...)` (NOT SwiftUI's `.transition(.opacity)`, which does
+    /// not apply to this `UIViewRepresentable`'s internal `UIImageView` content swap) is the
+    /// idiomatic UIKit mechanism for animating an image-view content change. `internal` (not
+    /// `private`) so it is directly unit-testable with a bare `UIImageView`. NOT used by the
+    /// memory-hit path, which stays a synchronous, unanimated assignment.
     static func applyWithFade(_ image: UIImage, to imageView: UIImageView, duration: TimeInterval = 0.18) {
         UIView.transition(with: imageView, duration: duration, options: .transitionCrossDissolve) {
             imageView.image = image
@@ -1330,109 +1331,160 @@ struct RemoteStillImageView: UIViewRepresentable {
         iv.setContentHuggingPriority(.defaultLow, for: .vertical)
         iv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         iv.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        context.coordinator.load(url: url, into: iv, onImageLoaded: onImageLoaded)
+        context.coordinator.load(url: url, into: iv, zoomScale: zoomScale, onImageLoaded: onImageLoaded)
         return iv
     }
 
     func updateUIView(_ uiView: UIImageView, context: Context) {
-        context.coordinator.load(url: url, into: uiView, onImageLoaded: onImageLoaded)
+        context.coordinator.load(url: url, into: uiView, zoomScale: zoomScale, onImageLoaded: onImageLoaded)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    /// The view left the screen: stop whatever is still loading for it.
+    static func dismantleUIView(_ uiView: UIImageView, coordinator: Coordinator) {
+        coordinator.cancel()
+    }
 
+    func makeCoordinator() -> Coordinator { Coordinator(loader: loader) }
+
+    /// Owns one view's binding: which URL it shows, which size has been requested for it and
+    /// the in-flight request. Main-thread only.
     final class Coordinator {
-        private var task: URLSessionDataTask?
-        private var loadedURL: URL?
+        private let loader: ReferenceUIImageLoading
+        private let displayScale: (UIView) -> CGFloat
+        private weak var imageView: UIImageView?
+        private var boundURL: URL?
+        private var zoomScale: CGFloat = 1
+        private var onImageLoaded: ((CGSize) -> Void)?
+        /// The in-flight request, if any.
+        private var request: ReferenceUIImageCancellable?
+        /// The largest size requested / satisfied for `boundURL` so far — a frame no larger
+        /// than this never triggers another request (including after a failure: no retry).
+        private var settledSize: ReferenceUIImagePixelSize?
+        /// The image currently in the view, when it came from the loader.
+        private var displayed: ReferenceUIDecodedImage?
+        private var reported: ReferenceUIDecodedImage?
 
-        func load(url rawURL: URL, into imageView: UIImageView, onImageLoaded: ((CGSize) -> Void)? = nil) {
+        init(loader: ReferenceUIImageLoading = ReferenceUIImagePipeline.shared,
+             displayScale: @escaping (UIView) -> CGFloat = { view in
+                 (view.window?.screen ?? UIScreen.main).scale
+             }) {
+            self.loader = loader
+            self.displayScale = displayScale
+        }
+
+        /// Bind `rawURL` to `imageView`. Safe to call on every SwiftUI update: an unchanged URL
+        /// keeps the current image and request.
+        func load(url rawURL: URL, into imageView: UIImageView, zoomScale: CGFloat = 1,
+                  onImageLoaded: ((CGSize) -> Void)? = nil) {
             // Single http→https upgrade point for ALL remote images (every call site routes
             // through RemoteStillImageView). A cleartext `http` pic would be blocked by iOS
             // ATS and never load → placeholder; the Livebuy host serves the same path over
             // TLS. https / non-http schemes pass through unchanged (ReferenceUIImageURL).
             let url = rawURL.lbHTTPSUpgraded
-            guard url != loadedURL else { return }
-            loadedURL = url
-            task?.cancel()
-            // Clear immediately so a RECYCLED cell never shows the previous product's
-            // photo while the new one loads (URLSessionDataTask.cancel is best-effort).
-            imageView.image = nil
-            // Cache hit → no network / decode, no flicker. `imageView.image` is set synchronously
-            // (imperative UIKit mutation, safe from any call context), but `onImageLoaded` is
-            // deferred one run-loop tick via `DispatchQueue.main.async` — this callback mutates
-            // SwiftUI `@State` (`loadedPhotoSizes`), and `load(url:into:onImageLoaded:)` runs
-            // synchronously from `makeUIView`/`updateUIView`, which SwiftUI itself calls DURING an
-            // active view-update pass. Mutating `@State` synchronously from inside that pass is
-            // undefined behavior (Apple's own "Modifying state during view update" runtime
-            // warning) — the write can silently fail to stick, which is exactly what caused the
-            // `.detail` main image to stay wedged on the fixed-168pt crop placeholder forever even
-            // though `onImageLoaded` reported the correct decoded size (rb-ios-product-detail-
-            // main-image-scale-down-letterbox — this async defer restores the "never crop" fix on
-            // the cache-hit path; the network-completion path below was already correctly async).
-            if let cached = ReferenceUIImageCache.shared.object(forKey: url as NSURL) {
-                imageView.image = cached
-                DispatchQueue.main.async {
-                    onImageLoaded?(cached.size)
-                }
+            self.imageView = imageView
+            self.zoomScale = zoomScale
+            self.onImageLoaded = onImageLoaded
+            (imageView as? FlexibleImageView)?.onLayout = { [weak self] in self?.frameDidChange() }
+            if url != boundURL { rebind(to: url, imageView: imageView) }
+            frameDidChange()
+        }
+
+        /// Stop the in-flight request (view left the screen). The displayed image is kept —
+        /// the view itself is going away.
+        func cancel() {
+            request?.cancel()
+            request = nil
+        }
+
+        /// URL changed: cancel the old request and clear the old image IMMEDIATELY so a recycled
+        /// cell never shows the previous product's photo; then show whatever memory already
+        /// holds for the new URL (synchronously, unanimated — no placeholder flash).
+        private func rebind(to url: URL, imageView: UIImageView) {
+            boundURL = url
+            cancel()
+            settledSize = nil
+            reported = nil
+            displayed = loader.memoryImage(for: url)
+            imageView.image = displayed?.image
+        }
+
+        /// Layout gave the view a (new) frame: make sure an image good enough for it is shown
+        /// or on its way. A frame that shrank, or one already covered, does nothing.
+        private func frameDidChange() {
+            guard let url = boundURL, let imageView = imageView,
+                  let need = ReferenceUIImageSizing.requestSize(
+                    bounds: imageView.bounds.size, displayScale: displayScale(imageView),
+                    zoomScale: zoomScale) else { return }
+            if let settled = settledSize, settled.covers(need) { return }
+            settledSize = need
+            if let ready = coveringImage(for: url, need: need) {
+                cancel()
+                show(ready, in: imageView, animated: false)
+                report(ready, deferred: true)
                 return
             }
-            let t = URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-                // Single decode+cache-write choke point, shared with `ReferenceUIImagePrefetch
-                // .prefetch` (rb-ios-product-image-loading-polish) — the two paths can never
-                // drift on decode/cache semantics.
-                guard let image = ReferenceUIImageCache.decodeAndStore(data, for: url) else { return }
-                DispatchQueue.main.async {
-                    // Re-check currency: a late completion for a NOW-stale URL (the cell
-                    // was recycled to a different product) MUST NOT overwrite the image.
-                    guard self?.loadedURL == url else { return }
-                    // Network-completion path fades in (rb-ios-product-image-loading-polish) —
-                    // the cache-hit branch above stays a synchronous, unanimated assignment.
-                    RemoteStillImageView.applyWithFade(image, to: imageView)
-                    // `image.size` is already POINTS (scale-corrected) — do NOT divide by
-                    // `UIScreen.main.scale` again (rb-ios-product-detail-main-image-scale-down-
-                    // letterbox D1).
-                    onImageLoaded?(image.size)
-                }
+            startRequest(url: url, need: need)
+        }
+
+        /// The displayed image, or failing that the largest one in memory, if it is good enough
+        /// to be THE result for a `need`-sized frame.
+        private func coveringImage(
+            for url: URL, need: ReferenceUIImagePixelSize
+        ) -> ReferenceUIDecodedImage? {
+            if let shown = displayed, shown.covers(need) { return shown }
+            if let cached = loader.memoryImage(for: url), cached.covers(need) { return cached }
+            return nil
+        }
+
+        /// Request `url` at `need`, replacing a smaller in-flight request. Whatever is displayed
+        /// stays up until the new image arrives (no placeholder flash); a failure leaves the
+        /// view as it is and is not retried.
+        private func startRequest(url: URL, need: ReferenceUIImagePixelSize) {
+            cancel()
+            request = loader.load(url: url, size: need) { [weak self] result in
+                // Re-check currency: a late completion for a NOW-stale URL / size (the cell was
+                // recycled to a different product) MUST NOT overwrite the image.
+                guard let self = self, self.boundURL == url, self.settledSize == need else { return }
+                self.request = nil
+                guard let result = result, let imageView = self.imageView else { return }
+                // Placeholder → image fades in; swapping a stand-in for the sharper image does not.
+                self.show(result, in: imageView, animated: imageView.image == nil)
+                self.report(result, deferred: false)
             }
-            task = t
-            t.resume()
         }
 
-        deinit { task?.cancel() }
-    }
-}
-
-/// Fire-and-forget background prefetch (`rb-ios-product-image-loading-polish`) — call ahead of
-/// a product entering the now-introducing / narrating window so its image is already decoded
-/// and cached (`ReferenceUIImageCache.shared`) by the time `RemoteStillImageView.Coordinator
-/// .load` needs it (cache-hit path — synchronous, no placeholder flash). Read-only cache warm;
-/// NEVER touches any `UIImageView` / SwiftUI `@State`. `internal` (not `private`) so it — and
-/// its dedicated test — can be called directly from `PlayerShellView` (a different file, same
-/// module) and from test files via `@testable import`.
-enum ReferenceUIImagePrefetch {
-    /// URLs with an in-flight prefetch request, guarded by `lock` — the `URLSession` completion
-    /// can fire on a background queue, and a caller (`PlayerShellView`) may invoke `prefetch`
-    /// again for the SAME url before the first request completes (e.g. a repeated 5s products
-    /// poll re-handing the same list) — dedup so that re-invocation is a cheap no-op, not a
-    /// second network round trip.
-    private static var inFlight = Set<URL>()
-    private static let lock = NSLock()
-
-    static func prefetch(url rawURL: URL) {
-        // Same http→https upgrade point `Coordinator.load` uses, so the cache key this warms
-        // is the SAME key a later `Coordinator.load` cache lookup will check.
-        let url = rawURL.lbHTTPSUpgraded
-        guard ReferenceUIImageCache.shared.object(forKey: url as NSURL) == nil else { return }
-        lock.lock()
-        guard !inFlight.contains(url) else { lock.unlock(); return }
-        inFlight.insert(url)
-        lock.unlock()
-        let task = URLSession.shared.dataTask(with: url) { data, _, _ in
-            _ = ReferenceUIImageCache.decodeAndStore(data, for: url)
-            lock.lock()
-            inFlight.remove(url)
-            lock.unlock()
+        private func show(_ entry: ReferenceUIDecodedImage, in imageView: UIImageView, animated: Bool) {
+            displayed = entry
+            guard imageView.image !== entry.image else { return }
+            if animated {
+                RemoteStillImageView.applyWithFade(entry.image, to: imageView)
+            } else {
+                imageView.image = entry.image
+            }
         }
-        task.resume()
+
+        /// Report an image that covers the frame — once per image. `deferred` (the synchronous
+        /// memory-hit path) pushes the callback one run-loop tick out: it mutates SwiftUI
+        /// `@State`, and this path runs synchronously from `makeUIView` / `updateUIView` /
+        /// layout, i.e. possibly DURING a SwiftUI view-update pass, where a synchronous `@State`
+        /// write is undefined behaviour and can silently fail to stick (rb-ios-product-detail-
+        /// main-image-scale-down-letterbox). `entry.image.size` is a scale-1 size — do NOT
+        /// divide by the screen scale.
+        private func report(_ entry: ReferenceUIDecodedImage, deferred: Bool) {
+            guard reported !== entry else { return }
+            reported = entry
+            let size = entry.image.size
+            guard deferred else {
+                onImageLoaded?(size)
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, self.reported === entry else { return }
+                self.onImageLoaded?(size)
+            }
+        }
+
+        deinit { request?.cancel() }
     }
 }
 

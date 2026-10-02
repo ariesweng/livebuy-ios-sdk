@@ -41,24 +41,49 @@ import Foundation
 struct LoadingMarkAnimationView: View {
 
     /// All 17 frames, preloaded once (design.md 決策 2 — no lazy / on-demand
-    /// per-frame decode). Loaded via `Bundle.module.url(forResource:withExtension:)`
-    /// + `UIImage(contentsOfFile:)` — NOT `Image(_:bundle:)`, which only resolves
-    /// asset-catalog entries and fails at runtime ("No image named … found in asset
-    /// catalog …") for loose `.process("Resources")`-bundled PNG files like these
-    /// (caught by the `.loading` snapshot test at apply time).
-    private let frames: [Image] = LoadingMarkAnimationView.loadFrames()
+    /// per-frame decode). Obtained through `frameProvider`, which in production is
+    /// always `loadFrames` (the bundled PNG sequence).
+    private let frames: [Image] = LoadingMarkAnimationView.frameProvider()
 
-    private static func loadFrames() -> [Image] {
+    /// Test-only override hook: production code never assigns this, so it
+    /// stays `loadFrames`, so every `LoadingMarkAnimationView` reads the 17 bundled
+    /// PNGs at `init` exactly as before. The reference-ui test target replaces it so
+    /// snapshot renders do not depend on the PNG files being readable at the instant
+    /// each view is built (`rb-ios-loading-mark-snapshot-flake-fix`: a frame whose
+    /// load fails silently becomes the `circle` fallback below, which then shows up
+    /// as a byte mismatch). MUST return exactly `frameCount` images; main-thread only
+    /// (read from `init`, which SwiftUI runs on the main thread).
+    static var frameProvider: () -> [Image] = LoadingMarkAnimationView.loadFrames
+
+    /// The production frame source: the 17 bundled PNGs, each falling back to a
+    /// system `circle` symbol if its file cannot be loaded.
+    static func loadFrames() -> [Image] {
+        makeFrames(load: loadBundledFrame(at:))
+    }
+
+    /// Builds the `frameCount`-long frame array from a per-index loader (pure apart
+    /// from whatever `load` does). A `nil` load becomes the defensive `circle`
+    /// fallback — should be unreachable once the 17 PNGs are correctly bundled under
+    /// `Resources/LoadingMark/`.
+    static func makeFrames(load: (Int) -> UIImage?) -> [Image] {
         (0..<frameCount).map { index in
-            let name = String(format: "frame_%02d", index)
-            if let url = Bundle.module.url(forResource: name, withExtension: "png"),
-               let uiImage = UIImage(contentsOfFile: url.path) {
-                return Image(uiImage: uiImage)
-            }
-            // Defensive fallback — should be unreachable once the 17 PNGs are
-            // correctly bundled under `Resources/LoadingMark/`.
-            return Image(systemName: "circle")
+            load(index).map { Image(uiImage: $0) } ?? Image(systemName: "circle")
         }
+    }
+
+    /// Loads one bundled frame (`frame_00.png` … `frame_16.png`), or `nil` when the
+    /// resource cannot be located or read. Loaded via
+    /// `Bundle.module.url(forResource:withExtension:)` + `UIImage(contentsOfFile:)` —
+    /// NOT `Image(_:bundle:)`, which only resolves asset-catalog entries and fails at
+    /// runtime ("No image named … found in asset catalog …") for loose
+    /// `.process("Resources")`-bundled PNG files like these (caught by the `.loading`
+    /// snapshot test at apply time).
+    static func loadBundledFrame(at index: Int) -> UIImage? {
+        let name = String(format: "frame_%02d", index)
+        guard let url = Bundle.module.url(forResource: name, withExtension: "png") else {
+            return nil
+        }
+        return UIImage(contentsOfFile: url.path)
     }
 
     /// The frame currently displayed. Driven by `timer` below; only reassigned when
