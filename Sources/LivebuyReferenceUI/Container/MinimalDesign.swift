@@ -532,7 +532,10 @@ struct PlayerOverlayRootView: View {
             // is resolved by `intro-player-seek-progress-core`).
             StartScreenHostView(model: shellModel, theme: theme,
                                 live: !paintsBackgroundPlaceholder, onSkip: onSkip,
-                                cleanMode: cleanMode)
+                                cleanMode: cleanMode,
+                                // rb-ios-skip-intro-under-product-sheets: hide the skip pill while a product
+                                // sheet is presented (design: sheet z30 covers skip z23).
+                                sheetsPresented: productSheetsPresented)
         }
     }
 }
@@ -553,6 +556,8 @@ struct StartScreenHostView: View {
     /// Forwarded from the root's mirrored `cleanMode` `@State` (rb-ios-clean-mode-upcoming-
     /// intro-coverage). Default `false` keeps any other/older call site source-compatible.
     var cleanMode: Bool = false
+    /// rb-ios-skip-intro-under-product-sheets: mirrored product-sheet presentation → `StartScreenView.sheetsPresented`.
+    var sheetsPresented: Bool = false
 
     /// This host's OWN scrub state for the intro progress bar (rb-ios-intro-progress-bar-
     /// interactive ADDED) — COMPLETELY SEPARATE from `PlayerShellView`'s private `isScrubbing`
@@ -566,12 +571,14 @@ struct StartScreenHostView: View {
     /// `isScrubbingForTesting` convention.
     init(model: PlayerShellModel, theme: ReferenceUITheme, live: Bool,
          onSkip: @escaping () -> Void, cleanMode: Bool = false,
+         sheetsPresented: Bool = false,
          isScrubbingForTesting: Bool = false) {
         self.model = model
         self.theme = theme
         self.live = live
         self.onSkip = onSkip
         self.cleanMode = cleanMode
+        self.sheetsPresented = sheetsPresented
         _isScrubbing = State(initialValue: isScrubbingForTesting)
     }
 
@@ -586,7 +593,7 @@ struct StartScreenHostView: View {
     private var startScreenView: StartScreenView {
         StartScreenView(theme: theme, phase: model.startPhase,
                         coverUrl: model.loadingCover, live: live, onSkip: onSkip,
-                        cleanMode: cleanMode,
+                        cleanMode: cleanMode, sheetsPresented: sheetsPresented,
                         introPosition: model.position, introDuration: model.duration,
                         isIntroPlaying: model.isPlaying, isIntroScrubbing: isScrubbing,
                         onIntroTogglePlayPause: { model.togglePlayPause() },

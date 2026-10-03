@@ -5,6 +5,27 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.27.0] - 2026-10-03
+
+> **Minor（iOS + Android lockstep）。** iOS 自 `4.26.0`、Android 自 `4.26.2` 升級，兩端重新對齊同號。只動
+> reference-ui；**無 BREAKING**——唯一的公開符號變動是 `StartScreenView` 新增帶預設值的 `sheetsPresented` 參數（原呼叫碼
+> 不必改）。完整敘述見 [`docs/release-notes/v4.27.0.md`](../docs/release-notes/v4.27.0.md)。
+
+### Added
+
+- `StartScreenView` 新增 `sheetsPresented: Bool = false`（reference-ui）：為 `true` 時不畫「略過介紹」鈕。
+
+### Changed
+
+- （無）
+
+### Fixed
+
+- **開場影片播放中打開商品面板，「略過介紹」鈕仍顯示在面板上方**（reference-ui）：依設計稿層級（商品面板高於略過鈕），
+  任一商品面板開著時隱藏略過鈕，關閉後恢復。未用有開場影片的頻道實測、未經真機驗證。
+- **錯誤畫面「找不到這部影片」圖示與設計稿不符**（reference-ui）：原為 SF Symbol 放大鏡，改為設計稿的放大鏡加驚嘆號
+  （自繪向量）。文字、按鈕、行為不變。
+
 ## [4.26.0] - 2026-10-02
 
 > **Minor（iOS + Android lockstep）。** 上架審查相關批次。**零公開符號移除／改簽章**；有行為變更（見

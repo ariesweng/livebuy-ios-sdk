@@ -119,6 +119,12 @@ public struct StartScreenView: View {
     /// site and every demo / snapshot baseline byte-identical.
     public let cleanMode: Bool
 
+    /// rb-ios-skip-intro-under-product-sheets: `true` while any product sheet is presented. The design layers the sheets
+    /// ABOVE the skip pill (`LBPBottomSheet` zBase 30 > `LBPSkipIntroButton` zIndex 23), so the
+    /// pill is covered; this surface paints above the sheets, so it hides the pill instead (same
+    /// visual result). Default `false` keeps every existing call site byte-identical.
+    public let sheetsPresented: Bool
+
     /// Opening-video current playhead, seconds (rb-ios-clean-mode-upcoming-intro-coverage
     /// ADDED, rb-ios-intro-progress-bar-interactive MODIFIED to be real data). Feeds the intro
     /// progress bar's fill ratio while `cleanMode == true`. Distinct from
@@ -174,6 +180,7 @@ public struct StartScreenView: View {
         live: Bool = false,
         onSkip: (() -> Void)? = nil,
         cleanMode: Bool = false,
+        sheetsPresented: Bool = false,
         introPosition: Double = 0,
         introDuration: Double = 0,
         isIntroPlaying: Bool = false,
@@ -189,6 +196,7 @@ public struct StartScreenView: View {
         self.live = live
         self.onSkip = onSkip
         self.cleanMode = cleanMode
+        self.sheetsPresented = sheetsPresented
         self.introPosition = introPosition
         self.introDuration = introDuration
         self.isIntroPlaying = isIntroPlaying
@@ -295,7 +303,8 @@ public struct StartScreenView: View {
                     Spacer(minLength: 0)
                     // 乾淨模式隱藏「略過介紹」(rb-ios-clean-mode-upcoming-intro-coverage ADDED —
                     // 功能擴充，design 稿本無此規範，見該 change proposal.md「Why」).
-                    if !cleanMode {
+                    // rb-ios-skip-intro-under-product-sheets: hidden while a product sheet covers it (design layering).
+                    if !cleanMode && !sheetsPresented {
                         skipIntroButton
                     }
                 }

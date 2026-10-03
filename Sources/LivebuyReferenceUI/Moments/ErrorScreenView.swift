@@ -125,20 +125,17 @@ public struct ErrorScreenView: View {
     }
 
     /// Kind-specific glyph (mirrors the design's per-kind SVG icons: `.stream` →
-    /// struck-through wifi, `.notFound` → magnifier, `.outdated` → up-arrow-in-circle).
-    /// `.stream` / `.outdated` are hand-drawn (`Icons.wifiSlash` / `Icons.arrowUpCircle`,
-    /// rb-ios-icon-parity — replace SF Symbol `wifi.slash` / `arrow.up.circle`);
-    /// `.notFound` keeps SF Symbol `magnifyingglass` (unchanged, outside this change's
-    /// 14-icon scope).
+    /// struck-through wifi, `.notFound` → magnifier with "!", `.outdated` → up-arrow-in-circle).
+    /// All three are hand-drawn: `.stream` / `.outdated` (`Icons.wifiSlash` / `Icons.arrowUpCircle`,
+    /// rb-ios-icon-parity) and `.notFound` (`SearchAlertGlyph`, the design's lens + "!",
+    /// rb-ios-error-notfound-glyph-parity — replaces SF Symbol `magnifyingglass`).
     @ViewBuilder
     private var glyph: some View {
         switch error.kind {
         case .stream:
             WifiSlashGlyph(size: 26, color: iconTint)
         case .notFound:
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundColor(iconTint)
+            SearchAlertGlyph(size: 26, color: iconTint)
         case .outdated:
             ArrowUpCircleGlyph(size: 26, color: iconTint)
         }
