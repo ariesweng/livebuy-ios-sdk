@@ -631,6 +631,8 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         // rationale.
         player.enablePiP = true
         coordinator.armAutoPiP(for: player)
+        // `.advance` + VOD／回放播完 + 無 next → 自動關閉 (rb-ios-vod-ended-no-next-close).
+        wireVodEndedCloseGate(player: player, coordinator: coordinator)
 
         // FOURTH in-place switch path — core's SELF-DRIVEN VOD auto-advance
         // (rb-ios-collapsible-autoadvance-switch-sync). core fires `onDidAutoAdvance` ONLY on the
@@ -653,6 +655,24 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         // the DefaultPlayerTemplate that `makeUIViewController` reads next.
         _ = player.view
         return player
+    }
+
+    /// Arm the `VodEndedCloseGate` (rb-ios-vod-ended-no-next-close) on `coordinator` for `player`.
+    /// The close goes through `resolvedPlayerDismiss(onDismiss: config.onDismiss, ...)` — the SAME
+    /// dismiss resolution the moment `onDismiss` / `onCancel` seams use (no new close path).
+    /// `behavior` reads the global core preference (`Livebuy.shared?.vodEndBehavior`, default
+    /// `.loop` when unconfigured → never closes). `internal` with injectable `behavior` /
+    /// `scheduler` so a test can drive it without a real wait or global SDK state.
+    func wireVodEndedCloseGate(
+        player: LivebuyPlayerViewController,
+        coordinator: Coordinator,
+        behavior: @escaping () -> LBVodEndBehavior = { Livebuy.shared?.vodEndBehavior ?? .loop },
+        scheduler: @escaping VodEndedCloseScheduler = defaultVodEndedCloseScheduler
+    ) {
+        let onDismiss = config.onDismiss
+        coordinator.armVodEndedClose(for: player, behavior: behavior, scheduler: scheduler) { p in
+            resolvedPlayerDismiss(onDismiss: onDismiss, player: p)
+        }
     }
 
     /// `sdkConfig.theme` > host options > minimal palette (existing resolver). No host
@@ -895,8 +915,10 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         // the two MUST always agree on what "close" means for a given `LivebuyPlayerConfig`
         // (bare `LivebuyPlayer` vs. `LivebuyPlayerPresenter`'s `composedConfig.onDismiss`
         // override, which routes to `closeSession()`).
+        // Body lives in `resolvedPlayerDismiss` (VodEndedCloseGate.swift) so the
+        // `VodEndedCloseGate` close (rb-ios-vod-ended-no-next-close) shares this exact exit.
         let resolvedDismiss: (LivebuyPlayerViewController) -> Void = { p in
-            if let custom = config.onDismiss { custom(p) } else { p.dismiss(animated: true) }
+            resolvedPlayerDismiss(onDismiss: config.onDismiss, player: p)
         }
 
         return PlayerOverlayContext(
@@ -1263,6 +1285,60 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         /// Removal token for `pipStateListener` (`player.removeEventListener`).
         private var pipListenerToken: LBListenerToken?
 
+        // MARK: VOD-ended auto-close (rb-ios-vod-ended-no-next-close)
+
+        /// Debounced「`.advance` + VOD／回放播完 + 無 next → 關閉」decision. Armed in
+        /// `armVodEndedClose`, cancelled in `teardownLifecycleObservers()`.
+        var vodEndedCloseGate: VodEndedCloseGate?
+        /// Aux (non-primary) `VIDEO_STATE_CHANGE` listener feeding the gate. Player state is
+        /// observed through THIS aux listener — NOT `player.onStateChange` (a single-owner closure;
+        /// taking it over would clobber whoever owns it). Retained here (core holds aux weakly).
+        private let videoStateListener = VideoStateAuxListener()
+        /// Removal token for `videoStateListener`.
+        private var videoStateListenerToken: LBListenerToken?
+        /// Test-only hook (`*ForTesting`): fired on main right after the aux-listener path fed the
+        /// gate, so a test can wait for the background→main hop deterministically. `nil` in
+        /// production (no behavior change).
+        var onVodEndedGateFedForTesting: (() -> Void)?
+
+        /// Build the gate and subscribe the aux listener. On every `VIDEO_STATE_CHANGE` (delivered
+        /// on the dispatcher's background queue) hop to main and re-read THIS player's own
+        /// `playerState` / `channel` (the dispatcher is process-global — never trust the payload).
+        func armVodEndedClose(for player: LivebuyPlayerViewController,
+                              behavior: @escaping () -> LBVodEndBehavior,
+                              scheduler: @escaping VodEndedCloseScheduler,
+                              close: @escaping (LivebuyPlayerViewController) -> Void) {
+            vodEndedCloseGate = VodEndedCloseGate(scheduler: scheduler) { [weak player] in
+                guard let player = player else { return }
+                close(player)
+            }
+            videoStateListener.onVideoStateChange = { [weak self, weak player] in
+                DispatchQueue.main.async {
+                    guard let self = self, let player = player else { return }
+                    self.feedVodEndedCloseGate(state: player.playerState,
+                                               liveStatus: player.channel?.liveStatus,
+                                               nextIsEmpty: player.channel?.next.isEmpty ?? true,
+                                               behavior: behavior())
+                    self.onVodEndedGateFedForTesting?()
+                }
+            }
+            videoStateListenerToken = player.addEventListener(videoStateListener)
+        }
+
+        /// Map one observed player snapshot onto the gate. `liveStatus == nil` == no channel
+        /// (e.g. after `unload()`); `liveStatus == 1` is the ONLY live value — a finished-live 回放
+        /// (`3`) counts as non-live and closes like any VOD.
+        func feedVodEndedCloseGate(state: LBPlayerState,
+                                   liveStatus: Int?,
+                                   nextIsEmpty: Bool,
+                                   behavior: LBVodEndBehavior) {
+            vodEndedCloseGate?.handleStateChange(state,
+                                                 hasChannel: liveStatus != nil,
+                                                 isLive: liveStatus == 1,
+                                                 hasNext: !nextIsEmpty,
+                                                 behavior: behavior)
+        }
+
         public init() {}
 
         /// Resolve the SWITCHED-to video's display item for a SWIPE, with its REAL cover / title,
@@ -1364,6 +1440,13 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
                 player?.removeEventListener(token)
                 self.pipListenerToken = nil
             }
+            // rb-ios-vod-ended-no-next-close: detach BEFORE dismantle's `unload()` (which sets
+            // `.ended`) and drop any pending close. Both idempotent.
+            if let token = videoStateListenerToken {
+                player?.removeEventListener(token)
+                self.videoStateListenerToken = nil
+            }
+            vodEndedCloseGate?.cancel()
             if let token = subtitleObserverToken {
                 subtitleObserverTemplate?.removeObserver(token)
                 self.subtitleObserverToken = nil

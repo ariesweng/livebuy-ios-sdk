@@ -5,6 +5,39 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.28.0] - 2026-10-14
+
+> **Minor（iOS + Android lockstep）。** iOS、Android 皆自 `4.27.0` 升級。**源碼面無 BREAKING**——新增帶預設值的
+> `configure(vodEndBehavior:)` 參數與 `LBVodEndBehavior`，原呼叫碼不必改；但 **⚠️ 預設播完行為改變**（見 Changed）。
+> core 與 reference-ui 同一 package 一起發佈。完整敘述見
+> [`docs/release-notes/v4.28.0.md`](../docs/release-notes/v4.28.0.md)。
+
+### Added
+
+- `LBVodEndBehavior { case loop, advance }`（core）：VOD／回放（`liveStatus != 1`）自然播完時的全域行為。`.loop`＝重播當前
+  影片（預設）；`.advance`＝舊行為（有下一支就接續、沒有就停在 `.ended`）。直播（`liveStatus == 1`）結束不受影響。
+- `Livebuy.configure(...)` 參數列尾端新增 `vodEndBehavior: LBVodEndBehavior = .loop`；`Livebuy` 新增
+  `public var vodEndBehavior` 可讀寫。設定值只存在記憶體（不寫 `UserDefaults`），每次 `configure` 以傳入值或預設 `.loop`
+  覆寫。
+
+### Changed
+
+- ⚠️ **VOD／回放播完的預設行為改為重播當前影片**（core）：以前有下一支會自動接續（`load` 下一支、fire
+  `onDidAutoAdvance`），現在預設回到開頭重播，有無下一支皆然。重播時 `playerState` 仍會先發一次 `.ended`、再回到
+  `.playing`；不 `load`、不 fire `onDidAutoAdvance`、不起結束畫面倒數、不重發 `VIDEO_OPEN`／stat `video_pv`。
+  **要維持舊行為請傳 `configure(..., vodEndBehavior: .advance)`。** 有監聽 `.ended` 的 host 注意：預設下每播完一輪都會
+  收到一次。
+- ⚠️ **`.advance` 下 VOD／回放播完且沒有下一支時，drop-in 播放器會自動關閉**（reference-ui）：`.ended` 持續約 400ms 後
+  關閉（`config.onDismiss` 優先，否則 `dismiss(animated:)`），不論有無 `hot`，**已結束直播的回放也一樣關閉**。以前停在
+  最後一幀。`.loop` 與直播結束不會關閉（直播結束仍顯示結束畫面）。
+
+### Fixed
+
+- （無）
+
+> **驗證範圍**：單元測試以 fake 播放引擎驗證呼叫順序；**未經真機驗證**——AVPlayer 播完 → 回到開頭 → 播放的銜接順暢度、
+> 重播時 Now Playing／PiP 的表現，以及 400ms 關閉的實際觀感都待實機確認。
+
 ## [4.27.0] - 2026-10-03
 
 > **Minor（iOS + Android lockstep）。** iOS 自 `4.26.0`、Android 自 `4.26.2` 升級，兩端重新對齊同號。只動
