@@ -41,6 +41,9 @@ import LivebuyUI
 /// (分享 + 客服 + 2 hidden placeholders), presented as sheet CONTENT via the shared
 /// `.lbBottomSheet` presenter (SheetKit draws the scrim + grab handle + card chrome).
 public struct LiveMoreSheetView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -145,10 +148,10 @@ public struct LiveMoreSheetView: View {
     /// `rgba(204,204,204,0.8)` icon-slot backdrop.
     static let slotBackground = Color(.sRGB, red: 204 / 255, green: 204 / 255, blue: 204 / 255, opacity: 0.8)
 
-    // MARK: - Fixed localized copy (design-literal, mirrors LiveBottomBarView convention)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let shareLabel = "分享"
-    static let contactLabel = "客服"
+    static var shareLabel: String { ReferenceUIStrings.text("common_share") }
+    static var contactLabel: String { ReferenceUIStrings.text("live_more_contact") }
 }
 
 // MARK: - Preview (deterministic demo)

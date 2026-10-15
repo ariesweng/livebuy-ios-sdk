@@ -23,6 +23,9 @@ import LivebuyUI
 /// The add-to-cart success toast: a dark-glass pill with an accent-ringed checkmark + a
 /// confirmation label ("已加入購物車").
 public struct CartToastView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always). The accent
     /// drives the checkmark ring (design `LBPCartToast` `background: accent`).
@@ -31,13 +34,17 @@ public struct CartToastView: View {
     /// The confirmation label (design default 「已加入購物車」).
     public let label: String
 
+    /// The default confirmation label in the current reference-ui language (string table key
+    /// `cart_added_toast`, `rb-ios-i18n-string-table`; zh-TW 「已加入購物車」).
+    public static var defaultLabel: String { ReferenceUIStrings.text("cart_added_toast") }
+
     /// Checkmark entrance scale. Initialised to the RESTING value (1.0) so a snapshot
     /// (no `onAppear` under `ImageRenderer`, mirrors `ProductZoomOverlayView`) captures
     /// the final state byte-stably; `onAppear` resets it small and springs it back at
     /// runtime for the `lbp-toast-check` bounce.
     @State private var checkScale: CGFloat
 
-    public init(theme: ReferenceUITheme, label: String = "已加入購物車") {
+    public init(theme: ReferenceUITheme, label: String = CartToastView.defaultLabel) {
         self.theme = theme
         self.label = label
         self._checkScale = State(initialValue: 1.0)

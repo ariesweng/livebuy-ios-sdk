@@ -103,6 +103,9 @@ import LivebuyUI
 /// full-width「查看購物車」CTA (`onViewCart`). All actions are host-wired forwarders;
 /// this layer never loads / advances / opens the cart itself.
 public struct EndScreenView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -327,7 +330,7 @@ public struct EndScreenView: View {
     /// title (2-line clamp), and the「{shopName} · {duration}」meta line.
     private func previewCaption(_ n0: LBNavItem, remain: Int) -> some View {
         VStack(spacing: 5) {
-            Text(String(format: Self.autoPlayLabel, remain))
+            Text(Self.autoPlayText(remain))
                 .font(.system(size: 12 * theme.fontScale))
                 .foregroundColor(Self.onDarkDim)
 
@@ -455,7 +458,8 @@ public struct EndScreenView: View {
     /// current production reality — no upstream signal is wired yet) renders the
     /// design's documented fallback `"--:--:--"`. Pure — no view state.
     static func liveDurationLine(_ duration: String) -> String {
-        "\(liveDurationPrefix)\(duration.isEmpty ? fallbackDuration : duration)"
+        ReferenceUIStrings.text("end_live_duration",
+                                ["duration": duration.isEmpty ? fallbackDuration : duration])
     }
 
     /// Format `Int` seconds → `mm:ss` (for `LBNavItem.duration`, which IS seconds —
@@ -497,17 +501,19 @@ public struct EndScreenView: View {
     /// Ring track (`rgba(255,255,255,0.28)`).
     static let ringTrack = Color.white.opacity(0.28)
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let endedLabel = "影片結束"
-    static let liveEndedTitle = "直播已結束"
-    static let liveDurationPrefix = "直播時長："
+    static var endedLabel: String { ReferenceUIStrings.text("end_video_ended") }
+    static var liveEndedTitle: String { ReferenceUIStrings.text("end_live_ended") }
     static let fallbackDuration = "--:--:--"
-    static let autoPlayLabel = "%d 秒後自動播放下一支"
-    static let untitledNext = "下一支影片"
-    static let cancelLabel = "取消"
-    static let watchNextLabel = "立即觀看"
-    static let viewCartLabel = "查看購物車"
+    /// `{seconds}` 秒後自動播放下一支 — named placeholder, see `autoPlayText(_:)`.
+    static func autoPlayText(_ seconds: Int) -> String {
+        ReferenceUIStrings.text("end_auto_next", ["seconds": String(seconds)])
+    }
+    static var untitledNext: String { ReferenceUIStrings.text("end_untitled_next") }
+    static var cancelLabel: String { ReferenceUIStrings.text("common_cancel") }
+    static var watchNextLabel: String { ReferenceUIStrings.text("end_watch_now") }
+    static var viewCartLabel: String { ReferenceUIStrings.text("common_view_cart") }
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)

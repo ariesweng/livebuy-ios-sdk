@@ -46,6 +46,9 @@ import LivebuyUI
 /// `LBSideRailItem`s as themed round pills (goods as the larger bag button with
 /// a cart badge), and replays a heart burst each time `heartBurstTick` increases.
 public struct OperationRailView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     // MARK: - Inputs (sub-view input pattern: theme, snapshot values, action)
 

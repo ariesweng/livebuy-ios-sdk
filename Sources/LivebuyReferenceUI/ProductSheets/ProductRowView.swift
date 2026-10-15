@@ -35,6 +35,9 @@ public enum ProductRowLayout: Equatable {
 /// constructing this view per iteration (mirrors how `ProductSheetsOverlayView`
 /// already captures per-item closures when wiring `ProductListView`).
 public struct ProductRowView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -303,8 +306,7 @@ public struct ProductRowView: View {
 
     /// "直播價" outline pill (`mode == .live`, `isFlashSale == false`) — 1pt `theme.accent`
     /// border, transparent fill, `theme.accent` text (design R39, shared `nameTagPill`
-    /// shape). Text is `livePriceLabel` — see that constant's doc for why this is a
-    /// hardcoded literal rather than a call through the core SDK's i18n system.
+    /// shape). Text is `livePriceLabel` (reference-ui string table key `product_live_price`).
     private var livePricePill: some View {
         nameTagPill(Self.livePriceLabel, textColor: theme.accent, fillColor: .clear, borderColor: theme.accent)
     }
@@ -942,29 +944,25 @@ public struct ProductRowView: View {
     /// `theme.accent` 主題色變動的寫法（不做成可設定項，直接硬編）。
     static let hotNameTagColor = (Color(hex: "#F03246") ?? Color.red).opacity(0.7)
 
-    static let soldOutLabel = "已售完"
+    static var soldOutLabel: String { ReferenceUIStrings.text("product_sold_out") }
     /// 「介紹中」底部橫幅文案——恆定字面值，不受 `isFlashSale` 影響
     /// （`rb-ios-narrating-banner-revert-flash-sale-text`）。`rb-ios-flash-sale-live-signal-
     /// wiring` 曾依後端文件原話「App 需要用它決定 goods[].label 為 narrating 時顯示『開標中』
     /// （搶購）或『介紹中』（一般）」把這個字面值改成依 `isFlashSale` 二選一函式；使用者事後
-    /// 拍板撤回該二選一，改回本檔案長期以來的恆定字面值。寫死字面值，不走 i18n（見
-    /// `livePriceLabel` 的文件對此模組既定慣例的說明）。
-    static let introducingLabel = "介紹中"
+    /// 拍板撤回該二選一，改回本檔案長期以來的恆定文案。文案走 reference-ui 字串表
+    /// （key `product_introducing`，`rb-ios-i18n-string-table`）。
+    static var introducingLabel: String { ReferenceUIStrings.text("product_introducing") }
     /// 「即將售完」名稱前標籤文案——含 🔥 emoji 前綴，對齊設計來源 `sdk-components.jsx`
     /// 的字面值 `'🔥 即將售完'`（`rb-ios-product-row-name-tag-style` checkpoint 訂正）。
-    static let outSoonLabel = "🔥 即將售完"
-    static let hotLabel = "熱賣中"
-    /// 「直播價」名稱前標籤文案（rb-ios-product-row-name-tag-system，design R39）——沿用既有
-    /// core i18n key `live_price` 的 zh-TW 譯文字面值（`ios/Sources/LivebuySDK/Resources/
-    /// zh-Hant-TW.lproj/Localizable.strings`）。reference-ui 層文案一律寫死、不走 i18n
-    /// ——`LBLocalizedString` / `LBLocalization` 是 `LivebuySDK` 模組內部 `internal` 型別
-    /// （非 `public`），`LivebuyReferenceUI` 是獨立模組，即使 `import LivebuySDK` 也無法呼叫；
-    /// 這與本檔案既有的 `soldOutLabel` / `introducingLabel` / `outSoonLabel` / `hotLabel`
-    /// 寫死慣例一致，並非遺漏 i18n 串接。
-    static let livePriceLabel = "直播價"
+    static var outSoonLabel: String { ReferenceUIStrings.text("product_out_soon") }
+    static var hotLabel: String { ReferenceUIStrings.text("product_hot") }
+    /// 「直播價」名稱前標籤文案（rb-ios-product-row-name-tag-system，design R39）——走
+    /// reference-ui 自帶字串表（key `product_live_price`，`rb-ios-i18n-string-table`），
+    /// 不呼叫 core 的 internal `LBLocalizedString`。
+    static var livePriceLabel: String { ReferenceUIStrings.text("product_live_price") }
     /// 「搶購中」名稱前標籤文案（`rb-ios-flash-sale-live-signal-wiring`，design R39
-    /// `liveMode === 'rush'` 分支）——同上，寫死字面值、不走 i18n。
-    static let rushLabel = "搶購中"
+    /// `liveMode === 'rush'` 分支）——同上，走 reference-ui 字串表（key `product_rush`）。
+    static var rushLabel: String { ReferenceUIStrings.text("product_rush") }
 
     /// Number / HOT badge background (design `rgba(0,0,0,0.7)`, rb-ios-product-row-number-badge).
     /// Distinct from `introducingBadgeColor` above (bottom banner) — a different badge, different
@@ -976,7 +974,7 @@ public struct ProductRowView: View {
 
     /// `.row` play-hint pill text/icon color (design R21, `rb-ios-product-row-play-hint-pill`).
     static let playHintText = Color(hex: "#111111") ?? Color.black
-    static let playHintLabel = "看講解"
+    static var playHintLabel: String { ReferenceUIStrings.text("product_play_hint") }
 
     static let breathDuration: Double = 0.9
     static let breathOpacityMin: Double = 0.55

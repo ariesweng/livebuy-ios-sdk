@@ -178,6 +178,9 @@ private struct MainImageWidthKey: PreferenceKey {
 /// 加入購物車 CTA — plus the「請選規格」prompt and the retryable add-to-cart failure
 /// banner when their guard flags are set.
 public struct ProductDetailSheetView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// How this sheet presents the same product-detail state (rb-ios-product-action-sheet):
     /// `.detail` = full browse (header「商品明細」+ body-bottom inline 收藏鈕 + 2-slot
@@ -1465,7 +1468,7 @@ public struct ProductDetailSheetView: View {
     }
 
     private var stockCaption: String {
-        "\(Self.stockCaptionPrefix)\(qty.max)\(Self.stockCaptionSuffix)"
+        ReferenceUIStrings.text("detail_stock_left", ["count": String(qty.max)])
     }
 
     /// THE single predicate deciding whether the「只剩庫存 N 組」caption is drawn
@@ -1863,29 +1866,27 @@ public struct ProductDetailSheetView: View {
     /// `theme.soldOut` (sold-out copy color — design `#9A96A3`).
     static let soldOutColor = Color(hex: "#9A96A3") ?? Color.gray
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let headerTitle = "商品明細"
-    static let soldOutLabel = "已售完"
+    static var headerTitle: String { ReferenceUIStrings.text("detail_header_title") }
+    static var soldOutLabel: String { ReferenceUIStrings.text("product_sold_out") }
     /// Fixed Sale badge text (rb-ios-product-sale-badge) — the design's `product.badge || 'Sale'`
     /// fallback; the iOS product model has no `badge` custom-text field, so this is always shown.
     static let saleBadgeLabel = "Sale"
-    static let qtyLabel = "數量"
-    static let stockCaptionPrefix = "只剩庫存 "
-    static let stockCaptionSuffix = " 組"
-    static let addToCartLabel = "加入購物車"
+    static var qtyLabel: String { ReferenceUIStrings.text("product_qty") }
+    static var addToCartLabel: String { ReferenceUIStrings.text("product_add_to_cart") }
     /// CTA label while an addcart request is in flight (cart-add-loading-state). Design
     /// `LBPButton.loading` fallback「加入中…」.
-    static let addingLabel = "加入中…"
-    static let viewCartLabel = "查看購物車"
-    static let favLabel = "收藏"
-    static let favedLabel = "已收藏"
-    static let shareLabel = "分享"
-    static let retryLabel = "重試"
-    static let failureTitle = "加入購物車失敗,請稍後再試"
+    static var addingLabel: String { ReferenceUIStrings.text("detail_adding") }
+    static var viewCartLabel: String { ReferenceUIStrings.text("common_view_cart") }
+    static var favLabel: String { ReferenceUIStrings.text("detail_fav") }
+    static var favedLabel: String { ReferenceUIStrings.text("detail_faved") }
+    static var shareLabel: String { ReferenceUIStrings.text("common_share") }
+    static var retryLabel: String { ReferenceUIStrings.text("common_retry") }
+    static var failureTitle: String { ReferenceUIStrings.text("detail_add_failed") }
     // 商品介紹 + 更多商品（design R21，rb-ios-product-detail-recommendations）
-    static let productIntroTitle = "商品介紹"
-    static let recommendationsTitle = "更多商品"
+    static var productIntroTitle: String { ReferenceUIStrings.text("detail_intro_title") }
+    static var recommendationsTitle: String { ReferenceUIStrings.text("detail_more_products") }
     // 「請選規格」copy moved to `SelectVariantPromptModalView` (prompt hoisted to the container's
     // overlay root — ios-variant-prompt-overlay-fix).
 

@@ -54,6 +54,9 @@ import LivebuyUI
 /// `simulateProductTap`); the CTA forwards to `onOpenCart`. This layer NEVER opens
 /// the detail itself.
 public struct ProductListView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -349,7 +352,7 @@ public struct ProductListView: View {
             // message — rb-ios-product-list-search).
             VStack {
                 Spacer(minLength: 0)
-                Text(products.isEmpty ? Self.emptyLabel : String(format: Self.noResultsFormat, query))
+                Text(products.isEmpty ? Self.emptyLabel : Self.noResultsText(query))
                     .font(.system(size: 13 * theme.fontScale))
                     .foregroundColor(Self.textDim)
                     .multilineTextAlignment(.center)
@@ -442,15 +445,18 @@ public struct ProductListView: View {
     /// `theme.surface.bgSunken` (search-pill background — light mode).
     static let bgSunken = Color(hex: "#F4F4F6") ?? Color.gray.opacity(0.08)
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let title = "銷售商品"
-    static let cartLabel = "查看購物車"
-    static let emptyLabel = "目前沒有商品"
+    static var title: String { ReferenceUIStrings.text("product_list_title") }
+    static var cartLabel: String { ReferenceUIStrings.text("common_view_cart") }
+    static var emptyLabel: String { ReferenceUIStrings.text("product_list_empty") }
     // 搜尋（rb-ios-product-list-search，對齊設計 ProductListSheet）
-    static let searchPlaceholder = "搜尋商品名稱"
-    static let searchCancel = "取消"
-    static let noResultsFormat = "找不到符合「%@」的商品"
+    static var searchPlaceholder: String { ReferenceUIStrings.text("product_list_search_placeholder") }
+    static var searchCancel: String { ReferenceUIStrings.text("common_cancel") }
+    /// 找不到符合「`{query}`」的商品 — named placeholder.
+    static func noResultsText(_ query: String) -> String {
+        ReferenceUIStrings.text("product_list_no_results", ["query": query])
+    }
 }
 
 // MARK: - ProductBagNarratingBadge — pure multi-product narrating-badge decision

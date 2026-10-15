@@ -64,6 +64,9 @@ func lbForwardLogin(
 /// trigger-specific body / vertical two-button footer) over a black-0.55 scrim.
 /// `triggerAction` drives the body copy; `onLogin` / `onDismiss` are host-wired.
 public struct AuthGateModalView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -232,17 +235,17 @@ public struct AuthGateModalView: View {
     /// `theme.surface.bgSunken` (sunken control fill / input bg).
     static let bgSunken = Color(hex: "#F4F4F6") ?? Color.gray.opacity(0.08)
 
-    // MARK: - Fixed localized copy (static presentation strings, 繁中)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let title = "請先登入"
-    static let dismissLabel = "稍後再說"
-    static let loginLabel = "前往登入"
+    static var title: String { ReferenceUIStrings.text("auth_title") }
+    static var dismissLabel: String { ReferenceUIStrings.text("auth_dismiss") }
+    static var loginLabel: String { ReferenceUIStrings.text("auth_login") }
     // Trigger-specific body copy — verbatim from the design's `LBP_AUTH_COPY`.
-    static let bodyCartAdd = "登入後即可將商品加入購物車"
-    static let bodyCommentSend = "登入後即可參與留言互動"
-    static let bodyCouponClaim = "登入後即可領取優惠與獎品"
-    static let bodySubscribe = "登入後即可訂閱直播主，第一時間掌握開播與專屬優惠"
-    static let bodyOther = "登入後即可使用完整功能"
+    static var bodyCartAdd: String { ReferenceUIStrings.text("auth_body_cart_add") }
+    static var bodyCommentSend: String { ReferenceUIStrings.text("auth_body_comment_send") }
+    static var bodyCouponClaim: String { ReferenceUIStrings.text("auth_body_coupon_claim") }
+    static var bodySubscribe: String { ReferenceUIStrings.text("auth_body_subscribe") }
+    static var bodyOther: String { ReferenceUIStrings.text("auth_body_other") }
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)

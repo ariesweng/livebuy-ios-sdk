@@ -47,6 +47,9 @@ import LivebuyUI
 
 /// The family-3 full-frame product-image zoom viewer for one `LBProductDetailState`.
 public struct ProductZoomOverlayView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -287,8 +290,8 @@ public struct ProductZoomOverlayView: View {
         .allowsHitTesting(false)
     }
 
-    static let hintIdle = "點圖片放大"
-    static let hintZoomed = "拖曳檢視細節 · 點一下還原"
+    static var hintIdle: String { ReferenceUIStrings.text("zoom_hint_idle") }
+    static var hintZoomed: String { ReferenceUIStrings.text("zoom_hint_zoomed") }
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)

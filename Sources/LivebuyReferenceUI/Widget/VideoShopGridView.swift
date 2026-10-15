@@ -83,6 +83,9 @@ import LivebuyUI
 /// remain, else the terminal「已顯示全部影片」. Card tap forwards `onTapVideo(item)`;
 /// this layer never scrolls / paginates / opens the player itself.
 public struct VideoShopGridView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The republished, read-only widget content snapshot. This surface binds
     /// `model.videos` (the grid cells) + `model.currentPage` / `model.lastPage`
@@ -393,8 +396,8 @@ public struct VideoShopGridView: View {
 
     // MARK: - Fixed presentation strings
 
-    static let loadMoreLabel = "載入更多影片..."
-    static let endOfListLabel = "已顯示全部影片"
+    static var loadMoreLabel: String { ReferenceUIStrings.text("widget_load_more") }
+    static var endOfListLabel: String { ReferenceUIStrings.text("widget_end_of_list") }
 }
 
 #if DEBUG

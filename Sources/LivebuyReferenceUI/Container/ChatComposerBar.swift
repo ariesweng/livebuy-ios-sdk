@@ -48,6 +48,9 @@ public final class ChatComposerController: ObservableObject {
 /// `PlayerOverlayRootView`; hosts drive it via `ChatComposerController` rather than
 /// instantiating the bar directly.
 public struct ChatComposerBar: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// Presentation/focus state — driven by the LIVE「留言...」pill's `onComment`.
     @ObservedObject var controller: ChatComposerController
@@ -104,7 +107,7 @@ public struct ChatComposerBar: View {
             // Live editable composer — dark translucent pill + accent send glyph.
             FocusableTextField(
                 text: $text,
-                placeholder: "留言...",
+                placeholder: ReferenceUIStrings.text("chat_comment_placeholder"),
                 accent: UIColor(theme.accent),
                 focusToken: controller.focusToken,
                 onSubmit: send,
@@ -181,9 +184,7 @@ struct FocusableTextField: UIViewRepresentable {
         field.tintColor = accent
         field.returnKeyType = .send
         field.autocorrectionType = .no
-        field.attributedPlaceholder = NSAttributedString(
-            string: placeholder,
-            attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.5)])
+        field.attributedPlaceholder = Self.attributedPlaceholder(placeholder)
         field.addTarget(context.coordinator,
                         action: #selector(Coordinator.editingChanged(_:)),
                         for: .editingChanged)
@@ -193,6 +194,11 @@ struct FocusableTextField: UIViewRepresentable {
 
     func updateUIView(_ field: UITextField, context: Context) {
         if field.text != text { field.text = text }
+        // Language switched at runtime (`rb-ios-i18n-string-table`): the parent re-renders with a
+        // new localized placeholder — re-apply it to the UIKit field.
+        if field.attributedPlaceholder?.string != placeholder {
+            field.attributedPlaceholder = Self.attributedPlaceholder(placeholder)
+        }
         field.tintColor = accent
         // Focus only when a NEW focus request arrived (token changed to a positive value).
         if focusToken > 0 && context.coordinator.lastFocusToken != focusToken {
@@ -202,6 +208,12 @@ struct FocusableTextField: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    /// The placeholder styling (white @ 50%) — shared by make / update.
+    static func attributedPlaceholder(_ placeholder: String) -> NSAttributedString {
+        NSAttributedString(string: placeholder,
+                           attributes: [.foregroundColor: UIColor.white.withAlphaComponent(0.5)])
+    }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         private let parent: FocusableTextField

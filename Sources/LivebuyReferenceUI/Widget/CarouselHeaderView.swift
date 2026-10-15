@@ -43,6 +43,9 @@ import LivebuyUI
 /// Renders NOTHING when `title` is empty and `subtitle` is nil / empty. A host
 /// places it FIXED above its own horizontal `ScrollView { CarouselRowView }`.
 public struct CarouselHeaderView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme. The title uses `theme.text`, the subtitle
     /// a dim variant, and the「查看更多 ›」link `theme.accent`.
@@ -70,7 +73,7 @@ public struct CarouselHeaderView: View {
 
     public init(
         theme: ReferenceUITheme,
-        title: String = "精選影片",
+        title: String = CarouselHeaderView.defaultTitle,
         subtitle: String? = nil,
         onSeeMore: (() -> Void)? = nil,
         showsHeader: Bool = true
@@ -150,9 +153,14 @@ public struct CarouselHeaderView: View {
         .accessibilityIdentifier(LBAccessibilityID.widgetSeeMore)
     }
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let seeMoreLabel = "查看更多 ›"
+    static var seeMoreLabel: String { ReferenceUIStrings.text("widget_see_more") }
+    /// Default carousel header title in the current reference-ui language (string table key
+    /// `widget_carousel_title`, `rb-ios-i18n-string-table`; zh-TW 「精選影片」). Public because the
+    /// public `CarouselView` / `ScrollableCarouselView` / `CarouselHeaderView` inits use it as
+    /// their `title` default argument.
+    public static var defaultTitle: String { ReferenceUIStrings.text("widget_carousel_title") }
 }
 
 #if DEBUG

@@ -2379,6 +2379,10 @@ private extension View {
 /// `PlayerShellView` 偵測 `model.isRestricted == true` 時建出，故未受限時不出像素
 /// （snapshot baseline byte-identical）。最終視覺 / 退出 affordance DECISION-PENDING 待設計稿。
 private struct RestrictionMaskView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
+
     let theme: ReferenceUITheme
 
     var body: some View {
@@ -2386,10 +2390,10 @@ private struct RestrictionMaskView: View {
             Color.black.opacity(0.78)
             VStack(spacing: 10) {
                 LockGlyph(size: 30, color: .white)
-                Text("此內容限定會員等級觀看")
+                Text(ReferenceUIStrings.text("player_restricted_title"))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.white)
-                Text("提升會員等級後即可觀看")
+                Text(ReferenceUIStrings.text("player_restricted_body"))
                     .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.7))
             }

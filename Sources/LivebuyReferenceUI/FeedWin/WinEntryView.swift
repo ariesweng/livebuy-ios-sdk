@@ -81,6 +81,9 @@ public enum WinEntryVariant: Equatable {
 /// `onTap` open intent (the container opens the claim sheet on the earliest
 /// unclaimed winner).
 public struct WinEntryView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     // MARK: - Inputs (documented sub-view input pattern)
 
@@ -473,15 +476,15 @@ private extension WinEntryView {
 
     // Bottom label — `rgba(55,60,68,0.8)` background (shared by both variants),
     // white text, fontSize 9, lineHeight 14px. Text differs per variant.
-    static let winLabelText = "領獎"
-    static let activityLabelText = "活動"
+    static var winLabelText: String { ReferenceUIStrings.text("win_entry_label") }
+    static var activityLabelText: String { ReferenceUIStrings.text("win_entry_activity_label") }
     static let labelFontSize: CGFloat = 9
     static let labelHeight: CGFloat = 14
     static let labelBackground = Color(white: 0.216, opacity: 0.8) // rgba(55,60,68,0.8) ≈ #373C44 @ 0.8
 
     // Accessibility labels (mirrors the design source's `aria-label`, design.md 1.7).
-    static let winAccessibilityLabel = "查看中獎"
-    static let activityAccessibilityLabel = "參加活動"
+    static var winAccessibilityLabel: String { ReferenceUIStrings.text("win_entry_a11y") }
+    static var activityAccessibilityLabel: String { ReferenceUIStrings.text("win_entry_activity_a11y") }
 }
 
 // MARK: - Deterministic demo data (previews + snapshot test)

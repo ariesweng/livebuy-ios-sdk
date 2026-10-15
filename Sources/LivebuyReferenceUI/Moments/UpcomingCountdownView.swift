@@ -22,6 +22,9 @@ import LivebuyUI
 // AsyncImage.
 
 public struct UpcomingCountdownView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     public let theme: ReferenceUITheme
     /// Scheduled start — backend `publish_at` (`"yyyy-MM-dd HH:mm:ss"`, UTC+8).
@@ -77,14 +80,18 @@ public struct UpcomingCountdownView: View {
 
     // MARK: - Pure display helpers (shared with CarouselCardView's upcoming card)
 
-    /// Reformat `publish_at` `"2026-06-11 13:40:00"` → `"6月11日"`（M月D日，去前導 0）by pure
-    /// string components (no Date round-trip → timezone-independent + deterministic). Empty /
-    /// unexpected shape → "".
-    static func scheduledDate(_ s: String) -> String {
+    /// Reformat `publish_at` `"2026-06-11 13:40:00"` → month + day in the CURRENT reference-ui
+    /// language (`rb-ios-i18n-string-table`): zh-TW / zh-CN `"6月11日"`（去前導 0）, en `"Jun 11"`,
+    /// ms-MY / id-ID `"11 Jun"` — the locale's CLDR `MMMd` skeleton via
+    /// `ReferenceUIStrings.monthDay`. Month / day come from pure string components and are
+    /// formatted on a fixed Gregorian / GMT calendar → timezone-independent + deterministic.
+    /// Empty / unexpected shape → "".
+    static func scheduledDate(_ s: String,
+                              language: String = ReferenceUILanguage.shared.effectiveCode) -> String {
         let parts = s.split(separator: " ")
         guard let datePart = parts.first?.split(separator: "-"), datePart.count == 3,
               let month = Int(datePart[1]), let day = Int(datePart[2]) else { return "" }
-        return "\(month)月\(day)日"
+        return ReferenceUIStrings.monthDay(month: month, day: day, language: language) ?? ""
     }
 
     /// Reformat `publish_at` `"2026-06-11 13:40:00"` → `"13:40"`（HH:MM）by pure string

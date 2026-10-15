@@ -78,6 +78,9 @@ import LivebuyUI
 /// forward via the host-wired `onTapVideo` exit; this layer never scrolls /
 /// paginates / opens the player itself.
 public struct CarouselView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The read-only widget content snapshot. This surface binds ONLY `videos`
     /// (the card-row source). Observed so a live template update re-renders.
@@ -127,7 +130,7 @@ public struct CarouselView: View {
     public init(
         model: WidgetModel,
         theme: ReferenceUITheme,
-        title: String = "精選影片",
+        title: String = CarouselHeaderView.defaultTitle,
         subtitle: String? = nil,
         cardWidth: CGFloat = 132,
         live: Bool = false,
@@ -282,7 +285,7 @@ public struct CarouselView: View {
     /// snapshot row bounded while exercising the off-edge overflow visually.
     static let maxCards = 4
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
     //
     // 「查看更多 ›」moved to `CarouselHeaderView.seeMoreLabel` with the header
     // decomposition (rb-ios-widget-host-scroll). The former「目前沒有影片」empty-state text

@@ -82,6 +82,9 @@ import LivebuyUI
 /// the playing opening video (`.splash`), or nothing (`.done`). Read-only — it never skips itself;
 /// the skip pill only FORWARDS `onSkip` (the host wires it to core `skipStart()`).
 public struct StartScreenView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     // MARK: - Inputs (documented sub-view input pattern)
 
@@ -406,7 +409,7 @@ private extension StartScreenView {
     // The intro plays through the normal path with subject chrome visible; the only added
     // UI is this bottom-right skip button. 片頭 tag / muted indicator / brand backdrop /
     // lower-third title card / progress bar are all REMOVED per the latest design.
-    static let skipLabel = "略過介紹"                  // was 略過介紹 (design rename)
+    static var skipLabel: String { ReferenceUIStrings.text("player_skip_intro") }                  // was 略過介紹 (design rename)
     static let skipFontSize: CGFloat = 13             // fontSize 13 / fontWeight 600
     static let skipGlyphGap: CGFloat = 6
     static let skipGlyphSize: CGFloat = 11

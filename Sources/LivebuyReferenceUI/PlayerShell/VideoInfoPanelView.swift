@@ -53,6 +53,9 @@ import LivebuyUI
 /// `canOpenNotice == false` the panel is a single-tab surface, not a two-tab
 /// switcher with a disabled entry.
 public struct VideoInfoPanelView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -456,7 +459,7 @@ public struct VideoInfoPanelView: View {
                     Text(info.shopName)
                         .font(.system(size: 14 * theme.fontScale, weight: .semibold))
                         .foregroundColor(theme.text)
-                    Text("\(Self.shopSublinePrefix)\(info.shopName)")
+                    Text(ReferenceUIStrings.text("info_shop_subline", ["shop": info.shopName]))
                         .font(.system(size: 12 * theme.fontScale))
                         .foregroundColor(Self.textDim)
                 }
@@ -651,34 +654,33 @@ public struct VideoInfoPanelView: View {
     /// merchant's `theme.accent` override.
     static let liveBadgeColor = Color(hex: "#F03246") ?? Color.red
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let panelTitle = "影片資訊"
-    static let infoTabTitle = "影片詳情"
+    static var panelTitle: String { ReferenceUIStrings.text("info_panel_title") }
+    static var infoTabTitle: String { ReferenceUIStrings.text("info_tab_title") }
     /// LIVE variant of `panelTitle` (design R44, `isLiveBroadcast == true`).
-    static let panelTitleLive = "直播資訊"
+    static var panelTitleLive: String { ReferenceUIStrings.text("info_panel_title_live") }
     /// LIVE variant of `infoTabTitle` (design R32, `isLiveBroadcast == true`).
-    static let infoTabTitleLive = "直播詳情"
+    static var infoTabTitleLive: String { ReferenceUIStrings.text("info_tab_title_live") }
     /// The red publishAt-row pill label (design R32, `isLiveBroadcast == true`).
-    static let liveBadgeLabel = "直播中"
+    static var liveBadgeLabel: String { ReferenceUIStrings.text("info_live_badge") }
     /// Non-LIVE, non-replay publishAt-row label (design R44, `isLiveBroadcast == false &&
     /// isFinishedLiveReplay == false` — the existing default).
-    static let vodStatusLabel = "點播影片"
+    static var vodStatusLabel: String { ReferenceUIStrings.text("info_vod_status") }
     /// Non-LIVE, finished-live-replay publishAt-row label (design R44, `isLiveBroadcast ==
     /// false && isFinishedLiveReplay == true`).
-    static let replayStatusLabel = "直播回放"
-    static let noticeTabTitle = "公告訊息"
-    static let systemNoticeLabel = "系統公告"
-    static let mallNoticeLabel = "商城公告"
-    static let subscribeLabel = "訂閱通知"
-    static let subscribedLabel = "已訂閱"
-    static let shopSublinePrefix = "這裡是 "
-    static let noticeEmptyPlaceholder = "目前沒有公告"
+    static var replayStatusLabel: String { ReferenceUIStrings.text("info_replay_status") }
+    static var noticeTabTitle: String { ReferenceUIStrings.text("info_notice_tab") }
+    static var systemNoticeLabel: String { ReferenceUIStrings.text("info_system_notice") }
+    static var mallNoticeLabel: String { ReferenceUIStrings.text("info_mall_notice") }
+    static var subscribeLabel: String { ReferenceUIStrings.text("info_subscribe") }
+    static var subscribedLabel: String { ReferenceUIStrings.text("info_subscribed") }
+    static var noticeEmptyPlaceholder: String { ReferenceUIStrings.text("info_notice_empty") }
     /// The removed PRIMARY CTA's label (rb-ios-live-replay-more-menu-and-video-info-live-copy,
     /// design R32). RETAINED (unused) alongside `HouseFillGlyph` and the `onOpenStorefront`
     /// closure — see that property's own doc comment.
-    static let storefrontLabel = "前往商城首頁"
-    static let contactLabel = "與商家一對一對話"
+    static var storefrontLabel: String { ReferenceUIStrings.text("info_storefront") }
+    static var contactLabel: String { ReferenceUIStrings.text("info_contact") }
 
     /// `theme.surface.bgSunken` (#F4F4F6) — ghost button fill (design `LBPButton`).
     static let bgSunken = Color(hex: "#F4F4F6") ?? Color.gray.opacity(0.08)

@@ -75,6 +75,9 @@ import LivebuyUI
 /// the modal its prefill / context; the actual rename is host-fulfilled via
 /// `onSubmit`, and the passthrough「請求改名」entry routes through `onRequestEdit`.
 public struct GuestNameEditModalView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -457,26 +460,25 @@ public struct GuestNameEditModalView: View {
     /// across files) so the family reads as one without a cross-file dependency.
     static let dangerColor = Color(hex: "#EB6E5F") ?? Color.red
 
-    // MARK: - Fixed localized copy (static presentation strings, 繁中)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let titleText = "設定暱稱"
-    static let subtitleText = "請輸入直播留言的暱稱"
-    static let inputPlaceholder = "暱稱字數上限 10 個字"
-    static let submitLabel = "送出"
+    static var titleText: String { ReferenceUIStrings.text("nickname_title") }
+    static var subtitleText: String { ReferenceUIStrings.text("nickname_subtitle") }
+    static var inputPlaceholder: String { ReferenceUIStrings.text("nickname_placeholder") }
+    static var submitLabel: String { ReferenceUIStrings.text("common_submit") }
     /// CTA label while `isSubmitting` (rb-ios-nickname-taken-inline-error) — same "…中" convention
     /// / exact string as `WinClaimModalView.submittingLabel`.
-    static let submittingLabel = "送出中…"
+    static var submittingLabel: String { ReferenceUIStrings.text("common_submitting") }
     /// `errorMessage` text for `LBError.guestNameTaken` (rb-ios-nickname-taken-inline-error) —
-    /// verbatim identical to core's own `zh-Hant-TW` i18n string for `guest_existing`
-    /// (`ios/Sources/LivebuySDK/Resources/zh-Hant-TW.lproj/Localizable.strings`), kept as a
-    /// reference-ui-owned literal (this layer hardcodes copy, does not read the core bundle) so the
+    /// zh-TW wording identical to core's own `guest_existing` string, kept in the reference-ui
+    /// string table (key `nickname_taken_error`; this layer does not read the core bundle) so the
     /// wording matches what the SAME error already says elsewhere (chat send's existing checkName
     /// precheck) rather than inventing a second phrasing for the same failure.
-    static let takenErrorText = "此暱稱已被使用，請換一個"
+    static var takenErrorText: String { ReferenceUIStrings.text("nickname_taken_error") }
     /// `errorMessage` text for any OTHER thrown error (network / server failures — validation
     /// could not complete, distinct from "taken"). Same "OOO失敗，請稍後再試" convention as
     /// `ProductDetailSheetView.failureTitle` ("加入購物車失敗,請稍後再試").
-    static let retryableErrorText = "暱稱設定失敗，請稍後再試"
+    static var retryableErrorText: String { ReferenceUIStrings.text("nickname_retryable_error") }
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)

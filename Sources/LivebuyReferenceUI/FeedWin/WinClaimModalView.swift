@@ -76,6 +76,9 @@ import LivebuyUI
 /// 經確認 alert 後以 `onSubmit(email)` 提交，並依 view-model 的 `submitInFlight` /
 /// `resultState` 呈現送出中 / 領獎完成 / 領獎失敗。
 public struct WinClaimModalView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     // MARK: - Stage 機（型別）
 
@@ -617,7 +620,8 @@ public struct WinClaimModalView: View {
     /// stage 分流。
     private var alertTitle: String { Self.submitAlertTitle }
     private var alertBody: String {
-        String(format: Self.submitAlertBodyFormat, email.trimmingCharacters(in: .whitespacesAndNewlines))
+        ReferenceUIStrings.text("win_submit_alert_body",
+                                ["email": email.trimmingCharacters(in: .whitespacesAndNewlines)])
     }
     private var alertNote: String {
         isDiscount ? Self.submitAlertNoteDiscount : Self.submitAlertNoteProduct
@@ -1113,42 +1117,41 @@ public struct WinClaimModalView: View {
             size: CGFloat(5 + (i % 3) * 2))
     }
 
-    // MARK: - 固定文案（本層全層寫死中文常數，不使用 NSLocalizedString / LBStrings）
+    // MARK: - 文案（走 reference-ui 字串表 `ReferenceUIStrings`，rb-ios-i18n-string-table）
 
-    static let congratsTitle = "恭喜中獎"
-    static let awardNameFallback = "直播間限定獎品"
-    static let emailPlaceholder = "電子郵件"
-    static let ctaSubmit = "確認領獎"
-    static let footerTerms = "使用條款"
-    static let footerPrivacy = "隱私政策"
+    static var congratsTitle: String { ReferenceUIStrings.text("win_congrats_title") }
+    static var awardNameFallback: String { ReferenceUIStrings.text("win_award_fallback") }
+    static var emailPlaceholder: String { ReferenceUIStrings.text("win_email_placeholder") }
+    static var ctaSubmit: String { ReferenceUIStrings.text("win_claim_confirm") }
+    static var footerTerms: String { ReferenceUIStrings.text("common_terms") }
+    static var footerPrivacy: String { ReferenceUIStrings.text("common_privacy") }
 
-    static let submitAlertTitle = "確認領獎"
-    static let submitAlertBodyFormat = "請確認 %@ 填寫正確，送出後將不可變更，確定要送出領獎資料嗎？"
-    static let submitAlertNoteDiscount = "※結帳折扣碼將會寄送到您的信箱內。"
-    static let submitAlertNoteProduct = "※獎品將自動加入為待結帳商品。"
+    static var submitAlertTitle: String { ReferenceUIStrings.text("win_claim_confirm") }
+    static var submitAlertNoteDiscount: String { ReferenceUIStrings.text("win_submit_note_discount") }
+    static var submitAlertNoteProduct: String { ReferenceUIStrings.text("win_submit_note_product") }
 
     // R27：`closeAlertTitle` / `closeAlertBodyFormat` / `closeAlertNote`（強勸阻的
     // 「關閉視窗」二次確認文案，R13 刻意分歧 1/2 的載體）已隨 `confirmClose` stage 一併
     // 移除——文案不存在後，不再有任何措辭與行為的落差需要維持（design.md D5）。
 
-    static let alertCancelLabel = "取消"
-    static let alertConfirmLabel = "確定"
+    static var alertCancelLabel: String { ReferenceUIStrings.text("common_cancel") }
+    static var alertConfirmLabel: String { ReferenceUIStrings.text("common_confirm") }
 
-    static let submittingLabel = "送出中…"
+    static var submittingLabel: String { ReferenceUIStrings.text("common_submitting") }
 
-    static let doneTitle = "領獎完成"
-    static let doneSublineDiscount = "結帳折扣碼已寄送到以下電子郵件"
-    static let doneSublineProduct = "獎品已加入待結帳商品，結帳前完成訂購"
-    static let copyLabel = "複製"
-    static let copiedLabel = "已複製"
-    static let pendingItemCaption = "待結帳商品"
+    static var doneTitle: String { ReferenceUIStrings.text("win_done_title") }
+    static var doneSublineDiscount: String { ReferenceUIStrings.text("win_done_subline_discount") }
+    static var doneSublineProduct: String { ReferenceUIStrings.text("win_done_subline_product") }
+    static var copyLabel: String { ReferenceUIStrings.text("common_copy") }
+    static var copiedLabel: String { ReferenceUIStrings.text("common_copied") }
+    static var pendingItemCaption: String { ReferenceUIStrings.text("win_pending_item_caption") }
 
-    static let failTitle = "領獎失敗"
-    static let failSubline = "領獎過程發生錯誤，你的中獎資格仍保留，請稍後再試一次。"
+    static var failTitle: String { ReferenceUIStrings.text("win_fail_title") }
+    static var failSubline: String { ReferenceUIStrings.text("win_fail_subline") }
     /// 🔴 通用文案 —— **MUST NOT** 換成 `CLAIM_TIMEOUT` 之類捏造的錯誤代碼，理由見
     /// `failNoticeRow` 的註解（R13 刻意分歧 2/2）。
-    static let failNotice = "若持續發生，請聯繫客服"
-    static let retryLabel = "重新領獎"
+    static var failNotice: String { ReferenceUIStrings.text("win_fail_notice") }
+    static var retryLabel: String { ReferenceUIStrings.text("win_claim_retry") }
 }
 
 // MARK: - 卡高量測（供鍵盤位移用）

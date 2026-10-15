@@ -72,6 +72,9 @@ import LivebuyUI
 /// nickname / share / like row from `LBLiveBottomBar`. The comment entry is always
 /// available for a live broadcast (prerecorded-live-bottom-bar-comment).
 public struct LiveBottomBarView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     // MARK: - Inputs (sub-view input pattern: theme, snapshot values, actions)
 
@@ -742,9 +745,9 @@ private extension LiveBottomBarView {
     static let commentHPadding: CGFloat = 14
     static let commentFontSize: CGFloat = 13
     static let commentBackground = Color(.sRGB, red: 20 / 255, green: 20 / 255, blue: 24 / 255, opacity: 0.55)
-    static let commentPlaceholder = "留言..."
+    static var commentPlaceholder: String { ReferenceUIStrings.text("chat_comment_placeholder") }
     /// 回放 chat-closed 變體文字（design-literal，同 `commentPlaceholder` 模式）。
-    static let chatClosedPlaceholder = "聊天室已關閉"
+    static var chatClosedPlaceholder: String { ReferenceUIStrings.text("chat_closed_placeholder") }
 
     // glyphs (match OperationRailView.symbolName mapping)
     // bag 改用自繪 BagGlyph（Icons.bag fill+鏤空環），不再用 SF symbol（rb-ios-icon-parity）。

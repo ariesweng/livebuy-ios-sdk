@@ -263,6 +263,9 @@ final class LivebuyWidgetController: ObservableObject {
 /// load lifecycle: configure-wait → `reload()` → optional demo fallback → grid pagination →
 /// host-policy list refresh. Card taps / see-more / feed publication forward via `config`.
 public struct LivebuyWidget: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     @StateObject private var controller: LivebuyWidgetController
     /// Fixed at init by the host — drives which surface renders (NOT `model.mode`, which can
@@ -380,7 +383,7 @@ public struct LivebuyWidget: View {
     @ViewBuilder
     private var demoCaption: some View {
         if controller.usingDemoData {
-            Text("（示範資料 — 未取得直播列表）")
+            Text(ReferenceUIStrings.text("widget_demo_data_caption"))
                 .font(.caption2)
                 .foregroundColor(.secondary)
                 .padding(.bottom, 6)

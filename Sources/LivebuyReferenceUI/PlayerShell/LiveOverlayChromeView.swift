@@ -53,6 +53,9 @@ import LivebuyUI
 /// pinned narrating-product card, host caption, and static gesture hints over
 /// the video area, themed by the resolved `ReferenceUITheme`.
 public struct LiveOverlayChromeView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (first positional argument, always).
     public let theme: ReferenceUITheme
@@ -667,10 +670,10 @@ public struct LiveOverlayChromeView: View {
     static let announceTextColor = Color.white
 
     /// Host caption label ("主持人").
-    static let hostCaptionLabel = "主持人"
+    static var hostCaptionLabel: String { ReferenceUIStrings.text("live_host_caption") }
     /// Host-caption price-row prefix ("價格:") and suffix ("開始銷售").
-    static let priceCaptionLabel = "價格:"
-    static let priceCaptionSuffix = "開始銷售"
+    static var priceCaptionLabel: String { ReferenceUIStrings.text("live_price_caption_prefix") }
+    static var priceCaptionSuffix: String { ReferenceUIStrings.text("live_price_caption_suffix") }
     /// Host-caption live-price color (`#FFD0D7` — design pink for the price span).
     static let captionPriceColor = Color(hex: "#FFD0D7") ?? Color.pink
     /// Narrate-tag copy shown on the pinned card — 恆定「介紹中」，不受 isFlashSale 影響
@@ -678,28 +681,28 @@ public struct LiveOverlayChromeView: View {
     /// wiring` previously split this into「開標中」(flash-sale) vs「介紹中」(default) per
     /// the backend documentation's wording; the user later decided to revert that split for
     /// both this pinned-card copy AND `ProductRowView.introducingLabel` (a SEPARATE view/
-    /// file's product-row narrating banner) — both are constants again. Written as a
-    /// literal — reference-ui 層文案一律寫死、不走 i18n（同本檔案既有慣例）。
-    static let narrateTagText = "介紹中"
+    /// file's product-row narrating banner) — both are constants again. Copy comes from the
+    /// reference-ui string table (key `product_introducing`, `rb-ios-i18n-string-table`).
+    static var narrateTagText: String { ReferenceUIStrings.text("product_introducing") }
     /// Narrate badge background (R31, `rb-ios-vod-live-product-card-restyle`): fixed
     /// `rgba(240,50,70,0.7)` coral — no longer `theme.accent`. Shared verbatim with
     /// `ProductRowView.introducingBadgeColor` (same design decision, same color).
     static let narrateBadgeColor = (Color(hex: "#F03246") ?? Color.red).opacity(0.7)
 
-    /// Gesture-hint copy (static localized presentation strings, matching
+    /// Gesture-hint copy (reference-ui string table `gesture_hint_*` keys, matching
     /// `LBPGestureHint` in `sdk-components.jsx`).
     ///
     /// Tap-hint copy (`rb-ios-gesture-clean-mode-v2`, design R29, supersedes R23's
     /// `isLive`-branched `hintTap(isLive:)` / `hintTapMute` / `hintTapPlayPause` trio): every
     /// short tap now toggles `cleanMode` — there is no longer a second outcome to branch on,
     /// so the copy is a single unconditional constant regardless of `isLive`.
-    static let hintTap = "點擊畫面 = 切換乾淨模式"
+    static var hintTap: String { ReferenceUIStrings.text("gesture_hint_tap") }
     /// 長按提示文案（`rb-ios-gesture-clean-mode-v2`，design R29，取代 R23「長按畫面 = 切換
     /// 乾淨模式」版本）：長按改驅動 2 倍速快轉，僅在 seekable（此 sub-view 情境下即
     /// `!isLive`，代表已結束直播回放）時才有意義——`gestureHints` 只在該情境渲染這一行；
     /// 真直播進行中長按無對應動作，該行整條不渲染（見 `gestureHints`）。
-    static let hintHold = "長按畫面 = 2倍速快轉"
-    static let hintSwipe = "上下滑動 = 切換影片"
+    static var hintHold: String { ReferenceUIStrings.text("gesture_hint_hold") }
+    static var hintSwipe: String { ReferenceUIStrings.text("gesture_hint_swipe") }
 
     /// The pinned product is "narrating" when `narrateStatus == 2`
     /// (core convention — see `LivebuyPlayerViewController.narrating`) — but ONLY when the
@@ -753,7 +756,7 @@ public struct LiveOverlayChromeView: View {
     }
 
     /// Sold-out price-line label (design「已售完」— same copy as `MiniCartView.soldOutLabel`).
-    static let soldOutLabel = "已售完"
+    static var soldOutLabel: String { ReferenceUIStrings.text("product_sold_out") }
 
     /// Sold-out price-line color — CORRECTED from an earlier `textDim` (`#6B6775`) mistake
     /// (rb-ios-live-pinned-card-soldout-label-color-fix): `#6B6775` is this module's general

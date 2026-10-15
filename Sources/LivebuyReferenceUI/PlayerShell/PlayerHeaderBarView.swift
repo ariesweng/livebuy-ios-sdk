@@ -121,6 +121,9 @@ extension EnvironmentValues {
 /// The family-1 top-bar chrome. Pinned to the top of the player shell; paints the
 /// glassy host pill + round glass control cluster over a dark scrim gradient.
 public struct PlayerHeaderBarView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     // MARK: - Inputs (documented sub-view input pattern)
 
@@ -843,7 +846,7 @@ public struct PlayerHeaderBarView: View {
     /// site and a unit test share exactly one source — mirrors this file's other pure `static
     /// func` helpers (`showsViewerBadge` / `formatViewerCount` / …).
     static func minimizeButtonAccessibilityLabel(showCloseIcon: Bool) -> String {
-        showCloseIcon ? "關閉" : "最小化"
+        ReferenceUIStrings.text(showCloseIcon ? "player_close_a11y" : "player_minimize_a11y")
     }
 
     /// A 36×36 round glass icon button (live-chrome.jsx iconBtn) drawing either the

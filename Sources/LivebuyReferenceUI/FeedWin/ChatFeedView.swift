@@ -44,6 +44,9 @@ import LivebuyUI
 /// newest-at-bottom translucent feed over the video area, dispatching each
 /// `LBFeedItem` to its row renderer and themed by the resolved `ReferenceUITheme`.
 public struct ChatFeedView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (first positional argument, always).
     public let theme: ReferenceUITheme
@@ -461,7 +464,7 @@ public struct ChatFeedView: View {
     static let atBottomEpsilon: CGFloat = 24
 
     /// "↓ 最新訊息" return-to-live pill label (scrollable variant).
-    static let returnToLatestLabel = "最新訊息"
+    static var returnToLatestLabel: String { ReferenceUIStrings.text("chat_return_to_latest") }
 
     /// Fraction of the available height the SCROLLABLE chat occupies (anchored bottom).
     /// The remaining upper area stays empty so the player's full-bleed gestures (swipe to
@@ -541,6 +544,10 @@ private struct BottomAnchorMaxYKey: PreferenceKey {
 // language without parsing fields.
 
 struct LBChatLineRow: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
+
     let theme: ReferenceUITheme
     let text: String
     /// The chat author's nickname (chat-nickname-render). nil / empty → text-only
@@ -667,7 +674,7 @@ struct LBChatLineRow: View {
                 // 主播訊息的 `userName` 恆非空），header 會只剩下這個冒號本身。這是
                 // 舊版「即使沒暱稱仍畫固定字串『主播』」行為的一個副作用性改變，design
                 // 沒有交代這個邊界情境的 fallback，本次不臆測補一個新文案。
-                Text("：")
+                chatNameSeparatorText()
                     .font(.system(size: 11.5 * theme.fontScale, weight: .regular))
                     .foregroundColor(.white)
             }
@@ -864,7 +871,7 @@ struct LBChatLineRow: View {
         return Text(userName)
             .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
             .foregroundColor(Self.guestRoleNameColor)
-            + Text("：")
+            + chatNameSeparatorText()
                 .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
                 .foregroundColor(.white)
             + body
@@ -928,6 +935,10 @@ struct LBChatLineRow: View {
 // instead. See the NOTE on `bubble` below for the full account.
 
 struct LBEventJoinLineRow: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
+
     let theme: ReferenceUITheme
     let text: String
     /// 主播名稱，純顯示 — 對齊 `LBChatLineRow.roleBubble` 的 accent 名牌版型
@@ -1027,7 +1038,7 @@ struct LBEventJoinLineRow: View {
             // 冒號（design R30）：MUST 帶明確 `.font()`，比照 `LBChatLineRow.roleBubble`
             // 的既知坑（`rb-ios-chat-colon-font-baseline-fix`）——未設 font 的 `Text` 片
             // 段會吃到 ambient ~17pt 預設字體。
-            Text("：")
+            chatNameSeparatorText()
                 .font(.system(size: 11.5 * theme.fontScale, weight: .semibold))
                 .foregroundColor(.white)
         }
@@ -1101,11 +1112,21 @@ struct LBEventJoinLineRow: View {
     }
 
     /// CTA label（`rb-ios-chat-message-line-restyle`，design R30：was 「加入活動」）.
-    static let joinLabel = "立即參加"
+    static var joinLabel: String { ReferenceUIStrings.text("common_join_now") }
     /// 已參加 joined-state label.
-    static let joinedLabel = "已參加"
+    static var joinedLabel: String { ReferenceUIStrings.text("chat_joined") }
     /// Fallback copy when `text` is empty (`LBEventJoinLine` default copy).
-    static let defaultEventCopy = "🎉 抽獎開始！留言「抽獎」即可參加"
+    static var defaultEventCopy: String { ReferenceUIStrings.text("chat_event_default") }
+}
+
+/// The chat name/message separator (string table key `chat_name_separator`, zh-TW 「：」) as a
+/// `Text` — built through `LocalizedStringKey`, NOT verbatim, on purpose (`rb-ios-i18n-string-table`).
+/// Before the string table this was a `Text("：")` literal, i.e. a localized-key `Text`, which is
+/// typeset with the environment locale's CJK punctuation form; a verbatim `Text` picks a different
+/// full-width-colon glyph position and would shift every existing chat baseline. The value is never
+/// a key in the host bundle, so SwiftUI displays the value itself.
+func chatNameSeparatorText() -> Text {
+    Text(LocalizedStringKey(ReferenceUIStrings.text("chat_name_separator")))
 }
 
 // MARK: - LBActivityLineRow — tier-styled activity row (LBActivityLine)
@@ -1276,12 +1297,16 @@ struct LBActivityLineRow: View {
 /// 渲染（最終視覺 DECISION-PENDING 待設計稿）；只在 `ChatFeedView.pinned != nil` 時被建出，
 /// 故無置頂時不出像素（snapshot baseline byte-identical）。
 private struct PinnedMessageBanner: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
+
     let theme: ReferenceUITheme
     let pinned: LBPinnedMessage
 
     /// 主播置頂（`kind == .host` / name 空）不顯示名前綴；comment 顯示「{name}：」。
     private var namePrefix: String {
-        (pinned.kind == .comment && !pinned.name.isEmpty) ? "\(pinned.name)：" : ""
+        (pinned.kind == .comment && !pinned.name.isEmpty) ? pinned.name + ReferenceUIStrings.text("chat_name_separator") : ""
     }
 
     var body: some View {

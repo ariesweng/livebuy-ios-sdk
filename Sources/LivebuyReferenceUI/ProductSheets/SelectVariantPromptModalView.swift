@@ -32,6 +32,9 @@ import LivebuyUI
 /// (title「請選規格」/ body「請先選擇商品規格，再加入購物車。」/ full-width「我知道了」) over a
 /// black-0.55 scrim. `onDismiss` (the「我知道了」CTA or a scrim tap) closes the prompt.
 public struct SelectVariantPromptModalView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -107,11 +110,11 @@ public struct SelectVariantPromptModalView: View {
     /// `AuthGateModalView`.
     static let textDim = Color(hex: "#6B6775") ?? Color.gray
 
-    // MARK: - Fixed localized copy (static presentation strings, 繁中)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let title = "請選規格"
-    static let body = "請先選擇商品規格，再加入購物車。"
-    static let primaryLabel = "我知道了"
+    static var title: String { ReferenceUIStrings.text("variant_prompt_title") }
+    static var body: String { ReferenceUIStrings.text("variant_prompt_body") }
+    static var primaryLabel: String { ReferenceUIStrings.text("variant_prompt_ok") }
 }
 
 // MARK: - Deterministic demo seed (previews)

@@ -5,6 +5,65 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.29.0] - 2026-10-15
+
+> **Minor（iOS + Android lockstep）。** iOS、Android 皆自 `4.28.0` 升級。**源碼面無 BREAKING**——新增
+> `Livebuy.currentLanguage`、`Livebuy.addLanguageListener(_:)`，被移除的都是 internal 符號，原呼叫碼不必改、照常編譯。
+> 但 **⚠️ 語言行為改變**（見 Changed）：沒指定語言時改跟手機語言，最後保底由 `zh-TW` 改為 `en`；drop-in
+> （reference-ui）文案不再寫死繁中，會跟著目前語言顯示。**要維持繁中請 `configure(..., lang: "zh-TW")`。**
+> core 與 reference-ui 同一 package 一起發佈。完整敘述見
+> [`docs/release-notes/v4.29.0.md`](../docs/release-notes/v4.29.0.md)。
+
+### Added
+
+- `Livebuy.currentLanguage: String`（core，`@objc public static`，唯讀）：目前生效的語言，永遠是 5 語系之一
+  （`zh-TW`／`zh-CN`／`en`／`ms-MY`／`id-ID`）；`configure` 之前也可讀（手機語言，不支援時為 `en`），不 assert。
+- `Livebuy.addLanguageListener(_ listener: @escaping (String) -> Void) -> () -> Void`（core，`@objc public static`、
+  `@discardableResult`）：目前語言**實際改變**時於 main thread 依訂閱順序通知新語言代碼；不需要也不影響 host 的
+  `setEventListener`；訂閱時不重播目前值（請先讀 `currentLanguage`）。回傳的閉包用來取消訂閱，可重複呼叫。
+- reference-ui 自帶五語系字串表（133 key），依 `Livebuy.currentLanguage` 顯示，執行中 `setLanguage` 會即時重繪
+  （含 accessibility label、聊天輸入框 placeholder、直播預告的月日格式）。zh-TW 畫面逐字不變。
+- reference-ui 新增 public 唯讀計算屬性 `CarouselHeaderView.defaultTitle`、`CartToastView.defaultLabel`（public init
+  預設參數改用它們，值隨語言變）。
+
+### Changed
+
+- ⚠️ **語言優先序改為 host（`configure(lang:)`／`setLanguage`）> 手機系統語言（屬 5 語系才採用）> API `lang` > `en`**
+  （core）。舊版是 `configure(lang:)` > API `lang` > `zh-TW`、不看手機語言。系統語言依偏好順序取第一個對得到的
+  （`zh-Hant*`／`zh-HK`／`zh-MO` → `zh-TW`；`zh-Hans*`／`zh-SG`／裸 `zh` → `zh-CN`；`en*`／`ms*`／`id*`、`in*` 各自對應）。
+  `configure(lang:)` 傳入不支援的值改為視同未設定；API `lang` 收到不支援的值時清除該層（`en-US` 這類可對應的值會正規化）。
+  **影響**：沒指定語言的 host，手機是英文／馬來文／印尼文的觀眾會看到該語言；手機語言不在 5 語系（例如日文）、
+  且後端沒給 `lang` 的觀眾，會看到 **en**（舊版是 zh-TW）。⚠️ 後端 `/sdk/*` 目前尚未回傳 `lang`，API `lang` 這層
+  實際永遠是空的。**要維持繁中請 `configure(..., lang: "zh-TW")`。**
+- ⚠️ **drop-in（reference-ui）文案跟著目前語言顯示**：以前所有文案寫死繁中，不論語言設定；現在依上述優先序顯示
+  5 語系之一。字串表某語言缺 key 時依序退回「目前語言 → `en` → key 本身」；收到不在 5 語系的語言碼視為 `en`
+  （目前五張表 key 集合一致，正式畫面不受影響）。
+- ⚠️ **`LANGUAGE_CHANGED` 改為「目前語言實際改變才派發」**（core）：`setLanguage` 設成目前已生效的語言不再派發；
+  新增 API `lang` 到達與 `configure` 兩種來源（例如首次載入 widget 時）。保底改 `en` 後，`from` 可能是 `en`（例如
+  API 給 `zh-TW` 時派發 `en → zh-TW`）。依賴事件次數或來源的 host 請改以 `params.to` 為準、可重入。
+- ⚠️ **加入購物車（`POST /sdk/video/addcart`）與追蹤回報（`/sdk/video/addcart/track`）送出的 `lang` 跟著新優先序**
+  （core，程式仍讀同一個目前語言）。後端只用它決定回應 message 語言，以及訪客加購且沒有暱稱時推給同場觀眾的購買
+  通知名稱（「有人」／`Someone`／`Seseorang`）——手機為英文的訪客加購時，其他觀眾可能看到 `Someone`。不影響建單、
+  價格、庫存。
+- `SubtitleUnavailableTooltip.defaultText` 由 `public static let` 改為 `public static var`（唯讀計算屬性，值隨語言變）；
+  讀取端原始碼相容，依新版重新編譯即可。
+
+### Removed
+
+- core 內建的 78 個 i18n key：刪除 `LivebuySDK` 資源下 5 個 `.lproj/Localizable.strings`（core bundle 只剩
+  `PrivacyInfo.xcprivacy`），移除 internal 查字函式 `LBLocalizedString` / `LBLocalization.string(_:)`。皆為
+  internal，host 無法引用、不受影響。SDK 內部錯誤碼字串（如 `guest_existing`）逐字不變；使用者可見的錯誤文案改由
+  reference-ui 字串表負責。
+- 售完聊天注入死碼（`scanForSoldOut` 等，internal）：該訊息從未出現在畫面上、也沒有事件或回呼帶出，host 無感。
+
+### Fixed
+
+- （無）
+
+> **驗證範圍**：單元測試（語言優先序純函式、listener 註冊表、字串表完整性／fallback／占位符、執行中切換語言接線）與
+> 既有 snapshot baseline 全數通過（zh-TW 零改動）。**未經真機驗證**——各系統語言冷啟動的實際介面、VoiceOver 念法
+> 與後端回應 message 語言待實機確認（見 `docs/release/v4.29.0-e2e-checklist.md`）。
+
 ## [4.28.0] - 2026-10-14
 
 > **Minor（iOS + Android lockstep）。** iOS、Android 皆自 `4.27.0` 升級。**源碼面無 BREAKING**——新增帶預設值的

@@ -27,6 +27,9 @@ import LivebuyUI
 /// The centred mute toast: a dark-glass pill with a speaker glyph + a state label.
 /// `muted == true` → 靜音 (speaker.slash); `false` → 聲音開啟 (speaker.wave.2).
 public struct GestureMuteToastView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -54,8 +57,8 @@ public struct GestureMuteToastView: View {
             Capsule().fill(Self.glass))
     }
 
-    static let mutedLabel = "靜音"
-    static let unmutedLabel = "聲音開啟"
+    static var mutedLabel: String { ReferenceUIStrings.text("player_muted") }
+    static var unmutedLabel: String { ReferenceUIStrings.text("player_unmuted") }
     /// Dark-glass pill surface (rgba(20,20,24,0.78)).
     static let glass = (Color(hex: "#141418") ?? .black).opacity(0.78)
 }

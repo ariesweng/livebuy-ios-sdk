@@ -64,6 +64,9 @@ import LivebuyUI
 /// submitting / result stage because joining an activity has no asynchronous
 /// outcome to wait for, and the CTA itself is a stateless, repeatable dispatch.
 public struct LiveActivitySheetView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     // MARK: - Inputs (documented sub-view input pattern)
 
@@ -281,7 +284,7 @@ public struct LiveActivitySheetView: View {
 
     /// Pure: the keyword call-to-action string (design source's fixed format).
     static func keywordLabel(keyword: String) -> String {
-        "留言關鍵字【\(keyword)】即可參加抽獎！"
+        ReferenceUIStrings.text("activity_keyword_cta", ["keyword": keyword])
     }
 
     /// CTA tap dispatch — `rb-ios-activity-sheet-cta-repeatable`: unconditionally
@@ -359,9 +362,9 @@ public struct LiveActivitySheetView: View {
     /// `S.border || '#D8DBE0'`）。
     static let dotInactive = Color(hex: "#D8DBE0") ?? Color.gray.opacity(0.3)
 
-    static let joinLabel = "立即參加"
-    static let footerTerms = "使用條款"
-    static let footerPrivacy = "隱私政策"
+    static var joinLabel: String { ReferenceUIStrings.text("common_join_now") }
+    static var footerTerms: String { ReferenceUIStrings.text("common_terms") }
+    static var footerPrivacy: String { ReferenceUIStrings.text("common_privacy") }
 }
 
 // `rb-ios-activity-sheet-cta-repeatable`: this view no longer carries any

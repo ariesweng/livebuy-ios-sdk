@@ -56,6 +56,9 @@ import LivebuyUI
 /// close button (aligned to the design's `LBPMiniCart`). The container draws it
 /// only when a peek exists.
 public struct MiniCartView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -308,10 +311,10 @@ public struct MiniCartView: View {
     /// (by-then-stale) shared `textDim`. This constant replaces that single call site.
     static let originalPriceColor = Color(hex: "#A0A0A0") ?? Color.gray
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
     /// Sold-out price-line label (design `已售完`).
-    static let soldOutLabel = "已售完"
+    static var soldOutLabel: String { ReferenceUIStrings.text("product_sold_out") }
 
     /// Up-to-2-char monogram from the product name (deterministic, pure) — for the
     /// photo placeholder. Mirrors `ProductDetailSheetView.monogram(for:)`.

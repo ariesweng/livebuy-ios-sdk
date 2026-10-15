@@ -49,6 +49,9 @@ import LivebuyUI
 /// reflects `noticeEnabled` and forwards `onToggleNotice`. RESTOCK-NOTIFY ONLY —
 /// no AWAIT switch (family-6).
 public struct NotifyRestockSheetView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -323,13 +326,13 @@ public struct NotifyRestockSheetView: View {
     /// `theme.soldOut` (sold-out caption — design `#9A9BA5`).
     static let soldOut = Color(hex: "#9A9BA5") ?? Color.gray
 
-    // MARK: - Fixed localized copy (static presentation strings)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let soldOutLabel = "已售完"
-    static let qtyLabel = "數量"
-    static let noStockLabel = "尚無庫存"
-    static let noticeOffLabel = "補貨通知我"
-    static let noticeOnLabel = "已開啟補貨通知"
+    static var soldOutLabel: String { ReferenceUIStrings.text("product_sold_out") }
+    static var qtyLabel: String { ReferenceUIStrings.text("product_qty") }
+    static var noStockLabel: String { ReferenceUIStrings.text("restock_no_stock") }
+    static var noticeOffLabel: String { ReferenceUIStrings.text("restock_notice_off") }
+    static var noticeOnLabel: String { ReferenceUIStrings.text("restock_notice_on") }
 
     /// First product photo as a non-empty URL, or nil (empty / whitespace → placeholder).
     static func photoURL(_ detail: LBProductDetailState) -> URL? {

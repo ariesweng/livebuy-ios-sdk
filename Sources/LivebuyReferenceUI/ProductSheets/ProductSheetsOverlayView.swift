@@ -151,6 +151,9 @@ enum ProductSheetActionMode { case detail, addToCart, restock }
 enum ProductSheetKind: Equatable { case detail, addToCart, notifyRestock }
 
 public struct ProductSheetsOverlayView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The republished, read-only product sheet-stack snapshot.
     @ObservedObject public var model: ProductSheetsModel

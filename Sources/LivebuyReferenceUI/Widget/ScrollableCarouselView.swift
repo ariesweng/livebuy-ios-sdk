@@ -65,6 +65,9 @@ import LivebuyUI
 /// `onSeeMore` / `onTapVideo`; nil closures render an inert demo form. Never
 /// snapshot-baselined — behavior-tested.
 public struct ScrollableCarouselView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The read-only widget content snapshot, passed through to the sub-surfaces.
     @ObservedObject public var model: WidgetModel
@@ -115,7 +118,7 @@ public struct ScrollableCarouselView: View {
     public init(
         model: WidgetModel,
         theme: ReferenceUITheme,
-        title: String = "精選影片",
+        title: String = CarouselHeaderView.defaultTitle,
         subtitle: String? = nil,
         showsHeader: Bool = true,
         cardWidth: CGFloat = 132,

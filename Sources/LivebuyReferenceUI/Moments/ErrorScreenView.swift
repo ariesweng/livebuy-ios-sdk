@@ -64,6 +64,9 @@ import LivebuyUI
 /// retry can help) and a secondary 關閉. Retry is the core player's job; the CTA
 /// only FORWARDS `onRetry`. Reads ONLY the passed-in error (no re-classification).
 public struct ErrorScreenView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -311,17 +314,17 @@ public struct ErrorScreenView: View {
     /// Solo-secondary filled affordance (`rgba(255,255,255,0.12)`).
     static let onScrimFill = Color.white.opacity(0.12)
 
-    // MARK: - Fixed localized copy (static presentation strings — 人話, NO raw code)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let streamTitle   = "連線發生問題"
-    static let streamBody    = "目前無法載入這場直播，請確認網路後再試一次。"
-    static let notFoundTitle = "找不到這部影片"
-    static let notFoundBody  = "這部影片可能已下架或不存在。"
-    static let outdatedTitle = "請更新 App 以繼續觀看"
-    static let outdatedBody  = "你的版本較舊，更新後即可觀看這場直播。"
-    static let retryLabel    = "重試"
-    static let backLabel     = "返回"
-    static let upgradeLabel  = "前往更新"
+    static var streamTitle: String { ReferenceUIStrings.text("error_stream_title") }
+    static var streamBody: String { ReferenceUIStrings.text("error_stream_body") }
+    static var notFoundTitle: String { ReferenceUIStrings.text("error_not_found_title") }
+    static var notFoundBody: String { ReferenceUIStrings.text("error_not_found_body") }
+    static var outdatedTitle: String { ReferenceUIStrings.text("error_outdated_title") }
+    static var outdatedBody: String { ReferenceUIStrings.text("error_outdated_body") }
+    static var retryLabel: String { ReferenceUIStrings.text("common_retry") }
+    static var backLabel: String { ReferenceUIStrings.text("common_back") }
+    static var upgradeLabel: String { ReferenceUIStrings.text("error_upgrade") }
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)

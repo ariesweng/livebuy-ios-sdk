@@ -33,6 +33,9 @@ import LivebuyUI
 /// footer) over a black-0.55 scrim. `onConfirm` proceeds to the host-wired service-link
 /// exit; `onDismiss` (or a scrim tap) just closes the modal.
 public struct ContactMerchantModalView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The resolved reference-ui theme (FIRST positional argument, always).
     public let theme: ReferenceUITheme
@@ -146,12 +149,12 @@ public struct ContactMerchantModalView: View {
     /// `theme.surface.strokeStrong` (plain-button outline). Matches `AuthGateModalView`.
     static let strokeStrong = Color(hex: "#D8D5DE") ?? Color.gray.opacity(0.35)
 
-    // MARK: - Fixed localized copy (static presentation strings, 繁中 — verbatim 設計稿)
+    // MARK: - Localized copy (reference-ui string table, `ReferenceUIStrings`)
 
-    static let title = "聯繫商家"
-    static let body = "確定要開啟商城指定的客服連結嗎?"
-    static let cancelLabel = "取消"
-    static let confirmLabel = "確定"
+    static var title: String { ReferenceUIStrings.text("contact_title") }
+    static var body: String { ReferenceUIStrings.text("contact_body") }
+    static var cancelLabel: String { ReferenceUIStrings.text("common_cancel") }
+    static var confirmLabel: String { ReferenceUIStrings.text("common_confirm") }
 }
 
 // MARK: - Deterministic demo seed (previews + snapshot tests)

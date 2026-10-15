@@ -152,6 +152,9 @@ import LivebuyUI
 /// All widget actions are host-wired container closures (no core simulate* /
 /// template intents are called here).
 public struct WidgetOverlayView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The republished, read-only widget content snapshot.
     @ObservedObject public var model: WidgetModel

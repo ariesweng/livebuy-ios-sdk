@@ -197,6 +197,9 @@ public enum LBProductCardMode: String {
 /// (`inside` overlay / `below` row / `hidden`) + the title below. `onTap` is a
 /// host-wired exit (the card never opens the player itself).
 public struct CarouselCardView: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// The video this card renders (read-only — `cover` / `title` / `duration` /
     /// `liveStatus` / `goods`). Read-only; this layer never mutates / re-fetches.

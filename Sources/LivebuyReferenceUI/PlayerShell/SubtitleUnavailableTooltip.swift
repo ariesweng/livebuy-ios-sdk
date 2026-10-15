@@ -23,6 +23,9 @@ import SwiftUI
 /// (subtitle) pill is inert (`CcIconState.unavailable`). Purely presentational — `show` /
 /// `placement` / `text` are the caller's own local state; this view has no callback.
 public struct SubtitleUnavailableTooltip: View {
+    /// Observed so a runtime language switch re-renders this view's localized copy
+    /// (`rb-ios-i18n-string-table`; see `ReferenceUILanguage`).
+    @ObservedObject var l10n = ReferenceUILanguage.shared
 
     /// Where the bubble sits relative to the button it explains.
     public enum Placement: Equatable {
@@ -37,7 +40,7 @@ public struct SubtitleUnavailableTooltip: View {
 
     /// Design-literal copy (`screens.jsx` `showCCUnavailableToast`), shared by both call sites —
     /// exposed as the default so callers don't need to repeat the literal string.
-    public static let defaultText = "未提供字幕/隱藏式輔助字幕"
+    public static var defaultText: String { ReferenceUIStrings.text("player_subtitle_unavailable") }
 
     public let show: Bool
     public let placement: Placement
