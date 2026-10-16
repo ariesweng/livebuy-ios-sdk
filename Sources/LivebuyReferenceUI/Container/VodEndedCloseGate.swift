@@ -118,8 +118,10 @@ final class VodEndedCloseGate {
 /// event. Held STRONGLY by `Coordinator` (core holds aux listeners weakly).
 final class VideoStateAuxListener: NSObject, LivebuyEventListener {
 
-    /// Invoked (on the dispatcher's background queue) on every `VIDEO_STATE_CHANGE`.
-    var onVideoStateChange: (() -> Void)?
+    /// Invoked (on the dispatcher's background queue) on every `VIDEO_STATE_CHANGE`, with whether
+    /// that event carried `advance_exhausted: true` (rb-ios-vod-advance-exhausted-close — the core
+    /// skipped every unplayable `next` candidate, vod-advance-skip-unplayable-ios-core).
+    var onVideoStateChange: ((_ advanceExhausted: Bool) -> Void)?
 
     func onEventTriggered(
         eventName: String,
@@ -128,7 +130,7 @@ final class VideoStateAuxListener: NSObject, LivebuyEventListener {
         shareContext: LBShareContext?
     ) -> Bool {
         if eventName == LBEvent.videoStateChange {
-            onVideoStateChange?()
+            onVideoStateChange?((params["advance_exhausted"] as? Bool) == true)
         }
         return false   // non-primary aux listener: never intercept
     }

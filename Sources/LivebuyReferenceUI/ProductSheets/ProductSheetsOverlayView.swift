@@ -291,6 +291,8 @@ public struct ProductSheetsOverlayView: View {
     /// rise, auto-cleared ~1.8s later. Default false → snapshot-neutral (baselines
     /// byte-identical).
     @State private var cartToastVisible = false
+    /// rb-ios-cart-add-failure-toast: whether the visible toast is the FAILURE variant.
+    @State private var cartToastIsError = false
 
     /// Pending auto-dismiss work for the success toast — cancelled + re-armed on each rise
     /// so rapid successive successes EXTEND the toast rather than truncate it.
@@ -441,7 +443,7 @@ public struct ProductSheetsOverlayView: View {
             // confirmation: bottom-aligned over the player frame, slides up (`lbp-toast-in`),
             // never eats taps (`allowsHitTesting(false)`). Default-hidden → snapshot-neutral.
             if cartToastVisible {
-                CartToastView(theme: theme)
+                CartToastView(theme: theme, isError: cartToastIsError)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 96)
                     .allowsHitTesting(false)
@@ -473,7 +475,14 @@ public struct ProductSheetsOverlayView: View {
         }
         // Flash the success toast on each cartCount rise (success → incrementOnAdd). dedup /
         // needsLogin / failure leave the count unchanged → no toast (D-1 known limitation).
-        .flashCartToast(onCartCount: model.cartCount, last: $lastCartCount) { showCartToast() }
+        .flashCartToast(onCartCount: model.cartCount, last: $lastCartCount) { showCartToast(isError: false) }
+        // rb-ios-cart-add-failure-toast: a genuine add failure (the template resets the flag to
+        // false at every attempt, so each failure is a fresh false→true edge) flashes the error
+        // toast; the detail stays open and 加入購物車 again retries. Replaces the banner at the very
+        // bottom of the scroll body that users could not see (livebuy-flutter-sdk issue #1).
+        .onChange(of: model.addToCartFailed) { failed in
+            if failed { showCartToast(isError: true) }
+        }
         // Mirror the template's addToCartInFlight into a floored loading flag (anti-flicker; a
         // synchronous dedup resolves within a frame). The sheets read `cartLoadingVisible` as
         // their CTA loading state (cart-add-loading-state D-2).
@@ -919,8 +928,9 @@ public struct ProductSheetsOverlayView: View {
     /// `.transition` slides the pill up), re-arm the dismiss so a rapid second success
     /// extends rather than truncates. @State setters are nonmutating, so this stays a plain
     /// method.
-    private func showCartToast() {
+    private func showCartToast(isError: Bool) {
         cartToastDismiss?.cancel()
+        cartToastIsError = isError
         withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) {
             cartToastVisible = true
         }

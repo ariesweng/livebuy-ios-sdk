@@ -341,8 +341,8 @@ enum TemplateWiring {
                     template.ingestBacklog(push: response.push, user: response.user, rush: response.rush)
                 } else {
                     for push in response.push { template.handlePush(push) }
-                    for user in response.user { template.handleJoin(text: user.text) }
-                    for rush in response.rush { template.handlePurchase(text: rush.text) }
+                    for user in response.user { template.handleJoin(user) }
+                    for rush in response.rush { template.handlePurchase(rush) }
                 }
             }
             if response.liveEnd == 1 { template.handleLiveEnd() }

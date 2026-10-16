@@ -285,6 +285,11 @@ public final class PlayerShellModel: ObservableObject {
     /// memberwise construction byte-identical.
     @Published public private(set) var isEndScreenActive: Bool
 
+    /// Whether the terminal error moment is showing (fix-ios-error-screen-close-button-blocked) —
+    /// the same `errorState.current != nil` condition `MomentsModel.error` reads. While true the
+    /// header's top-right button is forced to "direct close" (same as `isEndScreenActive`).
+    @Published public private(set) var isErrorActive: Bool = false
+
     // MARK: - Live binding
 
     /// The bound template, when constructed from a live player. nil for demo /
@@ -310,6 +315,7 @@ public final class PlayerShellModel: ObservableObject {
     public convenience init(template: DefaultPlayerTemplate) {
         self.init(snapshotting: template)
         self.template = template
+        isErrorActive = template.errorState.current != nil   // fix-ios-error-screen-close-button-blocked seed
         self.observerToken = template.addObserver { [weak self] in
             self?.refresh(from: template)
         }
@@ -536,6 +542,7 @@ public final class PlayerShellModel: ObservableObject {
         isRestricted = t.isRestricted
         isEndScreenActive = Self.deriveIsEndScreenActive(
             countdown: t.endScreen.countdown, endScreenVisible: t.endScreen.endScreenVisible)
+        isErrorActive = t.errorState.current != nil
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)

@@ -5,6 +5,64 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.30.0] - 2026-10-16
+
+> **Minor（iOS + Android lockstep）。** iOS、Android 皆自 `4.29.0` 升級。**源碼面無 BREAKING**——只新增公開符號與
+> 有預設值的參數，原呼叫碼不必改、照常編譯。**⚠️ 行為面有變更**（見 Changed）：SDK 請求帶 `lang` 的規則、商家語言
+> 新來源、後端 `error_code` 優先判定、advance 自動接播會跳過播不了的影片、drop-in 錯誤畫面與加購失敗提示。其中
+> `error_code`、聊天室原始欄位、`/sdk/config` 的 `extensions.lang` **要等後端新版上線才生效**（後端尚未部署，舊後端下
+> 行為與 `4.29.0` 相同）。core 與 reference-ui 同一 package 一起發佈。完整敘述見
+> [`docs/release-notes/v4.30.0.md`](../docs/release-notes/v4.30.0.md)。
+
+### Added
+
+- `LBError.backendErrorCode: String?`（core，`public extension`）：後端回應的原始 `error_code` 字串（目錄見
+  [`docs/migration/backend-error-code.md`](../docs/migration/backend-error-code.md)）。只有可能由後端回應產生的錯誤才有值，
+  SDK 本地建構的錯誤（網路錯誤等）一律 `nil`。加入購物車失敗時可從拋出的錯誤讀到 `spec_required`／`out_of_stock`／
+  `purchase_limit_exceeded` 等細項。
+- 事件 `SDK_CONFIG_LOAD_FAILED`、`AWARD_CLAIM_RESULT`（失敗時）在後端有給代碼時多帶 `backend_error_code`。
+- 聊天室組字（core）：新增公開型別 `LBChatRawFields`、`LBChatComposer`（`composeText`／`composeName`／`composeReply`／
+  `actorDisplayName`／`hostDisplayName`）；`LBPushMsg`／`LBUserMsg`／`LBRushMsg`／`LBWinMsg`／`LBPinnedMessage`／`LBComment`
+  新增選填原始欄位與 `composedText(lang:)` 等方法、`composedText`／`composedName`／`composedReply` 便利屬性（依 SDK
+  目前語言組句）；`LBPushMsg.init`／`LBPinnedMessage.init` 新增有預設值的參數。`POLL_RECEIVED`／`CHAT_HISTORY_LOADED`
+  每筆聊天多帶原始鍵（後端有送才帶）與 `composed_text`（必要時 `composed_name`／`composed_reply`，一律帶）。新增
+  `pollReceivedEventParams(_:lang:)`。見 [`docs/migration/sdk-i18n-raw-data.md`](../docs/migration/sdk-i18n-raw-data.md)。
+- `VIDEO_STATE_CHANGE` 新增選填參數 `advance_exhausted: true`（見 Changed 的 advance 條目）。
+- reference-ui：`CartToastView` 新增 `isError` 參數（預設 `false`）與 `CartToastView.errorLabel`；`label` 參數改為
+  `String?`（預設 `nil`，依 `isError` 取成功或失敗文案，原呼叫碼相容）。
+
+### Changed
+
+- ⚠️ **SDK 請求的 `lang` 改為「host 指定或手機語言對應成功時才帶」**（core）：值有時經 `APIClient` 統一寫入所有
+  `/sdk/*` 請求（POST body／GET query）；語言來自商家語言（API `lang`）或 `en` 保底時不帶，由後端改用商城站點語系。
+  加入購物車與加購追蹤回報（`addcart`／`addcart/track`）**不再一律帶 `lang`**。`/sdk/config` 與 `/stat` 照舊不帶。語言
+  優先序本身不變。
+- ⚠️ **商家語言新增來源 `/sdk/config` 回應的 `extensions.lang`**（core）：`configure` 快取命中、首次取得成功、背景刷新
+  成功與 `refreshConfig()` 成功後套用；後端上線後，只開播放器的 host 在未指定語言且手機語言不支援時也可能在
+  `configure` 後收到 `LANGUAGE_CHANGED`。後端尚未上線前無變化。
+- ⚠️ **後端 `error_code` 優先判定**（core）：回應帶頂層 `error_code` 時先用它判斷錯誤種類，整數 `code` 改為 fallback；
+  `LBError` 不新增 case。少數情況錯誤種類會改變（例如聊天以外的請求遇到 `video_not_found` 一律為 `videoNotFound`、
+  簽章錯誤不再被當成需要登入），對照見 `docs/migration/backend-error-code.md` 第 5 節。舊後端（無 `error_code`）行為不變。
+- ⚠️ **advance 自動接播（`configure(vodEndBehavior: .advance)`）先檢查下一支能不能播**（core）：依序檢查 `channel.next`
+  候選，跳過確定播不了的（找不到影片，或已結束但沒有回放檔的直播）；遇到網路等其他錯誤時照舊切過去。全部播不了時
+  停在 `.ended`，該次 `VIDEO_STATE_CHANGE` 帶 `advance_exhausted: true`，不載入、不呼叫 `onDidAutoAdvance`。檢查期間
+  播放器狀態維持原樣。預設的「重播」行為不受影響。
+- **drop-in（reference-ui）收到 `advance_exhausted: true` 時視同沒有下一支，自動關閉播放器**（與 `4.28.0` 起「advance
+  下無下一支自動關閉」相同）。
+- **drop-in 錯誤畫面**：錯誤期間右上角一律為「直接關閉」；錯誤畫面維持攔截下層點擊，只有落在右上角按鈕範圍的點擊會轉給關閉。
+- **drop-in 加購失敗改顯示失敗 toast**（紅色圓底 ✕「加入購物車失敗，請稍後再試」，與「已加入購物車」同位置、約 1.8 秒），
+  商品明細保持開啟、再按「加入購物車」即重試。明細底部原本使用者看不到的失敗橫幅與「重試」鈕移除；
+  `ProductDetailSheetView` 的 `addToCartFailed` 參數保留以維持編譯相容，但不再畫任何東西。
+- view-model：聊天 feed、toast、回放歷史改用 core 組好的句子（後端未送原始欄位時退回原本的文字，畫面不變）。
+
+### Fixed
+
+- drop-in 錯誤畫面右上角關閉鈕被錯誤畫面蓋住、按不到（livebuy-flutter-sdk issue #2）。
+- advance 自動接播接到沒有回放檔的已結束直播時卡在錯誤畫面（livebuy-flutter-sdk issue #2）。
+
+> **驗證範圍**：單元測試與既有 snapshot baseline 全數通過。`error_code`、聊天原始欄位、`extensions.lang` 只用手寫假回應
+> 測過（後端尚未部署）。**iOS 錯誤畫面關閉鈕與加購失敗 toast 未經真機驗證**（見 `docs/release/v4.30.0-e2e-checklist.md`）。
+
 ## [4.29.0] - 2026-10-15
 
 > **Minor（iOS + Android lockstep）。** iOS、Android 皆自 `4.28.0` 升級。**源碼面無 BREAKING**——新增

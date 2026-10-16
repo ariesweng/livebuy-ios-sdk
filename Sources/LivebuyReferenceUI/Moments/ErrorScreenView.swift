@@ -148,12 +148,22 @@ public struct ErrorScreenView: View {
     /// danger); `.stream` / `.notFound` tint with the design's danger color.
     private var iconTint: Color { error.kind == .outdated ? theme.accent : Self.danger }
 
+    @Environment(\.headerCloseHitTarget) private var headerCloseHitTarget
+
     public var body: some View {
         // Full-bleed dim scrim (design `rgba(10,10,14,0.9)`) with the centered
         // error card composited over it. Plain ZStack / VStack — no Lazy / Scroll.
         ZStack {
             Self.scrim
                 .edgesIgnoringSafeArea(.all)
+                // fix-ios-error-screen-close-button-blocked: the scrim keeps blocking every touch;
+                // a tap on the header ✕ underneath is forwarded to the container's close exit.
+                .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global).onEnded { value in
+                    guard let target = headerCloseHitTarget,
+                          HeaderCloseHitTarget.isHit(point: value.location, translation: value.translation,
+                                                     frame: target.frameInGlobal) else { return }
+                    target.onClose?()
+                })
 
             VStack(spacing: 16) {
                 iconBadge

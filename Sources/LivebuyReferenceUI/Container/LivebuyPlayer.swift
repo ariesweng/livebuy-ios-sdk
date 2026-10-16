@@ -1312,13 +1312,14 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
                 guard let player = player else { return }
                 close(player)
             }
-            videoStateListener.onVideoStateChange = { [weak self, weak player] in
+            videoStateListener.onVideoStateChange = { [weak self, weak player] advanceExhausted in
                 DispatchQueue.main.async {
                     guard let self = self, let player = player else { return }
                     self.feedVodEndedCloseGate(state: player.playerState,
                                                liveStatus: player.channel?.liveStatus,
                                                nextIsEmpty: player.channel?.next.isEmpty ?? true,
-                                               behavior: behavior())
+                                               behavior: behavior(),
+                                               advanceExhausted: advanceExhausted)
                     self.onVodEndedGateFedForTesting?()
                 }
             }
@@ -1328,14 +1329,18 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         /// Map one observed player snapshot onto the gate. `liveStatus == nil` == no channel
         /// (e.g. after `unload()`); `liveStatus == 1` is the ONLY live value — a finished-live 回放
         /// (`3`) counts as non-live and closes like any VOD.
+        /// `advanceExhausted` (rb-ios-vod-advance-exhausted-close): the core tagged this `ended` with
+        /// `advance_exhausted: true` — it skipped every unplayable `next` candidate — so treat it as
+        /// "no next" even though `channel.next` is still non-empty.
         func feedVodEndedCloseGate(state: LBPlayerState,
                                    liveStatus: Int?,
                                    nextIsEmpty: Bool,
-                                   behavior: LBVodEndBehavior) {
+                                   behavior: LBVodEndBehavior,
+                                   advanceExhausted: Bool = false) {
             vodEndedCloseGate?.handleStateChange(state,
                                                  hasChannel: liveStatus != nil,
                                                  isLive: liveStatus == 1,
-                                                 hasNext: !nextIsEmpty,
+                                                 hasNext: !nextIsEmpty && !advanceExhausted,
                                                  behavior: behavior)
         }
 

@@ -885,6 +885,9 @@ public struct PlayerHeaderBarView: View {
                 .background(Circle().fill(iconGlass))
             }
             .buttonStyle(PlainButtonStyle())
+            // fix-ios-error-screen-close-button-blocked: report this button's frame so the error
+            // scrim can forward a tap on it (zero pixels).
+            .background(HeaderCloseFrameReporter())
             .accessibilityIdentifier(LBAccessibilityID.playerMinimize)
             .accessibilityLabel(Self.minimizeButtonAccessibilityLabel(showCloseIcon: showCloseIcon))
         }

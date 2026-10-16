@@ -1474,7 +1474,8 @@ public struct PlayerShellView: View {
     /// whole player (`onCloseRequest` — the same exit `swipe-nav-close-on-empty` already uses);
     /// otherwise it falls back to the existing `onMinimize` forwarding, unchanged.
     private func handleHeaderTopRightTap() {
-        if model.isEndScreenActive {
+        // fix-ios-error-screen-close-button-blocked: the error moment too.
+        if model.isEndScreenActive || model.isErrorActive {
             onCloseRequest?()
         } else {
             onMinimize?()
@@ -1542,7 +1543,8 @@ public struct PlayerShellView: View {
             // moment 正在顯示（fix-ios-endscreen-close-button-blocked）——見上方
             // `effectiveShowCloseIcon` / `handleHeaderTopRightTap`。
             showCloseIcon: Self.effectiveShowCloseIcon(
-                isEndScreenActive: model.isEndScreenActive, showCloseIcon: model.showCloseIcon),
+                isEndScreenActive: model.isEndScreenActive || model.isErrorActive,
+                showCloseIcon: model.showCloseIcon),
             onMinimize: { handleHeaderTopRightTap() },
             // 訂閱徽章 → 容器注入的 gate（未登入 → AuthGate(.subscribe)）；未注入 fallback
             // `model.toggleSubscribe()`（rb-ios-subscribe-login-gate）。與 info pill 共用。

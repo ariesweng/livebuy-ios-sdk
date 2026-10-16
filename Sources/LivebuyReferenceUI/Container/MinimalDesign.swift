@@ -317,6 +317,10 @@ struct PlayerOverlayRootView: View {
     /// `moreSheetOpen` mirrors above. Defaults `false` (baseline unchanged) until the first report.
     @State private var productSheetsPresented: Bool = false
 
+    /// fix-ios-error-screen-close-button-blocked: lets the error scrim forward a tap on the header ✕
+    /// (see `HeaderCloseHitTarget`). Stable reference for the root's lifetime.
+    @State private var headerCloseHitTarget = HeaderCloseHitTarget()
+
     var body: some View {
         ZStack {
             PlayerShellView(
@@ -537,6 +541,8 @@ struct PlayerOverlayRootView: View {
                                 // sheet is presented (design: sheet z30 covers skip z23).
                                 sheetsPresented: productSheetsPresented)
         }
+        .environment(\.headerCloseHitTarget, headerCloseHitTarget)
+        .onAppear { headerCloseHitTarget.onClose = onCloseRequest }
     }
 }
 

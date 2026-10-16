@@ -50,7 +50,9 @@ import LivebuyUI
 //     same overlay-root idiom as the cart-needs-login `AuthGateModalView`). Mounting its
 //     full-bleed scrim INSIDE this sheet card distorted the card's `GeometryReader` height
 //     measurement and broke the sheet layout (ios-variant-prompt-overlay-fix).
-//   • When `addToCartFailed` is true, a retryable error banner is shown.
+//   • `addToCartFailed` is no longer drawn here (rb-ios-cart-add-failure-toast): the container
+//     flashes the error `CartToastView` instead of the old bottom-of-scroll banner users could
+//     not see (livebuy-flutter-sdk issue #1). The parameter stays for source compatibility.
 //
 // iOS-14-safe SwiftUI only. `VStack` / `HStack` / `ZStack` / `Text` / `Button` /
 // `RoundedRectangle` / `Color` / `LinearGradient` are all iOS-13+. The sheet top
@@ -216,6 +218,8 @@ public struct ProductDetailSheetView: View {
     /// 「請選規格」guard flag (`DefaultPlayerTemplate.needsVariantSelection`). Read-only.
     public let needsVariantSelection: Bool
     /// Add-to-cart failure flag (`DefaultPlayerTemplate.addToCartFailed`). Read-only.
+    /// **No longer drawn** (rb-ios-cart-add-failure-toast): `ProductSheetsOverlayView` shows the
+    /// error `CartToastView` instead. Retained so existing public call sites keep compiling.
     public let addToCartFailed: Bool
     /// Add-to-cart「請求進行中」flag (`addToCartInFlight`, cart-add-loading-state). When true the
     /// CTA shows a spinner +「加入中…」(keeping the accent fill) and the qty stepper / variant
@@ -788,12 +792,6 @@ public struct ProductDetailSheetView: View {
 
         hairline.padding(.vertical, 18)
         qtyRow
-
-        // Add-to-cart failure banner (retryable), only when the route-B
-        // add threw (D-3). Sits above the footer so it reads as feedback.
-        if addToCartFailed {
-            failureBanner.padding(.top, 16)
-        }
     }
 
     // MARK: - Sheet header (LBPSheetHeader — centered title + trailing close)
@@ -1788,42 +1786,6 @@ public struct ProductDetailSheetView: View {
         .buttonStyle(PlainButtonStyle())
     }
 
-    // MARK: - Add-to-cart failure banner (retryable — LBPButton danger feel)
-
-    private var failureBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(theme.accent)
-            Text(Self.failureTitle)
-                .font(.system(size: 13 * theme.fontScale, weight: .semibold))
-                .foregroundColor(theme.text)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-            Button(action: { guard !isSoldOut else { return }; onAddToCart?() }) {
-                Text(Self.retryLabel)
-                    .font(.system(size: 13 * theme.fontScale, weight: .bold))
-                    .foregroundColor(theme.accent)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 999)
-                            .stroke(theme.accent, lineWidth: 1))
-                    // Whole pill taps (outlined → stroke-only, padding ring would be dead).
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(PlainButtonStyle())
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(theme.accent.opacity(0.08)))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(LBAccessibilityID.addToCartRetry)
-    }
-
     // 「請選規格」prompt (LBPAlertModal) is no longer a sub-view here — it is hoisted to the
     // container's player overlay root as `SelectVariantPromptModalView` (ios-variant-prompt-overlay-fix).
 
@@ -1882,8 +1844,6 @@ public struct ProductDetailSheetView: View {
     static var favLabel: String { ReferenceUIStrings.text("detail_fav") }
     static var favedLabel: String { ReferenceUIStrings.text("detail_faved") }
     static var shareLabel: String { ReferenceUIStrings.text("common_share") }
-    static var retryLabel: String { ReferenceUIStrings.text("common_retry") }
-    static var failureTitle: String { ReferenceUIStrings.text("detail_add_failed") }
     // 商品介紹 + 更多商品（design R21，rb-ios-product-detail-recommendations）
     static var productIntroTitle: String { ReferenceUIStrings.text("detail_intro_title") }
     static var recommendationsTitle: String { ReferenceUIStrings.text("detail_more_products") }

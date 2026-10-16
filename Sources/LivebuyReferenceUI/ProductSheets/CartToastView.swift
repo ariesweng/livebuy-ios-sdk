@@ -44,9 +44,20 @@ public struct CartToastView: View {
     /// runtime for the `lbp-toast-check` bounce.
     @State private var checkScale: CGFloat
 
-    public init(theme: ReferenceUITheme, label: String = CartToastView.defaultLabel) {
+    /// `true` → the add-to-cart FAILURE variant (rb-ios-cart-add-failure-toast, design
+    /// `LBPCartToast variant='error'`): danger `#EB6E5F` circle with ✕ + 「加入購物車失敗，請稍後再試」.
+    public let isError: Bool
+
+    /// The failure label in the current reference-ui language (`detail_add_failed`).
+    public static var errorLabel: String { ReferenceUIStrings.text("detail_add_failed") }
+
+    /// Failure badge color — design danger `#EB6E5F` (same as `ErrorScreenView`).
+    static let danger = Color(hex: "#EB6E5F") ?? .red
+
+    public init(theme: ReferenceUITheme, label: String? = nil, isError: Bool = false) {
         self.theme = theme
-        self.label = label
+        self.isError = isError
+        self.label = label ?? (isError ? CartToastView.errorLabel : CartToastView.defaultLabel)
         self._checkScale = State(initialValue: 1.0)
     }
 
@@ -54,9 +65,9 @@ public struct CartToastView: View {
         HStack(spacing: 9) {
             ZStack {
                 Circle()
-                    .fill(theme.accent)
+                    .fill(isError ? Self.danger : theme.accent)
                     .frame(width: 24, height: 24)
-                Image(systemName: "checkmark")
+                Image(systemName: isError ? "xmark" : "checkmark")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white)
             }

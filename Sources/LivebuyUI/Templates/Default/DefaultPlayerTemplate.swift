@@ -308,6 +308,12 @@ public final class DefaultPlayerTemplate {
     /// 預設 nil（無置頂）。
     private(set) public var pinnedMessage: LBPinnedMessage?
 
+    /// chat-composed-text-ios-template：聊天 feed / toast 組句所用的語言來源。每筆 feed item **建立當下**
+    /// 讀一次，把 core 組好的句子（`composedText(lang:)` 等）定格進 item——之後換語言**不重組**既有
+    /// item（view-model 沒有換語言重建 feed 的機制）。預設讀 core `Livebuy.currentLanguage`（與 core
+    /// `composedText` 便利屬性同一來源）；測試注入固定語言。
+    var chatLanguageProvider: () -> String = { Livebuy.currentLanguage }
+
     /// 會員等級限定旗標（restriction-gate ②），由 `ingestChannel` 從 `LBChannel.isRestriction`
     /// 衍生（`== 1`）。**軟性顯示閘門**：core 不擋播放，reference-ui 讀此旗標在播放畫面上疊
     /// 升級遮罩。預設 false（未受限）。
@@ -1390,6 +1396,17 @@ public final class DefaultPlayerTemplate {
         activityFeed.appendPurchase(text: text)
     }
 
+    /// chat-composed-text-ios-template：`user[]` 項目 → 進場 activity row，文字用 core 組好的句子
+    /// （建立當下語言；缺原始欄位時 core 退回後端 `text`）。
+    func handleJoin(_ user: LBUserMsg) {
+        handleJoin(text: user.composedText(lang: chatLanguageProvider()))
+    }
+
+    /// chat-composed-text-ios-template：`rush[]` 項目 → 購買 activity row，文字用 core 組好的句子。
+    func handlePurchase(_ rush: LBRushMsg) {
+        handlePurchase(text: rush.composedText(lang: chatLanguageProvider()))
+    }
+
     /// `showWin` (winner[]) → feed activity row (tier = win) AND the INDEPENDENT
     /// unclaimed entry set (feed = 「中獎發生」, entry = 「尚有 N 筆可領」).
     func handleWin(text: String, winner: LBWinner) {
@@ -1438,10 +1455,14 @@ public final class DefaultPlayerTemplate {
     /// AI 回覆（`.aiReply`）為直播 push 限定、回放歷史不會出現 → `isAI` 一律 false。`color` /
     /// `replyColor` 不入 feed 模型（reference-ui 以**版型**而非顏色區分主播 / 回覆），故只搬
     /// `text` / `name` / `reply`（經 `isHost` / `replyText`）。Pure / testable。
-    static func replayChatRow(for comment: LBComment) -> (isHost: Bool, replyText: String?) {
+    /// chat-composed-text-ios-template：引用回覆改用 core 組好的 `composedReply(lang:)`（缺
+    /// `reply_template` 時等於後端 `reply`）。
+    static func replayChatRow(for comment: LBComment,
+                              lang: String = Livebuy.currentLanguage) -> (isHost: Bool, replyText: String?) {
         switch comment.kind {
         case .hostReply:
-            return (isHost: true, replyText: comment.reply.isEmpty ? nil : comment.reply)
+            let reply = comment.composedReply(lang: lang)
+            return (isHost: true, replyText: reply.isEmpty ? nil : reply)
         case .host:
             return (isHost: true, replyText: nil)
         default:
@@ -1450,8 +1471,10 @@ public final class DefaultPlayerTemplate {
     }
 
     private func appendReplayComment(_ comment: LBComment) {
-        let row = Self.replayChatRow(for: comment)
-        activityFeed.appendChat(text: comment.text, name: comment.name,
+        // chat-composed-text-ios-template：text / name / reply 一律用 core 組好的值（建立當下語言）。
+        let lang = chatLanguageProvider()
+        let row = Self.replayChatRow(for: comment, lang: lang)
+        activityFeed.appendChat(text: comment.composedText(lang: lang), name: comment.composedName(lang: lang),
                                 isHost: row.isHost, replyText: row.replyText)
     }
 
@@ -1494,6 +1517,12 @@ public final class DefaultPlayerTemplate {
         // `id`，後台刻意重送的真實通知（相同文字、新 id）不受影響仍會顯示。同時涵蓋批次
         // `ingestBacklog` 與即時 trickle 兩條路徑（皆呼叫本函式）及兩者交錯的情境。
         guard Self.shouldIngestPush(id: push.id, seen: &seenPushIds) else { return }
+        // chat-composed-text-ios-template：feed item 的 text / name / reply 一律取 core 組好的值，
+        // 於**建立當下**以 `chatLanguageProvider()` 的語言組一次（之後換語言不重組）；缺原始欄位時
+        // core 退回後端 `text` / `name` / `reply`。
+        let lang = chatLanguageProvider()
+        let text = push.composedText(lang: lang)
+        let name = push.composedName(lang: lang)
         // chat-message-kind ⑤：依 `push.kind` 判型路由，**停止以 `color` 反推**。
         // event-join-cta-isset-ek-template：`kind=event` 活動公告（與其他 kind 正交）仍**最先**判定 →
         // 獨立 event-join 項（套用 `LBEventJoinLine` 樣式）。判定用 `kind == .event` + `eid > 0`。
@@ -1504,9 +1533,9 @@ public final class DefaultPlayerTemplate {
         if push.kind == .event, let eid = push.eid, eid > 0 {
             let keyword = Self.eventJoinKeyword(for: push)
             // event-join-streamer-name-template: thread this push's own streamer name
-            // (push.name) into the feed item's userName — distinct from the header's
+            // (push composedName, falling back to push.name) into the feed item's userName — distinct from the header's
             // whole-session hostName (= channel.shop.name).
-            activityFeed.appendEventJoin(eid: eid, keyword: keyword, text: push.text, name: push.name)
+            activityFeed.appendEventJoin(eid: eid, keyword: keyword, text: text, name: name)
             return
         }
         switch push.kind {
@@ -1514,37 +1543,38 @@ public final class DefaultPlayerTemplate {
             // 觀眾選購（`#66F796`, ty=ds）= 社會認同廣播（「{觀眾名} 正在選購商品～」），
             // **性質同 join / purchase、非主播訊息、非介紹中**。→ 社會認同 activity row。
             // （舊版誤把 `#66F796` 當「商品介紹中」走 appendIntro，本批次語意校正。）
-            activityFeed.appendNarrate(text: push.text)
+            activityFeed.appendNarrate(text: text)
         case .onsale:
             // onsale 商品開賣改用「主播訊息」UI（主播氣泡：主播標＋暱稱＋accent 氣泡），不再走特製商品開賣卡。
-            // text 直顯後端組裝好的完整文案；name = push.name（主播名）；isHost = true。
+            // text = core 組好的句子（缺原始欄位退回後端 text）；name = composedName（主播名）；isHost = true。
             // 空 text → 不 append（避免空氣泡；取代舊「退回系統通知」分支）。
-            guard !push.text.isEmpty else { break }
-            activityFeed.appendChat(text: push.text, name: push.name, isHost: true)
+            guard !text.isEmpty else { break }
+            activityFeed.appendChat(text: text, name: name, isHost: true)
         case .comment:
             // 一般用戶 / 訪客留言 → chat row 帶暱稱（chat-nickname-display），isHost=false，不去重。
-            activityFeed.appendChat(text: push.text, name: push.name)
+            activityFeed.appendChat(text: text, name: name)
         case .host, .hostReply, .aiReply:
             // 主播訊息：帶 promo metadata（`ct` / `p`，或 `eid>0` 的 promo-tied）→ DE-DUPED 系統通知；
             // 其餘主播留言 → chat row 帶暱稱 + 角色 metadata。維持既有去重語意。
             // （`.event` 已在最前面以 `kind == .event` 攔截為 event-join 活動公告，不再落此分支。）
             if Self.isSystemNoticePush(push) {
-                activityFeed.appendSystemNotice(text: push.text)
+                activityFeed.appendSystemNotice(text: text)
             } else {
                 // 群組① 真正的聊天（chat-message-taxonomy ⑤）：thread 角色 metadata 供
                 // reference-ui 依**版型**區分主播留言（主播標 + accent 氣泡）/ 主播回覆（引用框）/
                 // AI 回覆（AI 標）。
                 let isAI = (push.kind == .aiReply)
                 let isReply = (push.kind == .hostReply || push.kind == .aiReply)
+                let reply = push.composedReply(lang: lang)
                 activityFeed.appendChat(
-                    text: push.text, name: push.name,
+                    text: text, name: name,
                     isHost: true,
-                    replyText: (isReply && !push.reply.isEmpty) ? push.reply : nil,
+                    replyText: (isReply && !reply.isEmpty) ? reply : nil,
                     isAI: isAI)
             }
         default:
             // .join / .purchase / .win 不會落 push 桶；.unknown → 保守當 chat。
-            activityFeed.appendChat(text: push.text, name: push.name)
+            activityFeed.appendChat(text: text, name: name)
         }
     }
 
@@ -1619,8 +1649,8 @@ public final class DefaultPlayerTemplate {
     func ingestBacklog(push: [LBPushMsg], user: [LBUserMsg], rush: [LBRushMsg]) {
         activityFeed.batchIngest {
             for item in Self.backlogIngestOrder(push) { handlePush(item) }
-            for item in Self.backlogIngestOrder(user) { handleJoin(text: item.text) }
-            for item in Self.backlogIngestOrder(rush) { handlePurchase(text: item.text) }
+            for item in Self.backlogIngestOrder(user) { handleJoin(item) }
+            for item in Self.backlogIngestOrder(rush) { handlePurchase(item) }
         }
     }
 
