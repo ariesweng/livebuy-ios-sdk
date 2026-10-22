@@ -5,6 +5,34 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.30.2] - 2026-10-22
+
+> **Patch（iOS + Android 同發）。** iOS 自 `4.30.0` **直接升級到 `4.30.2`，沒有 `4.30.1`**：`4.30.1` 是 Android-only
+> 的修正（Android 商品列名稱前標籤在 `MaterialTheme` host 下被截斷），與 iOS 無關，iOS 沒有對應變更。本版只動
+> reference-ui 的 drop-in `LivebuyWidget`／`LivebuyLiveEntry`；core（`LivebuySDK`）與 view-model（`LivebuyUI`）原始碼
+> 零變更。**無 BREAKING、零公開符號變動**（改動的 controller 與新增的輔助函式皆為 `internal`）。完整敘述見
+> [`docs/release-notes/v4.30.2.md`](../docs/release-notes/v4.30.2.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- **drop-in `LivebuyWidget` 等待 `configure()` 的上限由約 5 秒延長為約 31.5 秒**（reference-ui）：等待間隔
+  100／200／400／800 ms 後每秒一次，最多 34 次，與 Android／RN／Flutter 共用同一套排程（判斷條件仍是 SDK 實例已建立）。
+  host 的 `configure()` 晚於 widget 掛載時，列表在 configure 後（最慢約 1 秒）自行載入，不必等週期刷新；刷新間隔設 0
+  也會載入。全部等待失敗時維持原本行為（跳過首載、週期刷新照常）。
+- **`LivebuyWidget`／`LivebuyLiveEntry` 的主題在 `sdkConfig` 可讀後重新解析**：原本只在建立時讀一次，未 configure 時
+  一直是預設色；現在 configure 完成後改為商家設定的主題色。
+
+### Fixed
+
+- host 從未呼叫 `configure()` 時，drop-in `LivebuyWidget` 的週期刷新會走到 core 的 `fatalError` 而閃退；現在 SDK 尚未
+  建立時刷新會跳過。
+- `configure()` 晚於 drop-in `LivebuyWidget` 掛載時，列表要等週期刷新（預設 30 秒）才出現、刷新間隔為 0 時永久空白
+  （起因見 livebuy-flutter-sdk issue #3）。未經模擬器端到端驗證。
+
 ## [4.30.0] - 2026-10-16
 
 > **Minor（iOS + Android lockstep）。** iOS、Android 皆自 `4.29.0` 升級。**源碼面無 BREAKING**——只新增公開符號與

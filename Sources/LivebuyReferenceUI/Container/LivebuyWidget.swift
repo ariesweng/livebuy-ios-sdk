@@ -115,13 +115,31 @@ final class LivebuyWidgetController: ObservableObject {
     @Published private(set) var usingDemoData = false
 
     /// Resolved reference-ui theme (`sdkConfig.theme` → host options → minimal palette).
-    let theme: ReferenceUITheme
+    /// Published (rb-ios-container-configure-wait-extend): when the widget mounts before
+    /// `configure()` finished, it starts as the minimal palette and is re-resolved once
+    /// `Livebuy.sdkConfig()` becomes readable.
+    @Published private(set) var theme: ReferenceUITheme
 
     private var didLoad = false
 
-    init(shopId: String, mode: WidgetMode, config: LivebuyWidgetConfig) {
+    /// SDK readiness side effects (real globals + `Task.sleep` in production).
+    private let readiness: LBSdkReadiness
+    /// Test seam for the page-1 reload; `nil` → `template?.reload()`.
+    private let reloadProvider: (@MainActor () async -> Void)?
+    /// Whether `theme` already came from a real `SDKConfig` (no further resolution needed).
+    private var themeResolved: Bool
+    /// The in-flight wait for config-ready (started on first load, cancelled on deinit).
+    private var themeTask: Task<Void, Never>?
+
+    init(shopId: String,
+         mode: WidgetMode,
+         config: LivebuyWidgetConfig,
+         readiness: LBSdkReadiness = .live,
+         reloadProvider: (@MainActor () async -> Void)? = nil) {
         self.mode = mode
         self.config = config
+        self.readiness = readiness
+        self.reloadProvider = reloadProvider
 
         let widget = LivebuyWidgetCore(shopId: shopId, mode: mode)
         if let listener = config.eventListener { widget.setEventListener(listener) }
@@ -131,12 +149,17 @@ final class LivebuyWidgetController: ObservableObject {
         self.template = template
         self.model = template.map { WidgetModel(template: $0) } ?? WidgetModel()
 
-        self.theme = ReferenceUIThemeResolver.resolve(
-            coreTheme: (try? Livebuy.sdkConfig())?.theme, hostOptions: nil)
+        let initialConfig = readiness.sdkConfig()
+        self.theme = lbContainerTheme(for: initialConfig)
+        self.themeResolved = initialConfig != nil
     }
 
     /// Load the first page once. Waits for `Livebuy.configure()` (kicked off at launch) to
-    /// finish first — otherwise `loadFirstPage()` would hit `requireAPIClient()` and `fatalError`.
+    /// create the SDK instance first — otherwise `loadFirstPage()` would hit
+    /// `requireAPIClient()` and `fatalError`. The wait follows the shared RN / Flutter schedule
+    /// (`lbAwaitSdkCondition`, ≈ 31.5 s budget). If the SDK never appears, the first load is
+    /// skipped (it cannot run without an API client) and the periodic refresh still starts —
+    /// its tick loads page 1 once the SDK exists (rb-ios-container-configure-wait-extend).
     /// With a valid shop + credentials this shows REAL `/sdk/widget` videos; it only falls back
     /// to demo fixtures when the live fetch is empty AND the host opted in.
     ///
@@ -152,16 +175,11 @@ final class LivebuyWidgetController: ObservableObject {
     func loadIfNeeded() async {
         guard !didLoad else { return }
         didLoad = true
+        startThemeResolutionIfNeeded()
 
-        var waited = 0
-        while Livebuy.shared == nil && waited < 50 {
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-            waited += 1
-        }
-
-        if Livebuy.shared != nil {
+        if await lbAwaitSdkCondition(readiness.isApiReady, sleep: readiness.sleep) {
             model.setFirstLoadInFlight(true)
-            await template?.reload()
+            await reloadPageOne()
             model.setFirstLoadInFlight(false)
         }
 
@@ -172,6 +190,42 @@ final class LivebuyWidgetController: ObservableObject {
         }
 
         if !usingDemoData { startAutoRefreshIfNeeded() }
+    }
+
+    /// Page-1 reload through the injected seam, else the attached template.
+    @MainActor
+    private func reloadPageOne() async {
+        if let reloadProvider = reloadProvider {
+            await reloadProvider()
+        } else {
+            await template?.reload()
+        }
+    }
+
+    // MARK: - Theme re-resolution (rb-ios-container-configure-wait-extend)
+
+    /// Starts waiting for config-ready when the init-time theme was only the minimal
+    /// fallback. Idempotent; runs alongside the first-load wait (it never delays the load).
+    @MainActor
+    private func startThemeResolutionIfNeeded() {
+        guard !themeResolved, themeTask == nil else { return }
+        themeTask = lbStartContainerThemeResolution(readiness: readiness) { [weak self] theme in
+            self?.applyResolvedTheme(theme)
+        }
+    }
+
+    /// One-shot re-check used by the refresh tick, so a host that configures after the
+    /// wait gave up still gets its theme on the next tick.
+    @MainActor
+    private func resolveThemeIfAvailable() {
+        guard !themeResolved, let config = readiness.sdkConfig() else { return }
+        applyResolvedTheme(lbContainerTheme(for: config))
+    }
+
+    @MainActor
+    private func applyResolvedTheme(_ resolved: ReferenceUITheme) {
+        themeResolved = true
+        if theme != resolved { theme = resolved }
     }
 
     /// Grid load-more footer → core `requestLoadMore()` (fetch next page + refresh snapshot).
@@ -216,19 +270,34 @@ final class LivebuyWidgetController: ObservableObject {
     var isAutoRefreshActiveForTesting: Bool { refreshTimer != nil }
 
     /// Test-only mutator: force the demo-fixtures state so a test can assert the demo gate on
-    /// `resumeAutoRefreshIfNeeded()` deterministically (without a 5s configure-poll). Compiled only
+    /// `resumeAutoRefreshIfNeeded()` deterministically (without running the configure-wait). Compiled only
     /// in DEBUG.
     func setUsingDemoDataForTesting(_ value: Bool) { usingDemoData = value }
+
+    /// Test-only: run one refresh tick synchronously (the timer itself is not awaited).
+    @MainActor
+    func runAutoRefreshTickForTesting() async { await autoRefreshTick() }
+
+    /// Test-only: the in-flight theme wait, so a test can await its completion.
+    var themeResolutionTaskForTesting: Task<Void, Never>? { themeTask }
     #endif
 
+    /// One periodic refresh tick. Skips while the SDK instance does not exist yet: the
+    /// reload would otherwise reach `requireAPIClient()`'s fatalError when the configure-wait
+    /// gave up and the host still has not configured (rb-ios-container-configure-wait-extend).
     @MainActor
     private func autoRefreshTick() async {
+        resolveThemeIfAvailable()
         guard lbWidgetShouldAutoRefreshTick(
-            usingDemo: usingDemoData, currentPage: model.currentPage) else { return }
-        await template?.reload()
+            usingDemo: usingDemoData, currentPage: model.currentPage),
+              readiness.isApiReady() else { return }
+        await reloadPageOne()
     }
 
-    deinit { refreshTimer?.invalidate() }
+    deinit {
+        refreshTimer?.invalidate()
+        themeTask?.cancel()
+    }
 
     // MARK: - Demo fixtures (used only on opted-in empty-live fallback)
 

@@ -175,7 +175,9 @@ final class LivebuyLiveEntryController: ObservableObject {
 
     /// 解析後的 reference-ui theme（`sdkConfig.theme` → minimal palette），與
     /// `LivebuyPlayer` / 最小化播放器卡同一 resolver，讓入口卡與播放器品牌一致。
-    let theme: ReferenceUITheme
+    /// `@Published`（rb-ios-container-configure-wait-extend）：在 `configure()` 完成前掛載時先用
+    /// minimal palette，待 `Livebuy.sdkConfig()` 可讀後依共用排程重新解析。
+    @Published private(set) var theme: ReferenceUITheme
 
     private let shopId: String
     private let pollInterval: TimeInterval
@@ -198,26 +200,55 @@ final class LivebuyLiveEntryController: ObservableObject {
     /// 無條件真實 fetch。不在 `pollLoop` 的 `catch` 分支設定，讓快重試那一輪仍有機會查快取。
     private var hasAppliedFirstRound = false
 
+    /// SDK readiness side effects（正式環境＝真實 SDK 全域狀態＋`Task.sleep`）。
+    private let readiness: LBSdkReadiness
+    /// `theme` 是否已來自真實 `SDKConfig`（是則不再解析）。
+    private var themeResolved: Bool
+    /// 等待 config-ready 的 Task（`start()` 起、deinit 取消）。
+    private var themeTask: Task<Void, Never>?
+
     init(shopId: String,
          pollInterval: TimeInterval = 30,
          cache: LiveNowFetchCache = .shared,
+         readiness: LBSdkReadiness = .live,
          fetch: @escaping (String) async throws -> LBVideoItem? = { try await Livebuy.fetchLatestLive(id: $0) }) {
         self.shopId = shopId
         self.pollInterval = pollInterval
         self.cache = cache
+        self.readiness = readiness
         self.fetch = fetch
-        self.theme = ReferenceUIThemeResolver.resolve(
-            coreTheme: (try? Livebuy.sdkConfig())?.theme, hostOptions: nil)
+        let initialConfig = readiness.sdkConfig()
+        self.theme = lbContainerTheme(for: initialConfig)
+        self.themeResolved = initialConfig != nil
         observeLiveEnd()
     }
 
     // MARK: 輪詢生命週期
 
-    /// 起輪詢（`onAppear`）。冪等：已在跑就跳過。
+    /// 起輪詢（`onAppear`）。冪等：已在跑就跳過。同時（若 init 時尚未取得 SDKConfig）開始等待
+    /// config-ready 以重新解析主題——與資料輪詢互不影響。
     func start() {
+        startThemeResolutionIfNeeded()
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in await self?.pollLoop() }
     }
+
+    // MARK: 主題重新解析（rb-ios-container-configure-wait-extend）
+
+    /// 冪等：已取得真實主題或已在等待時跳過。放棄（約 31.5 秒）後維持目前主題。
+    private func startThemeResolutionIfNeeded() {
+        guard !themeResolved, themeTask == nil else { return }
+        themeTask = lbStartContainerThemeResolution(readiness: readiness) { [weak self] theme in
+            guard let self = self else { return }
+            self.themeResolved = true
+            if self.theme != theme { self.theme = theme }
+        }
+    }
+
+    #if DEBUG
+    /// Test-only：等待中的主題解析 Task，供測試 await 完成。
+    var themeResolutionTaskForTesting: Task<Void, Never>? { themeTask }
+    #endif
 
     /// 停輪詢（`onDisappear`）。
     func stop() {
@@ -316,6 +347,7 @@ final class LivebuyLiveEntryController: ObservableObject {
     // 對稱 `LivebuyWidgetController.deinit`：invalidate 輪詢、移除通知觀察者，避免洩漏。
     deinit {
         pollTask?.cancel()
+        themeTask?.cancel()
         if let obs = liveEndObserver { NotificationCenter.default.removeObserver(obs) }
     }
 }
