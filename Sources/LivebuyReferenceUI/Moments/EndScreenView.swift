@@ -210,7 +210,7 @@ public struct EndScreenView: View {
     // Mirrors `LBPEndScreen`'s `showCountdown` branch (moments.jsx 284-339):
     //   • 「影片結束」rule-flanked label.
     //   • a 150×(9:16) preview card of `next.first` with a centered countdown ring.
-    //   • 「{remain} 秒後自動播放下一支」+ the next title + 「{shopName} · {duration}」.
+    //   • 「下一部影片將在 {remain} 秒後播放」+ the next title + 「{shopName} · {duration}」.
     //   • 取消 (outline) / 立即觀看 (accent, play glyph) buttons.
 
     private var countdownVariant: some View {
@@ -506,7 +506,7 @@ public struct EndScreenView: View {
     static var endedLabel: String { ReferenceUIStrings.text("end_video_ended") }
     static var liveEndedTitle: String { ReferenceUIStrings.text("end_live_ended") }
     static let fallbackDuration = "--:--:--"
-    /// `{seconds}` 秒後自動播放下一支 — named placeholder, see `autoPlayText(_:)`.
+    /// 下一部影片將在 `{seconds}` 秒後播放 — named placeholder, see `autoPlayText(_:)`.
     static func autoPlayText(_ seconds: Int) -> String {
         ReferenceUIStrings.text("end_auto_next", ["seconds": String(seconds)])
     }

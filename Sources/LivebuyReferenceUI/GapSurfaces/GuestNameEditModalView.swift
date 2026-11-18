@@ -477,7 +477,7 @@ public struct GuestNameEditModalView: View {
     static var takenErrorText: String { ReferenceUIStrings.text("nickname_taken_error") }
     /// `errorMessage` text for any OTHER thrown error (network / server failures — validation
     /// could not complete, distinct from "taken"). Same "OOO失敗，請稍後再試" convention as
-    /// `ProductDetailSheetView.failureTitle` ("加入購物車失敗,請稍後再試").
+    /// `ProductDetailSheetView.failureTitle` ("加入購物車失敗，請稍後再試").
     static var retryableErrorText: String { ReferenceUIStrings.text("nickname_retryable_error") }
 }
 

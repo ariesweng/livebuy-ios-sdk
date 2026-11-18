@@ -8,7 +8,7 @@ import LivebuyUI
 // Design: `design/templates/minimal/sdk-components.jsx` `LBPAlertModal` (centered
 //          card over a black-0.55 scrim, 18pt corner card, HORIZONTAL two-button
 //          footer [plain secondary][primary]) + `screens.jsx` `contact_merchant`
-//          state (title「聯繫商家」/ body「確定要開啟商城指定的客服連結嗎?」/ 確定 / 取消).
+//          state (title「聯繫商家」/ body「確定要開啟商城指定的客服連結嗎？」/ 確定 / 取消).
 //
 // A presentation-only CONFIRM before opening the shop's customer-service link. The
 // rail `serviceLink` tap and the VideoInfoPanel footer「與商家一對一對話」used to call
@@ -29,7 +29,7 @@ import LivebuyUI
 // buttons use `.buttonStyle(PlainButtonStyle())` (mirrors `LBPButton`).
 
 /// The family-1「聯絡商家」confirm modal (`LBPAlertModal`). Renders a centered card
-/// (title「聯繫商家」/ body「確定要開啟商城指定的客服連結嗎?」/ horizontal [取消][確定]
+/// (title「聯繫商家」/ body「確定要開啟商城指定的客服連結嗎？」/ horizontal [取消][確定]
 /// footer) over a black-0.55 scrim. `onConfirm` proceeds to the host-wired service-link
 /// exit; `onDismiss` (or a scrim tap) just closes the modal.
 public struct ContactMerchantModalView: View {

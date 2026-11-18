@@ -271,7 +271,7 @@ public struct NotifyRestockSheetView: View {
     // The restock-notify subscription toggle. Reflects `noticeEnabled`:
     //   • not subscribed → outline accent affordance (design `LBPButton kind="outline"`
     //     + bell glyph + 「通知我補貨」), tap subscribes.
-    //   • subscribed     → filled accent affordance + bell-fill glyph + 「已開啟補貨通知」,
+    //   • subscribed     → filled accent affordance + bell-fill glyph + 「已開啟通知」,
     //     tap unsubscribes.
     // A no-op when `onToggleNotice == nil` (demo / snapshot). The footer sits above
     // a top hairline (design `borderTop`). RESTOCK-NOTIFY ONLY — no AWAIT switch.
@@ -379,7 +379,7 @@ struct NotifyRestockSheetView_Previews: PreviewProvider {
             NotifyRestockSheetView.demo(theme: theme)
                 .previewDisplayName("restock · not subscribed")
 
-            // Subscribed → filled「已開啟補貨通知」.
+            // Subscribed → filled「已開啟通知」.
             NotifyRestockSheetView(
                 theme: theme,
                 detail: NotifyRestockSheetView.demoSoldOutDetail,

@@ -40,7 +40,7 @@ import LivebuyUI
 // The rest mirrors `LBPMiniCart`: the white card surface, the single-line
 // name, the price line (`已售完` when `soldOut == 1`, else `priceShow`, in
 // the merchant accent color), and the close button now absolutely-positioned
-// at the card's top-right corner. NO「已加入購物車」confirmation line (the
+// at the card's top-right corner. NO「加入成功」confirmation line (the
 // design's `LBPMiniCart` has none — the peek's mere appearance is the
 // "added" signal). Tapping the card body opens the detail; tapping the
 // close button dismisses (matching `onTap` / `onClose`).

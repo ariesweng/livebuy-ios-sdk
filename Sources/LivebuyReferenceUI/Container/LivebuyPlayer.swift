@@ -1035,7 +1035,7 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
             //   • 成功（不 throw）→ 沿用**既有**「讀 compose / pendingJoin → dismiss → 開 composer /
             //     續作 event-join」整段邏輯，只是包在驗證成功之後才跑（邏輯本身一個字不改）。
             //   • `LBError.guestNameTaken` → **不** dismiss：`nicknameController.failSubmit` 顯示
-            //     「此暱稱已被使用」，使用者留在輸入框可直接修改重試。
+            //     「暱稱已存在」，使用者留在輸入框可直接修改重試。
             //   • 其他錯誤（網路等）→ 同樣**不** dismiss，顯示通用重試文案（`nicknameSubmitErrorMessage`
             //     依 `nicknameSubmitFailure` 分流，兩段判斷皆為純函式、皆有單元測試）。
             //

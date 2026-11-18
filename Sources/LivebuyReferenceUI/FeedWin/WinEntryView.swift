@@ -226,9 +226,9 @@ public struct WinEntryView: View {
         }
     }
 
-    /// Accessibility label (mirrors the design source's `aria-label`) — "查看中獎"
-    /// for `.win`, "參加活動" for `.activity` (design.md 1.7, `moments.jsx`
-    /// `LBWinEntry`'s `aria-label={isActivity ? '參加活動' : '查看中獎'}`).
+    /// Accessibility label (mirrors the design source's `aria-label`) — "領獎"
+    /// for `.win`, "活動" for `.activity` (design.md 1.7, `moments.jsx`
+    /// `LBWinEntry`'s `aria-label={isActivity ? '活動' : '領獎'}`).
     private var accessibilityLabelText: String {
         switch variant {
         case .win: return Self.winAccessibilityLabel

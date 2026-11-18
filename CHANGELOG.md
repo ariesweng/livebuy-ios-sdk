@@ -5,6 +5,33 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.31.0] - 2026-11-18
+
+> **Minor（iOS + Android 同發，皆自 `4.30.2`）。** 只改 reference-ui（`LivebuyReferenceUI`）字串表的值；core（`LivebuySDK`）與
+> view-model（`LivebuyUI`）原始碼零變更。**無 BREAKING、零公開符號變動。** host 的 UI 測試若寫死 drop-in 顯示文字需更新。
+> 完整敘述見 [`docs/release-notes/v4.31.0.md`](../docs/release-notes/v4.31.0.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- **drop-in 文案對齊網頁版用字**（reference-ui 五語系字串表，只改值；key 與佔位符不變）：網頁前端在同一畫面已有譯文時改用
+  網頁版用字，並套用翻譯組回覆。
+  - 繁中／簡中 11 個 key，例如結束畫面「下一部影片將在 {seconds} 秒後播放」「立即播放」、聊天室「最新留言」、暱稱撞名
+    「暱稱已存在」、規格提示「請選擇規格」、商品搜尋「搜尋商品」。
+  - 英文／馬來文／印尼文／簡中 94 個值：「直播」馬來／印尼文改 `Langsung`、簡中「留言」改「评论」、暱稱馬來文改
+    `nama samaran`、有網頁對應的文字大小寫跟網頁版。
+  - 翻譯組回覆後 44 個值：主播標籤「主持人」→「直播主」（en `Streamer`、ms-MY `Penstrim`、id-ID `Streamer`）、加入購物車
+    提示「加入成功」、中獎／活動入口朗讀文字「領獎」「活動」、領獎確認提醒句、商品列表標題 en `Sales Products`、補貨按鈕
+    en `Restock Update`／`Update Activated`、使用條款 ms-MY `Syarat Penggunaan` 等。
+
+### Fixed
+
+- SDK 自身譯文 4 條：聯繫商家確認句、加入購物車失敗提示改用全形標點；庫存剩餘（`Tinggal {count} sahaja`）、已加入聊天室
+  （`Sudah menyertai`）的馬來文改為較自然的說法。
+
 ## [4.30.2] - 2026-10-22
 
 > **Patch（iOS + Android 同發）。** iOS 自 `4.30.0` **直接升級到 `4.30.2`，沒有 `4.30.1`**：`4.30.1` 是 Android-only

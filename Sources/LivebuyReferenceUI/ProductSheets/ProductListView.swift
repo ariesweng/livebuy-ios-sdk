@@ -348,7 +348,7 @@ public struct ProductListView: View {
     private var rows: some View {
         if displayedProducts.isEmpty {
             // Empty-state line. Distinguish「no products at all」(目前沒有商品) from「search
-            // matched nothing」(找不到符合『…』的商品, mirrors ProductListSheet's empty filtered
+            // matched nothing」(沒有符合『…』的商品, mirrors ProductListSheet's empty filtered
             // message — rb-ios-product-list-search).
             VStack {
                 Spacer(minLength: 0)
@@ -453,7 +453,7 @@ public struct ProductListView: View {
     // 搜尋（rb-ios-product-list-search，對齊設計 ProductListSheet）
     static var searchPlaceholder: String { ReferenceUIStrings.text("product_list_search_placeholder") }
     static var searchCancel: String { ReferenceUIStrings.text("common_cancel") }
-    /// 找不到符合「`{query}`」的商品 — named placeholder.
+    /// 沒有符合「`{query}`」的商品 — named placeholder.
     static func noResultsText(_ query: String) -> String {
         ReferenceUIStrings.text("product_list_no_results", ["query": query])
     }

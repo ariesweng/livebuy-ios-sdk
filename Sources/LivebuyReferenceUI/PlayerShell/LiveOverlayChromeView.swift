@@ -570,7 +570,7 @@ public struct LiveOverlayChromeView: View {
     // MARK: - LBLiveHostCaption — centered host caption overlay
 
     /// Centered black-on-white host caption (`LBLiveHostCaption`). Translucent
-    /// dark card with a "主持人" label + the host caption copy + a live-price row.
+    /// dark card with a "直播主" label + the host caption copy + a live-price row.
     /// The price row mirrors the design's third line — `價格:<pink>NT$ X</pink>
     /// 開始銷售` — and reads the price from `pinnedProduct` (NOT the caption
     /// string); it is omitted when there is no pinned product.
@@ -669,7 +669,7 @@ public struct LiveOverlayChromeView: View {
     /// 2026-05-29).
     static let announceTextColor = Color.white
 
-    /// Host caption label ("主持人").
+    /// Host caption label ("直播主").
     static var hostCaptionLabel: String { ReferenceUIStrings.text("live_host_caption") }
     /// Host-caption price-row prefix ("價格:") and suffix ("開始銷售").
     static var priceCaptionLabel: String { ReferenceUIStrings.text("live_price_caption_prefix") }

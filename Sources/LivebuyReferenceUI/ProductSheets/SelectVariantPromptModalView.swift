@@ -29,7 +29,7 @@ import LivebuyUI
 // are all iOS-13+. NO ScrollView / Lazy* (they render BLANK under the `ImageRenderer` snapshot path).
 
 /// The family-3「請選規格」acknowledge modal (`LBPAlertModal`, single-CTA). Renders a centered card
-/// (title「請選規格」/ body「請先選擇商品規格，再加入購物車。」/ full-width「我知道了」) over a
+/// (title「請選擇規格」/ body「請先選擇商品規格，再加入購物車。」/ full-width「我知道了」) over a
 /// black-0.55 scrim. `onDismiss` (the「我知道了」CTA or a scrim tap) closes the prompt.
 public struct SelectVariantPromptModalView: View {
     /// Observed so a runtime language switch re-renders this view's localized copy

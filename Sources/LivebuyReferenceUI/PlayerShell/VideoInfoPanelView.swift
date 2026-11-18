@@ -103,7 +103,7 @@ public struct VideoInfoPanelView: View {
 
     /// Whether the video this panel describes is a FINISHED LIVE BROADCAST'S REPLAY
     /// (`model.isFinishedLiveReplay`) rather than a genuine VOD upload. `false` (default) →
-    /// the publishAt-row shows 「點播影片」when `isLiveBroadcast == false`. `true` → the row
+    /// the publishAt-row shows 「影片」when `isLiveBroadcast == false`. `true` → the row
     /// shows 「直播回放」instead. Has NO effect when `isLiveBroadcast == true` — the LIVE
     /// 「直播中」badge always wins (design R44, rb-ios-video-info-panel-replay-copy).
     ///
@@ -826,7 +826,7 @@ struct VideoInfoPanelView_Previews: PreviewProvider {
 
             // Finished-live-replay copy (design R44, rb-ios-video-info-panel-replay-copy):
             // VOD title/tab ("影片資訊"/"影片詳情"), publishAt-row reads「直播回放」instead of
-            // the default「點播影片」, no date either way.
+            // the default「影片」, no date either way.
             VideoInfoPanelView(
                 theme: theme,
                 info: VideoInfoPanelView.demoInfo,

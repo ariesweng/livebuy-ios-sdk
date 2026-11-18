@@ -463,7 +463,7 @@ public struct ChatFeedView: View {
     /// not flicker the pill on. Scrollable variant only.
     static let atBottomEpsilon: CGFloat = 24
 
-    /// "↓ 最新訊息" return-to-live pill label (scrollable variant).
+    /// "↓ 最新留言" return-to-live pill label (scrollable variant).
     static var returnToLatestLabel: String { ReferenceUIStrings.text("chat_return_to_latest") }
 
     /// Fraction of the available height the SCROLLABLE chat occupies (anchored bottom).
