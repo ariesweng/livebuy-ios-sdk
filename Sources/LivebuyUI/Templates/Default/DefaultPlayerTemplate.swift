@@ -303,6 +303,14 @@ public final class DefaultPlayerTemplate {
     /// reference-ui's (another change); this is the zero-pixel data layer.
     private(set) public var addToCartInFlight: Bool = false
 
+    /// 搶購下標結果（live-bid-ios-template）。搶購場直播中 `addToCart()` 改走下標：成功 `.placed`
+    /// （商品明細同時關閉）、後端錯誤 `.failed(code:)`。每次新的 `addToCart()` 與開啟商品明細時重設
+    /// 為 `nil`。一般加購路徑恆為 `nil`。reference-ui 依此顯示「已加入搶購」或失敗文字。
+    private(set) public var bidOutcome: LBBidOutcome?
+
+    /// 「恭喜搶購成功」視窗狀態（live-bid-ios-template），由 core `BID_WON` 餵入。
+    public let bidWon: DefaultBidWon
+
     /// 置頂留言（chat-message-kind ⑤，messages `data.top`）。由 `handlePollReceived` 從
     /// `poll.top` 設定，供 reference-ui 渲染。冪等：每輪以當前釘選狀態覆蓋，取消釘選 → nil。
     /// 預設 nil（無置頂）。
@@ -373,6 +381,10 @@ public final class DefaultPlayerTemplate {
     /// NEVER builds an HTTP request itself. Returns the `LBCartResult` on success.
     private let addToCartRequester: (LBCartRequest) async throws -> LBCartResult
 
+    /// Injected flash-sale bid requester (live-bid-ios-template). The wiring fills it with
+    /// `Livebuy.placeBid(...)`; default is a throwing stub (headless tests, no HTTP).
+    private let bidRequester: (LBBidRequest) async throws -> Void
+
     /// Injected retry-token registrar for the proactive add-to-cart login gate
     /// (`ios-cart-add-proactive-gate-retry-token-template`). Default is core's
     /// `Livebuy.registerPendingRetry`; tests inject a spy for a deterministic token.
@@ -438,6 +450,8 @@ public final class DefaultPlayerTemplate {
         setAwaitGoods: ((String, Bool) -> Void)? = nil,
         setNoticeGoods: ((String, Bool) -> Void)? = nil,
         addToCartRequester: ((LBCartRequest) async throws -> LBCartResult)? = nil,
+        bidRequester: ((LBBidRequest) async throws -> Void)? = nil,
+        bidConfirmRequester: ((String, [String]) -> Void)? = nil,
         registerPendingRetryProvider: ((@escaping () -> Void) -> String)? = nil,
         feedSnapshotCache: VideoFeedSnapshotCache = .shared
     ) {
@@ -452,7 +466,9 @@ public final class DefaultPlayerTemplate {
         self.addToCartRequester = addToCartRequester ?? { _ in
             throw LBProductSheetError.noRequester
         }
+        self.bidRequester = bidRequester ?? { _ in throw LBProductSheetError.noRequester }
         self.registerPendingRetryProvider = registerPendingRetryProvider ?? { Livebuy.registerPendingRetry($0) }
+        self.bidWon = DefaultBidWon()
         self.activityFeed = DefaultActivityFeed()
         self.winClaim = DefaultWinClaim(requester: player)
         self.activeEvent = DefaultActiveEvent(provider: player)
@@ -509,6 +525,11 @@ public final class DefaultPlayerTemplate {
         // injected `viewCartRequester` (ui-template-foundation §查看購物車意圖 passthrough).
         // productId = current detail's id (detail CTA) or nil (list-bottom CTA → seam
         // omits `product_id`). nil requester → inert no-op (demo / headless-safe).
+        // 「確定」→ core `Livebuy.confirmBidWin` via the injected requester (videoId = current video).
+        bidWon.confirmForwarder = { [weak self] ids in
+            guard let self = self else { return }
+            bidConfirmRequester?(self.currentVideoId ?? self.player?.channel?.id ?? "", ids)
+        }
         cartCTA.openCartForwarder = { [weak self] in
             guard let self = self else { return }
             self.viewCartRequester?(self.productSheet.detail?.productId)
@@ -581,6 +602,7 @@ public final class DefaultPlayerTemplate {
         qtyStepper.onMutation = { [weak self] in self?.notifyChange() }
         miniCart.onMutation = { [weak self] in self?.notifyChange() }
         cartCTA.onMutation = { [weak self] in self?.notifyChange() }
+        bidWon.onMutation = { [weak self] in self?.notifyChange() }
     }
 
     /// Re-entrancy depth of an in-flight `coalescing` batch. While > 0, model
@@ -764,6 +786,7 @@ public final class DefaultPlayerTemplate {
             // 搶購場旗標（channel-flash-sale-flag-template）：原樣鏡射 core 既有的 channel.isFlashSale，
             // 跟 isLive / isFinishedLiveReplay 語意正交、不互斥，不依播放狀態推導或覆寫。
             header.handleFlashSale(ch.isFlashSale)
+            header.handleSaleKeywordRequired(ch.saleKeywordRequired)
             // 會員等級限定軟閘門（restriction-gate ②）：衍生 isRestricted 供 reference-ui 疊遮罩。
             applyRestriction(ch.isRestriction == 1)
             // 通用 loading 封面（player-loading-cover-background-template）：衍生 loadingCover =
@@ -1140,13 +1163,20 @@ public final class DefaultPlayerTemplate {
             addToCartFailed = false
             addToCartNeedsLogin = false
             addToCartInFlight = false
-            productSheet.openDetail(product, otherGoods: currentOtherGoods ?? player?.channel?.otherGoods ?? [])
+            bidOutcome = nil
+            productSheet.openDetail(product, otherGoods: currentOtherGoods ?? player?.channel?.otherGoods ?? [],
+                                    bidMode: isBidMode, saleKeywordRequired: header.saleKeywordRequired)
             guard let detail = productSheet.detail else { return }
             variantPicker.reset(for: detail)
             // qty bounds: chosen spec stock if a spec is implicitly selected
-            // (no-spec product), else product stock. soldOut forces 0.
+            // (no-spec product), else product stock. soldOut forces 0. Flash-sale live also
+            // caps at the effective 每人限購 (live-bid-ios-template).
             let stock = variantPicker.selectedSpec?.stock ?? detail.stock
-            qtyStepper.recomputeBounds(stock: stock, soldOut: detail.soldOut)
+            detailProductLimitNum = product.limitNum
+            let limit = Self.effectiveLimitNum(productLimit: product.limitNum,
+                                               spec: variantPicker.selectedSpec, bidMode: isBidMode)
+            productSheet.updateLimitNum(limit)
+            qtyStepper.recomputeBounds(stock: stock, soldOut: detail.soldOut, limit: limit)
         }
     }
 
@@ -1174,7 +1204,10 @@ public final class DefaultPlayerTemplate {
             }
             let stock = variantPicker.selectedSpec?.stock ?? productSheet.detail?.stock ?? 0
             let soldOut = productSheet.detail?.soldOut ?? 0
-            qtyStepper.recomputeBounds(stock: stock, soldOut: soldOut)
+            let limit = Self.effectiveLimitNum(productLimit: detailProductLimitNum,
+                                               spec: variantPicker.selectedSpec, bidMode: isBidMode)
+            productSheet.updateLimitNum(limit)
+            qtyStepper.recomputeBounds(stock: stock, soldOut: soldOut, limit: limit)
         }
     }
 
@@ -1198,6 +1231,9 @@ public final class DefaultPlayerTemplate {
         // Reset the transient flags for this attempt (both orthogonal flags together).
         addToCartFailed = false
         addToCartNeedsLogin = false
+        bidOutcome = nil
+        // live-bid-ios-template: 直播管家商品沒設搶購關鍵字 → 按鈕隱藏，intent 不動作（同網頁）。
+        if detail.buyButtonHidden { return }
         // Login gate (add-to-cart-login-gate-template) — checked FIRST, before the
         // sold-out / variant-selection guards below and before any network call.
         // This is a deliberate priority ordering: when the host has opted into
@@ -1232,6 +1268,11 @@ public final class DefaultPlayerTemplate {
             return
         }
         needsVariantSelection = false
+        // live-bid-ios-template: flash-sale live → bid instead of add-to-cart.
+        if isBidMode {
+            placeBid(detail: detail)
+            return
+        }
         // cart-add-loading-state: a request is about to fire → enter in-flight and notify so
         // the host / reference-ui can disable the CTA for the request lifecycle. (Guards above
         // return early without firing, so they never enter in-flight.)
@@ -1269,6 +1310,81 @@ public final class DefaultPlayerTemplate {
             }
         }
     }
+
+    // MARK: - Flash-sale bid (live-bid-ios-template)
+
+    /// Flash-sale live (`header.isFlashSale && header.isLive`): `addToCart()` bids instead.
+    var isBidMode: Bool { header.isFlashSale && header.isLive }
+
+    /// PURE (live-bid-ios-template): hide the buy button when the 直播管家 flash sale needs a
+    /// keyword (`saleKeywordRequired`) and this product has none — same rule as the web
+    /// `xslNoKeyword`. Shared by the detail state and the product list's quick-add.
+    public static func isBuyButtonHidden(product: LBProduct, saleKeywordRequired: Bool) -> Bool {
+        saleKeywordRequired && product.saleKeyword.isEmpty
+    }
+
+    /// PURE: effective 每人限購 — the selected spec's `limitNum` when > 0, else the product's;
+    /// `0` outside flash-sale live.
+    static func effectiveLimitNum(productLimit: Int, spec: LBSpec?, bidMode: Bool) -> Int {
+        guard bidMode else { return 0 }
+        if let spec = spec, spec.limitNum > 0 { return spec.limitNum }
+        return productLimit
+    }
+
+    /// The open detail's product-level `limitNum`, captured by `openProductDetail` so a later
+    /// spec selection can fall back to it.
+    private var detailProductLimitNum = 0
+
+    /// Bid branch of `addToCart()`: in-flight → requester → `bidOutcome` (or needs-login).
+    private func placeBid(detail: LBProductDetailState) {
+        addToCartInFlight = true
+        notifyChange()
+        let request = LBBidRequest(goodsId: detail.productId, num: qtyStepper.qty,
+                                   specificationId: variantPicker.selectedSpecificationId,
+                                   videoId: currentVideoId ?? player?.channel?.id ?? "")
+        let requester = bidRequester
+        Task { [weak self] in
+            do {
+                try await requester(request)
+                await MainActor.run { [weak self] in self?.applyBidResult(.success(())) }
+            } catch {
+                await MainActor.run { [weak self] in self?.applyBidResult(.failure(error)) }
+            }
+        }
+    }
+
+    /// Main-thread bid result → state, one coalesced onChange.
+    func applyBidResult(_ result: Result<Void, Error>) {
+        coalescing {
+            addToCartInFlight = false
+            switch result {
+            case .success:
+                bidOutcome = .placed
+                productSheet.clearDetail()
+            case .failure(let error):
+                if case LBError.cartAddDeduplicated = error {
+                    break
+                } else if Self.isAddToCartAuthRequired(error) {
+                    addToCartNeedsLogin = true
+                } else {
+                    bidOutcome = .failed(code: (error as? LBError)?.backendErrorCode)
+                }
+            }
+            notifyChange()
+        }
+    }
+
+    /// `BID_WON` → win popup (main thread).
+    func handleBidWon(params: [String: Any]) {
+        guard let item = LBBidWonItem.from(params: params) else { return }
+        Self.runOnMain { [weak self] in self?.bidWon.record(item) }
+    }
+
+    /// Host「確定」on the win popup: confirm every listed win, then close.
+    public func confirmBidWin() { bidWon.confirm() }
+
+    /// Host「取消」on the win popup: close without confirming.
+    public func dismissBidWon() { bidWon.clear() }
 
     /// Proactive-gate `AUTH_REQUIRED` dispatch carrying a retry token
     /// (`ios-cart-add-proactive-gate-retry-token-template`). Registers a closure that
@@ -1749,6 +1865,9 @@ public final class DefaultPlayerTemplate {
             qtyStepper.clear()
             miniCart.dismissMiniCart()
             cartCTA.resetForSession()
+            // live-bid-ios-template: a switched video MUST NOT keep the previous video's wins.
+            bidWon.clear()
+            bidOutcome = nil
         }
     }
 

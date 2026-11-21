@@ -59,6 +59,33 @@ public struct LBCartRequest: Equatable {
 
 // MARK: - 1. product-detail — `{ productId, name, priceShow, …, specifications, specOptions }`
 
+/// One flash-sale bid as assembled by the template from the current detail + variant + qty
+/// (live-bid-ios-template). Delegated to the injected bid requester (default wiring:
+/// `Livebuy.placeBid`); the template builds no HTTP.
+public struct LBBidRequest: Equatable {
+    public let goodsId: String
+    public let num: Int
+    /// `nil` when the product has no named spec.
+    public let specificationId: String?
+    public let videoId: String
+
+    public init(goodsId: String, num: Int, specificationId: String?, videoId: String) {
+        self.goodsId = goodsId
+        self.num = num
+        self.specificationId = specificationId
+        self.videoId = videoId
+    }
+}
+
+/// Result of the last flash-sale bid attempt (live-bid-ios-template). `nil` = no bid result
+/// yet for the current attempt / sheet. `.failed(code:)` carries the backend `error_code`
+/// (`purchase_limit_exceeded` / `out_of_stock` / …) so reference-ui can pick the copy; `nil`
+/// code = no backend code (network error, older backend).
+public enum LBBidOutcome: Equatable {
+    case placed
+    case failed(code: String?)
+}
+
 /// One「更多商品」推薦卡片 — mapped from `LBChannel.otherGoods[]`
 /// (expose-other-goods-recommendations-template design.md D2). Deliberately
 /// minimal: just enough to render a recommendation card and switch videos
@@ -121,11 +148,21 @@ public struct LBProductDetailState: Equatable {
     /// reference-ui's job). Empty when the channel has no other goods, or when
     /// this detail was opened without a channel context.
     public let recommendations: [LBProductRecommendation]
+    /// 搶購場直播中且本人已搶購（`LBProduct.buyingNum > 0`）→ 顯示「正在等待結果...」
+    /// （live-bid-ios-template）。其他情況 `false`。
+    public let bidWaiting: Bool
+    /// 搶購場直播中的每人限購：已選規格且規格 `limitNum > 0` 取規格值，否則取商品值；
+    /// `0` = 不限購或非搶購場直播中（live-bid-ios-template）。數量上限已依此收斂。
+    public let limitNum: Int
+    /// 直播管家搶購場（`header.saleKeywordRequired`）且商品沒設搶購關鍵字 → 隱藏購買鈕，
+    /// `addToCart()` 不動作（live-bid-ios-template，同網頁）。
+    public let buyButtonHidden: Bool
 
     public init(productId: String, name: String, priceShow: String,
                 originalPriceShow: String, price: Double, stock: Int, soldOut: Int,
                 photos: [String], specifications: [LBSpec], specOptions: [LBSpecOption],
-                recommendations: [LBProductRecommendation] = []) {
+                recommendations: [LBProductRecommendation] = [],
+                bidWaiting: Bool = false, limitNum: Int = 0, buyButtonHidden: Bool = false) {
         self.productId = productId
         self.name = name
         self.priceShow = priceShow
@@ -137,6 +174,18 @@ public struct LBProductDetailState: Equatable {
         self.specifications = specifications
         self.specOptions = specOptions
         self.recommendations = recommendations
+        self.bidWaiting = bidWaiting
+        self.limitNum = limitNum
+        self.buyButtonHidden = buyButtonHidden
+    }
+
+    /// Same detail with a different `limitNum` (spec selection changed the effective limit).
+    func withLimitNum(_ value: Int) -> LBProductDetailState {
+        LBProductDetailState(productId: productId, name: name, priceShow: priceShow,
+                             originalPriceShow: originalPriceShow, price: price, stock: stock,
+                             soldOut: soldOut, photos: photos, specifications: specifications,
+                             specOptions: specOptions, recommendations: recommendations,
+                             bidWaiting: bidWaiting, limitNum: value, buyButtonHidden: buyButtonHidden)
     }
 
     // LBSpec / LBSpecOption are not Equatable; compare by stable identity so a
@@ -153,6 +202,9 @@ public struct LBProductDetailState: Equatable {
             && lhs.specifications.map(\.id) == rhs.specifications.map(\.id)
             && lhs.specOptions.map(\.name) == rhs.specOptions.map(\.name)
             && lhs.recommendations == rhs.recommendations
+            && lhs.bidWaiting == rhs.bidWaiting
+            && lhs.limitNum == rhs.limitNum
+            && lhs.buyButtonHidden == rhs.buyButtonHidden
     }
 }
 
@@ -174,7 +226,11 @@ public final class DefaultProductSheet {
     /// Diff-then-notify: re-opening the SAME product (identical mapped fields) is
     /// a no-op. The owning template resets variant / qty when this fires for a NEW
     /// product (handled at the template level so the three models stay decoupled).
-    func openDetail(_ product: LBProduct, otherGoods: [LBProduct] = []) {
+    /// `bidMode` = flash-sale live (`header.isFlashSale && header.isLive`), `saleKeywordRequired`
+    /// = `header.saleKeywordRequired` (live-bid-ios-template); both default `false` so existing
+    /// callers / a non-flash-sale channel produce the same detail as before.
+    func openDetail(_ product: LBProduct, otherGoods: [LBProduct] = [],
+                    bidMode: Bool = false, saleKeywordRequired: Bool = false) {
         let next = LBProductDetailState(
             productId: product.id,
             name: product.name,
@@ -186,7 +242,11 @@ public final class DefaultProductSheet {
             photos: product.photos,
             specifications: product.specifications,
             specOptions: product.specOptions,
-            recommendations: Self.recommendations(from: otherGoods, excluding: product.id))
+            recommendations: Self.recommendations(from: otherGoods, excluding: product.id),
+            bidWaiting: bidMode && product.buyingNum > 0,
+            limitNum: bidMode ? product.limitNum : 0,
+            buyButtonHidden: DefaultPlayerTemplate.isBuyButtonHidden(
+                product: product, saleKeywordRequired: saleKeywordRequired))
         guard next != detail else { return }
         detail = next
         onMutation?()
@@ -208,6 +268,14 @@ public final class DefaultProductSheet {
                                         pic: $0.pic, videoId: $0.videoId, soldOut: $0.soldOut,
                                         originalPriceShow: $0.originalPriceShow)
             }
+    }
+
+    /// Replace the open detail's `limitNum` (spec selection changed it). Diff-then-notify;
+    /// no-op without an open detail (live-bid-ios-template).
+    func updateLimitNum(_ value: Int) {
+        guard let current = detail, current.limitNum != value else { return }
+        detail = current.withLimitNum(value)
+        onMutation?()
     }
 
     /// Dismiss the detail sheet. Diff-then-notify (no-op when already nil).
@@ -512,10 +580,12 @@ public final class DefaultQtyStepper {
     /// → `min == max == qty == 0` (D3). Otherwise `min == 1`, `max == stock`, and
     /// `qty` is re-clamped into the new range (switching to a smaller-stock spec
     /// drops `qty` to the new `max`). Diff-then-notify.
-    func recomputeBounds(stock: Int, soldOut: Int) {
+    /// `limit > 0` (flash-sale 每人限購, live-bid-ios-template) caps `max` at `min(stock, limit)`;
+    /// the default `0` keeps the stock-only bound.
+    func recomputeBounds(stock: Int, soldOut: Int, limit: Int = 0) {
         let out = soldOut == 1 || stock <= 0
         let newMin = out ? 0 : 1
-        let newMax = out ? 0 : stock
+        let newMax = out ? 0 : (limit > 0 ? Swift.min(stock, limit) : stock)
         // Re-clamp the current qty into the new range. When (re)entering an
         // in-stock range from 0/unset, start at `min`.
         let base = qty < newMin ? newMin : qty

@@ -75,6 +75,11 @@ final class TemplateAuxListener: NSObject, LivebuyEventListener {
                 template?.handleWin(text: winner.title, winner: winner)
             }
             return false
+        case LBEvent.bidWon:
+            // live-bid-ios-template: BID_WON (ordered or failed) → 「恭喜搶購成功」popup state.
+            // Non-primary: returns false so the host's primary listener still sees the event.
+            template?.handleBidWon(params: params)
+            return false
         case LBEvent.awardClaimResult:
             // Notify event → win-claim result-state model (§4). `.claimed`
             // decrements the unclaimed count for the in-flight winner.
@@ -304,6 +309,17 @@ enum TemplateWiring {
                     num: request.num,
                     specificationId: request.specificationId.flatMap { Int($0) },
                     videoId: request.videoId)
+            },
+            // live-bid-ios-template: flash-sale live bids go to core `Livebuy.placeBid`; the
+            // win-popup「確定」goes to `Livebuy.confirmBidWin` (fire-and-forget, like the web).
+            bidRequester: { request in
+                guard let goodsId = Int(request.goodsId) else { throw LBProductSheetError.noRequester }
+                _ = try await Livebuy.placeBid(videoId: request.videoId, goodsId: goodsId,
+                                               specificationId: request.specificationId.flatMap { Int($0) },
+                                               num: request.num)
+            },
+            bidConfirmRequester: { videoId, ids in
+                Task { _ = try? await Livebuy.confirmBidWin(videoId: videoId, buyingIds: ids) }
             }
         )
 

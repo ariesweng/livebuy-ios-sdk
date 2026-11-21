@@ -580,16 +580,34 @@ public struct ProductDetailSheetView: View {
     // rb-ios-product-intro-bgcolor-and-hide-empty; no background layering, no favButton/intro/
     // recommendations — see `detailBodyContent` for the `.detail`-only layered structure)
 
+    @ViewBuilder
     private var addToCartBodyContent: some View {
+        if detail.bidWaiting {
+            // rb-ios-flash-sale-bid: design `AddToCartSheet` — banner (marginTop 4, full-bleed)
+            // above the padded body, whose top inset grows to 12 while the banner shows.
+            VStack(alignment: .leading, spacing: 0) {
+                BidWaitingBannerView(theme: theme)
+                    .padding(.top, 4)
+                addToCartBodyStack
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 12)
+            }
+        } else {
+            addToCartBodyStack
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 12)
+        }
+    }
+
+    private var addToCartBodyStack: some View {
         VStack(alignment: .leading, spacing: 0) {
             // `.addToCart` (購買) uses the design's compact 96×96 product card (aligned with
             // NotifyRestockSheetView).
             compactProductCard
             variantQtyFailureBlock
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 12)
     }
 
     // MARK: - `.detail` body — LAYERED per design `ProductDetailSheet`'s outer `bgSunken`
@@ -621,6 +639,12 @@ public struct ProductDetailSheetView: View {
     // never gray, in every reachable combination of which sections are visible.
     private var detailBodyContent: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // rb-ios-flash-sale-bid: 「正在等待結果...」banner at the very top of the scroll body,
+            // full-bleed (design `ProductDetailSheet`: `{bidWaiting && <LBPBidWaitingBanner />}`
+            // before the white block). Absent → the stack is unchanged.
+            if detail.bidWaiting {
+                BidWaitingBannerView(theme: theme)
+            }
             // Thumb-to-favButton block — own white background wrapper (design `padding:'0 16px
             // 16px'`: horizontal 16, bottom 16, top 0). The existing `.padding(.top, 6)`
             // header→content gap is kept INSIDE this white block (not the outer gray level) so
@@ -1373,6 +1397,10 @@ public struct ProductDetailSheetView: View {
     //
     // Bound to `qty.qty` within `[qty.min, qty.max]`. The stepper is DISABLED when
     // sold out (`qty.max == 0`); `-` is also disabled at `qty.min`, `+` at `qty.max`.
+    // Flash-sale 每人限購 (rb-ios-flash-sale-bid): the view-model already caps `qty.max` at
+    // `min(stock, limitNum)`, so `+` greys out at the limit through this same rule; the caption
+    // slot shows「每人限購 N 組」instead of the stock caption while `detail.limitNum > 0`
+    // (`QtyHint.resolve`, sold-out still wins). With `limitNum == 0` the rule below is unchanged.
     //
     // The「只剩庫存 N 組」caption is drawn ⟺ `showsStockCaption(showStock:isSoldOut:)` — an AND of
     // TWO independent gates (rb-ios-show-stock-caption-toggle):
@@ -1407,10 +1435,20 @@ public struct ProductDetailSheetView: View {
                 .font(.system(size: 14 * theme.fontScale, weight: .semibold))
                 .foregroundColor(theme.text)
             Spacer(minLength: 0)
-            if Self.showsStockCaption(showStock: showStock, isSoldOut: isSoldOut) {
+            // rb-ios-flash-sale-bid: 每人限購 replaces the stock caption (design `LBPQtyHint`,
+            // sold-out > limit > stock). `limitNum == 0` (non-flash-sale) → `.stock` / `.none`
+            // exactly as `showsStockCaption(showStock:isSoldOut:)` decided before.
+            switch QtyHint.resolve(isSoldOut: isSoldOut, showStock: showStock, limitNum: detail.limitNum) {
+            case .limit(let num):
+                Text(ReferenceUIStrings.text("bid_limit", ["num": String(num)]))
+                    .font(.system(size: 12 * theme.fontScale))
+                    .foregroundColor(Self.textDim)
+            case .stock:
                 Text(stockCaption)
                     .font(.system(size: 12 * theme.fontScale))
                     .foregroundColor(Self.textDim)
+            case .none:
+                EmptyView()
             }
             qtyStepper
         }
@@ -1521,7 +1559,21 @@ public struct ProductDetailSheetView: View {
     // session has successful adds (cartCount > 0), a slim cart-CTA row (LBPCartCTA)
     // sits below so the user can jump to the cart.
 
+    /// Footer slots (rb-ios-flash-sale-bid): `detail.buyButtonHidden` drops the CTA; with no
+    /// slot left the whole footer (incl. its separator) is omitted.
+    private var footerSlots: ProductSheetFooterSlots {
+        ProductSheetFooterSlots.resolve(isDetailPresentation: presentation == .detail,
+                                        isLive: isLive, buyButtonHidden: detail.buyButtonHidden)
+    }
+
+    @ViewBuilder
     private var footer: some View {
+        if !footerSlots.isEmpty {
+            footerRow
+        }
+    }
+
+    private var footerRow: some View {
         VStack(spacing: 10) {
             // Bottom action row: 2-slot footer [分享][CTA] (rb-ios-product-sheet-resize-fav-inline
             // moved 收藏 out of the footer into the body content — see `favButtonInline`; the
@@ -1535,11 +1587,19 @@ public struct ProductDetailSheetView: View {
                 // to the body content, see `favButtonInline` below — rb-ios-product-sheet-resize-fav-inline),
                 // EXCEPT 分享 is additionally hidden while genuinely live
                 // (rb-ios-live-hide-product-share, design R12) — 收藏 is unaffected either way.
-                if presentation == .detail && !isLive {
+                if footerSlots.share {
                     shareButton
                 }
-                addToCartButton
+                if footerSlots.cta {
+                    addToCartButton
+                }
             }
+            // Fill the row and lead-align it: with the CTA hidden (buyButtonHidden, non-live
+            // detail) only the width-56 分享 slot remains, and without this the row would shrink
+            // and centre (with a short top divider). Design footer is a full-width flex row, so
+            // 分享 stays left (rb-ios-flash-sale-bid-footer-align). No-op while the CTA is present
+            // (it already fills the width).
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // 商品明細 footer 收斂為 2-slot `[分享][CTA]`（收藏鈕自 rb-ios-product-sheet-resize-fav-inline
             // 起搬到 body 內文區塊，不再是 footer 的一個 slot）：設計並無額外的「查看購物車」CTA，且

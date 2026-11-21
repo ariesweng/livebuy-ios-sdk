@@ -207,6 +207,18 @@ public final class ProductSheetsModel: ObservableObject {
     /// locked stepper / variant). Orthogonal to `addToCartFailed` / `addToCartNeedsLogin`.
     @Published public private(set) var addToCartInFlight: Bool
 
+    // -- Flash-sale bid (rb-ios-flash-sale-bid, binds live-bid-ios-template) --------
+
+    /// Last bid outcome (`DefaultPlayerTemplate.bidOutcome`): reset to nil at every attempt /
+    /// detail open, so each result is a fresh nil → value change the container flashes a toast on.
+    @Published public private(set) var bidOutcome: LBBidOutcome?
+    /// 「恭喜搶購成功」items (`DefaultPlayerTemplate.bidWon.items`).
+    @Published public private(set) var bidWonItems: [LBBidWonItem]
+    /// Whether the bid-won popup is up (`DefaultPlayerTemplate.bidWon.isPresented`).
+    @Published public private(set) var bidWonPresented: Bool
+    /// Merchant logo URL string for the bid-won popup (`DefaultPlayerHeaderState.shopLogo`).
+    @Published public private(set) var shopLogo: String
+
     /// Backend / merchant-driven REMAINING-STOCK-COUNT gate (rb-ios-show-stock-caption-toggle).
     /// NOT a template-derived snapshot — a per-shell constant sourced from
     /// `LivebuyPlayerConfig.showStock` (default `true`, itself normalized by the host from
@@ -270,7 +282,11 @@ public final class ProductSheetsModel: ObservableObject {
             needsVariantSelection: t.needsVariantSelection,
             addToCartFailed: t.addToCartFailed,
             addToCartNeedsLogin: t.addToCartNeedsLogin,
-            addToCartInFlight: t.addToCartInFlight
+            addToCartInFlight: t.addToCartInFlight,
+            bidOutcome: t.bidOutcome,
+            bidWonItems: t.bidWon.items,
+            bidWonPresented: t.bidWon.isPresented,
+            shopLogo: t.header.shopLogo
         )
     }
 
@@ -303,6 +319,10 @@ public final class ProductSheetsModel: ObservableObject {
         addToCartFailed: Bool = false,
         addToCartNeedsLogin: Bool = false,
         addToCartInFlight: Bool = false,
+        bidOutcome: LBBidOutcome? = nil,
+        bidWonItems: [LBBidWonItem] = [],
+        bidWonPresented: Bool = false,
+        shopLogo: String = "",
         // Per-shell CONFIG constant, not a template snapshot (see the property's doc). Kept last so
         // every existing labelled call site is source-compatible.
         showStock: Bool = true
@@ -323,6 +343,10 @@ public final class ProductSheetsModel: ObservableObject {
         self.addToCartFailed = addToCartFailed
         self.addToCartNeedsLogin = addToCartNeedsLogin
         self.addToCartInFlight = addToCartInFlight
+        self.bidOutcome = bidOutcome
+        self.bidWonItems = bidWonItems
+        self.bidWonPresented = bidWonPresented
+        self.shopLogo = shopLogo
         self.showStock = showStock
     }
 
@@ -357,6 +381,10 @@ public final class ProductSheetsModel: ObservableObject {
         addToCartFailed = t.addToCartFailed
         addToCartNeedsLogin = t.addToCartNeedsLogin
         addToCartInFlight = t.addToCartInFlight
+        bidOutcome = t.bidOutcome
+        bidWonItems = t.bidWon.items
+        bidWonPresented = t.bidWon.isPresented
+        shopLogo = t.header.shopLogo
     }
 
     // MARK: - Read-only host intents (pass-through to the bound template)
@@ -411,6 +439,17 @@ public final class ProductSheetsModel: ObservableObject {
     /// No-op for demo instances.
     public func addToCart() {
         template?.addToCart()
+    }
+
+    /// Bid-won popup「確定」→ `template.confirmBidWin()` (confirms every listed win once, then
+    /// closes). No-op for demo instances.
+    public func confirmBidWin() {
+        template?.confirmBidWin()
+    }
+
+    /// Bid-won popup「取消」→ `template.dismissBidWon()` (closes without confirming). No-op for demo.
+    public func dismissBidWon() {
+        template?.dismissBidWon()
     }
 
     /// Forward a「關閉商品明細 / 加購 / 補貨 sheet」intent → `DefaultPlayerTemplate.closeProductDetail()`

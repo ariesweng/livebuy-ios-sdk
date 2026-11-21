@@ -217,6 +217,15 @@ public enum LBAccessibilityID {
     /// Add-to-cart success toast (`CartToastView`, rb-ios-cart-add-success-toast).
     public static let cartToast = "lb_cart_toast"
 
+    // Flash-sale bid (rb-ios-flash-sale-bid).
+    /// 「正在等待結果... ／ 搶購中」banner on the product-detail / add-to-cart sheet.
+    public static let bidWaitingBanner = "lb_bid_waiting_banner"
+    /// 「恭喜搶購成功」bid-won popup card (`BidWonModalView`).
+    public static let bidWonModal = "lb_bid_won_modal"
+    public static let bidWonConfirm = "lb_bid_won_confirm"
+    public static let bidWonCancel = "lb_bid_won_cancel"
+    public static let bidWonPaginationDots = "lb_bid_won_pagination_dots"
+
     /// Sale badge chip on the product-detail / add-to-cart sheet (rb-ios-product-sale-badge).
     public static let saleBadge = "lb_sale_badge"
 

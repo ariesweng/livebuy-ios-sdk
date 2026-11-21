@@ -5,6 +5,36 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.32.0] - 2026-11-21
+
+> **Minor（iOS + Android 同發，皆自 `4.31.0`）。** 搶購場改用下標模式，動到 core（`LivebuySDK`）、view-model（`LivebuyUI`）、reference-ui（`LivebuyReferenceUI`）。**源碼面無 BREAKING**（只加不減、
+> 新參數都有預設值）；**⚠️ 行為改變**：搶購場直播中 drop-in／view-model 的「加入購物車」改為下標。
+> 🔴 需要後端 `sdk-live-bid`；發版當下正式機尚未部署，部署前搶購場下標會失敗。完整敘述見
+> [`docs/release-notes/v4.32.0.md`](../docs/release-notes/v4.32.0.md)。
+
+### Added
+
+- core：`Livebuy.placeBid(videoId:goodsId:specificationId:num:)` → `LBBidResult`、`Livebuy.confirmBidWin(videoId:buyingIds:)`（`[Int]`／`[String]` 兩個多載，`async throws`）→ `[LBBidConfirmItem]`。訪客下標派 `AUTH_REQUIRED`（`trigger_action="bid_place"`）。
+- core：通知型事件 `BID_PLACE_RESULT`、`BID_WON`（SDK 輪詢到得標後自動取單再派發）。
+- core：`CART_ADD_REQUEST` 新增 `cart_origin`（`normal`／`award`／`bid_won`），得標另帶 `buying_id`、`shop_cart_synced`
+  （`true` 時 host 應忽略，不要重複入車）。
+- core：`LBChannel.saleKeywordRequired`；`LBProduct`／`LBSpec` 的 `saleKeyword`、`buyingNum`、`totalBuyingNum`、`limitNum`。
+- core：搶購場直播中、已登入時，聊天室「關鍵字＋數量」自動下標。
+- view-model：商品明細 `bidWaiting`／`limitNum`／`buyButtonHidden`、`bidOutcome`、得標視窗狀態 `bidWon`（確認／取消）。
+- reference-ui：「正在等待結果...」橫幅、「每人限購 N 組」、下標結果 toast、得標視窗「恭喜搶購成功」（商家 logo 或商店圖示、
+  多筆滑動＋分頁圓點）；8 個新字串 key（五語系）。
+
+### Changed
+
+- ⚠️ view-model：搶購場直播中 `addToCart()` 改呼叫下標（不打 addcart），結果寫入 `bidOutcome`，成功時關閉商品明細；有限購時
+  數量上限為 `min(庫存, limitNum)`；直播管家搶購場沒有搶購關鍵字的商品隱藏購買鈕。非搶購場、非直播中不變。
+- reference-ui：領獎確認視窗商品提醒句 `win_submit_note_product` 的 en、id-ID 改用網頁版原句
+  `*The prize will be automatically added as pending checkout items.`。
+
+### Fixed
+
+- reference-ui：商品明細非直播中、只剩分享鈕時，按鈕列縮成置中、分隔線變短 → 改為靠左、分隔線滿寬。
+
 ## [4.31.0] - 2026-11-18
 
 > **Minor（iOS + Android 同發，皆自 `4.30.2`）。** 只改 reference-ui（`LivebuyReferenceUI`）字串表的值；core（`LivebuySDK`）與

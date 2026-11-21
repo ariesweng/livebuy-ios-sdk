@@ -293,6 +293,9 @@ public struct ProductSheetsOverlayView: View {
     @State private var cartToastVisible = false
     /// rb-ios-cart-add-failure-toast: whether the visible toast is the FAILURE variant.
     @State private var cartToastIsError = false
+    /// rb-ios-flash-sale-bid: label override for the visible toast (bid「已加入搶購」/ bid failure
+    /// copy); nil → `CartToastView`'s own default for `cartToastIsError`.
+    @State private var cartToastLabel: String?
 
     /// Pending auto-dismiss work for the success toast — cancelled + re-armed on each rise
     /// so rapid successive successes EXTEND the toast rather than truncate it.
@@ -338,15 +341,17 @@ public struct ProductSheetsOverlayView: View {
     }
 
     /// PURE: whether ANY product sheet/modal this container can render is currently presented —
-    /// the aggregate OR of all FIVE full-bleed overlay surfaces (`rb-ios-block-swipe-nav-when-
+    /// the aggregate OR of all SIX full-bleed overlay surfaces (`rb-ios-block-swipe-nav-when-
     /// sheet-open`). Deliberately exhaustive (not "any future overlay auto-counts") — a future
-    /// sixth overlay must be a deliberate edit here:
+    /// seventh overlay must be a deliberate edit here:
     ///
     /// 1. `listPresented` — the product list drawer (`model.listPresented`).
     /// 2. `detailPresented` — the detail-or-restock sheet (`presentingDetail != nil`).
     /// 3. `zoomPresented` — the product-photo zoom lightbox (`zoomedDetail != nil`).
     /// 4. `cartLoginGatePresented` — the add-to-cart needs-login gate (`AuthGateModalView`).
     /// 5. `variantPromptPresented` — the「請選規格」prompt (`SelectVariantPromptModalView`).
+    /// 6. `bidWonPresented` — the「恭喜搶購成功」popup (`BidWonModalView`, rb-ios-flash-sale-bid;
+    ///    defaulted `false` so existing five-signal call sites keep their meaning).
     ///
     /// The add-to-cart success toast (`cartToastVisible` → `CartToastView`) is DELIBERATELY
     /// excluded — its call site applies `.allowsHitTesting(false)`, so it is structurally
@@ -358,9 +363,11 @@ public struct ProductSheetsOverlayView: View {
         detailPresented: Bool,
         zoomPresented: Bool,
         cartLoginGatePresented: Bool,
-        variantPromptPresented: Bool
+        variantPromptPresented: Bool,
+        bidWonPresented: Bool = false
     ) -> Bool {
         listPresented || detailPresented || zoomPresented || cartLoginGatePresented || variantPromptPresented
+            || bidWonPresented
     }
 
     /// The current aggregate from the five live signals above — recomputed on every `body`
@@ -372,7 +379,8 @@ public struct ProductSheetsOverlayView: View {
             detailPresented: presentingDetail != nil,
             zoomPresented: zoomedDetail != nil,
             cartLoginGatePresented: cartLoginGatePresented,
-            variantPromptPresented: variantPromptPresented)
+            variantPromptPresented: variantPromptPresented,
+            bidWonPresented: model.bidWonPresented)
     }
 
     public var body: some View {
@@ -442,8 +450,22 @@ public struct ProductSheetsOverlayView: View {
             // the sheet stack when an add SUCCEEDS (`model.cartCount` ticks up). PURE
             // confirmation: bottom-aligned over the player frame, slides up (`lbp-toast-in`),
             // never eats taps (`allowsHitTesting(false)`). Default-hidden → snapshot-neutral.
+            // 「恭喜搶購成功」bid-won popup (rb-ios-flash-sale-bid) — centered modal over the sheet
+            // stack, bound to `DefaultPlayerTemplate.bidWon`. 確定 → `confirmBidWin()` (confirm all
+            // listed wins once + close); 取消 → `dismissBidWon()` (close only). Its scrim does not
+            // close it (design `LBBidWonModal`). The merchant logo goes through the SAME gate as
+            // the header avatar, so demo / snapshot (`live == false`) shows the glyph only.
+            if model.bidWonPresented && !model.bidWonItems.isEmpty {
+                BidWonModalView(
+                    theme: theme,
+                    items: model.bidWonItems,
+                    shopLogoURL: PlayerHeaderBarView.resolvedShopLogoURL(live: live,
+                                                                         urlString: model.shopLogo),
+                    onConfirm: { model.confirmBidWin() },
+                    onCancel: { model.dismissBidWon() })
+            }
             if cartToastVisible {
-                CartToastView(theme: theme, isError: cartToastIsError)
+                CartToastView(theme: theme, label: cartToastLabel, isError: cartToastIsError)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 96)
                     .allowsHitTesting(false)
@@ -483,12 +505,21 @@ public struct ProductSheetsOverlayView: View {
         .onChange(of: model.addToCartFailed) { failed in
             if failed { showCartToast(isError: true) }
         }
+        // rb-ios-flash-sale-bid: each bid result (the template resets `bidOutcome` to nil at every
+        // attempt) flashes the shared toast — `.placed`「已加入搶購」(success style; the detail
+        // sheet is closed by the view-model), `.failed(code)` → error style with copy chosen by
+        // `BidToastContent` (the detail stays open, so its `limitNum` is still readable).
+        .onChange(of: model.bidOutcome) { outcome in
+            guard let outcome = outcome else { return }
+            let content = BidToastContent.resolve(outcome, limitNum: model.detail?.limitNum ?? 0)
+            showCartToast(isError: content.isError, label: content.text)
+        }
         // Mirror the template's addToCartInFlight into a floored loading flag (anti-flicker; a
         // synchronous dedup resolves within a frame). The sheets read `cartLoadingVisible` as
         // their CTA loading state (cart-add-loading-state D-2).
         .syncCartLoading(on: model.addToCartInFlight) { syncCartLoading($0) }
         // Report `anyProductSheetPresentedNow` to the container on every change to ANY of the
-        // five underlying signals (rb-ios-block-swipe-nav-when-sheet-open), so the sibling
+        // six underlying signals (rb-ios-block-swipe-nav-when-sheet-open), so the sibling
         // `PlayerShellView` can suppress its vertical-swipe video-switch gesture while a sheet is
         // visually covering the video. One `.onChange` per tracked signal, mirroring the
         // established `onInfoPanelPresentedChange` / `onCleanModeChange` /
@@ -499,6 +530,7 @@ public struct ProductSheetsOverlayView: View {
         .onChange(of: zoomedDetail != nil) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
         .onChange(of: cartLoginGatePresented) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
         .onChange(of: variantPromptPresented) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
+        .onChange(of: model.bidWonPresented) { _ in onPresentationChange?(anyProductSheetPresentedNow) }
     }
 
     /// The product sheet-stack proper (mini-cart peek + the `lbBottomSheet` list / detail /
@@ -928,9 +960,10 @@ public struct ProductSheetsOverlayView: View {
     /// `.transition` slides the pill up), re-arm the dismiss so a rapid second success
     /// extends rather than truncates. @State setters are nonmutating, so this stays a plain
     /// method.
-    private func showCartToast(isError: Bool) {
+    private func showCartToast(isError: Bool, label: String? = nil) {
         cartToastDismiss?.cancel()
         cartToastIsError = isError
+        cartToastLabel = label
         withAnimation(.spring(response: 0.32, dampingFraction: 0.72)) {
             cartToastVisible = true
         }

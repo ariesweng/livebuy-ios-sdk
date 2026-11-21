@@ -307,6 +307,10 @@ public final class DefaultPlayerHeaderState {
     /// NOT in `LBPlayerMomentState`（單一來源）。
     private(set) public var isFlashSale: Bool = false
 
+    /// 直播管家搶購場旗標 — 原樣鏡射 core `channel.saleKeywordRequired`（live-bid-ios-template）。
+    /// `true` 時，`saleKeyword` 為空的商品要隱藏購買鈕（見 `DefaultPlayerTemplate.isBuyButtonHidden`）。
+    private(set) public var saleKeywordRequired: Bool = false
+
     // MARK: - Top-bar chrome (player-chrome-template D3) — from public `channel`
     /// Host pill 標題 — `channel.title`.
     private(set) public var title: String = ""
@@ -365,6 +369,14 @@ public final class DefaultPlayerHeaderState {
     func handleFlashSale(_ value: Bool) {
         guard value != self.isFlashSale else { return }
         self.isFlashSale = value
+        onMutation?()
+    }
+
+    /// `channel.saleKeywordRequired` mirror (live-bid-ios-template). Diff-then-notify, fed in the
+    /// same `ingestChannel` coalescing batch as `handleFlashSale`.
+    func handleSaleKeywordRequired(_ value: Bool) {
+        guard value != self.saleKeywordRequired else { return }
+        self.saleKeywordRequired = value
         onMutation?()
     }
 
