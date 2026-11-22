@@ -267,6 +267,22 @@ enum TemplateWiring {
         (try? Livebuy.sdkConfig()) ?? SDKConfig()
     }
 
+    /// Wrap the core add-to-cart call as the drop-in default requester
+    /// (`ios-add-to-cart-empty-shop-id-guard-template`). An empty `request.shopId`
+    /// (the channel carries no shop id) throws `LBProductSheetError.missingShopId`
+    /// WITHOUT calling `coreAddToCart`; `addToCart()` maps that throw to the
+    /// ordinary failure branch (`addToCartFailed`). Parity Android
+    /// `if (shopId.isNullOrEmpty()) onResult(FAILURE)` — empty only, not trimmed.
+    /// A host-injected requester never goes through this wrapper.
+    static func makeDefaultAddToCartRequester(
+        _ coreAddToCart: @escaping (LBCartRequest) async throws -> LBCartResult
+    ) -> (LBCartRequest) async throws -> LBCartResult {
+        return { request in
+            guard !request.shopId.isEmpty else { throw LBProductSheetError.missingShopId }
+            return try await coreAddToCart(request)
+        }
+    }
+
     /// Attach a Default Player template to `vc` and wire both routes.
     static func attachPlayer(_ vc: LivebuyPlayerViewController) {
         // guestNameEditRequester forwards the template's `requestGuestNameEdit()`
@@ -302,7 +318,9 @@ enum TemplateWiring {
             // current product-detail + variant + qty selection. Host-takeover (route
             // A) is excluded upstream — this requester is only invoked from the
             // not-intercepted `productTap` → detail-sheet path.
-            addToCartRequester: { request in
+            // ios-add-to-cart-empty-shop-id-guard-template: an empty `shopId` (channel
+            // has no shop id) fails before reaching core (parity Android / RN / Flutter).
+            addToCartRequester: makeDefaultAddToCartRequester { request in
                 try await Livebuy.addToCart(
                     shopId: request.shopId,
                     goodsId: Int(request.goodsId),

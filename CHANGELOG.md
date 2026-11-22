@@ -5,6 +5,25 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.32.1] - 2026-11-22
+
+> **Patch（iOS-only）。** 只動 `LivebuyUI`（view-model）的 drop-in 預設加購、**無 BREAKING**、零 public 符號變動；
+> Android 不發，維持 `4.32.0`。完整敘述見 [`docs/release-notes/v4.32.1.md`](../docs/release-notes/v4.32.1.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- （無）
+
+### Fixed
+
+- **頻道沒有商家 id 時，drop-in 預設加購仍送出必定失敗的請求**（`LivebuyUI`）：`4.32.0` 以空 `shopId` 呼叫
+  `Livebuy.addToCart`。現在商家 id 為空時不呼叫 core，直接走既有加購失敗提示（對齊 Android／RN／Flutter）。host 自行注入的
+  加購 requester 不受影響。未經真機驗證。
+
 ## [4.32.0] - 2026-11-21
 
 > **Minor（iOS + Android 同發，皆自 `4.31.0`）。** 搶購場改用下標模式，動到 core（`LivebuySDK`）、view-model（`LivebuyUI`）、reference-ui（`LivebuyReferenceUI`）。**源碼面無 BREAKING**（只加不減、

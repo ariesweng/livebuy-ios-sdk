@@ -30,6 +30,9 @@ import LivebuySDK
 /// HTTP, no count change). The real wiring injects `Livebuy.addToCart(...)`.
 enum LBProductSheetError: Error {
     case noRequester
+    /// The drop-in default add-to-cart requester got an empty `shopId` and did not
+    /// call core (`ios-add-to-cart-empty-shop-id-guard-template`).
+    case missingShopId
 }
 
 // MARK: - Route-B add-to-cart request envelope (injected-requester input)
