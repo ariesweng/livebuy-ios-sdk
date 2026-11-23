@@ -5,6 +5,24 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.32.2] - 2026-11-23
+
+> **Patch（iOS + Android 同發）。** 只動 `LivebuyUI`（view-model）、**無 BREAKING**、零 public 符號變動。完整敘述見
+> [`docs/release-notes/v4.32.2.md`](../docs/release-notes/v4.32.2.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- （無）
+
+### Fixed
+
+- **drop-in 一般加購成功後商品明細不會自動收起**（`LivebuyUI`）：成功時 `DefaultPlayerTemplate` 一併收起商品明細
+  （從清單進入的回到清單），對齊設計稿與網頁前台；失敗／需登入／重複加購保持開啟，不自動開購物車。未經真機驗證。
+
 ## [4.32.1] - 2026-11-22
 
 > **Patch（iOS-only）。** 只動 `LivebuyUI`（view-model）的 drop-in 預設加購、**無 BREAKING**、零 public 符號變動；

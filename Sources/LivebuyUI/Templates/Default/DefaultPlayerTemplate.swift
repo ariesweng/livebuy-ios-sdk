@@ -1405,13 +1405,16 @@ public final class DefaultPlayerTemplate {
         if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
-    /// Success branch (main thread): mini-cart peek + cart CTA count → ONE coalesced
-    /// onChange (D6 — single add success = single notification).
+    /// Success branch (main thread): mini-cart peek + cart CTA count + close the detail →
+    /// ONE coalesced onChange (D6 — single add success = single notification). Closing the
+    /// detail matches the design's `confirmAddToCart` and the web `addCart()`, same as a
+    /// placed bid (cart-add-success-close-detail-ios-template).
     private func applyAddSuccess(peek: LBMiniCartPeek) {
         coalescing {
             addToCartInFlight = false
             miniCart.setPeek(peek)
             cartCTA.incrementOnAdd()
+            productSheet.clearDetail()
         }
     }
 
