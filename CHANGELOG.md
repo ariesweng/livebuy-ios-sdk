@@ -5,6 +5,30 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.33.0] - 2026-11-23
+
+> **Minor（iOS + Android 同發）。** 只動 `LivebuySDK`（core）、**新增公開 API、無 BREAKING**（只有新增，沒有改名、移除或改簽章）。
+> 完整敘述見 [`docs/release-notes/v4.33.0.md`](../docs/release-notes/v4.33.0.md)。
+
+### Added
+
+- **宿主攔截後恢復播放器**：`Livebuy.resumeAfterIntercept()`（static）。宿主同步攔截 `PRODUCT_CLICK`／`AUTH_REQUIRED`／
+  `INFO_CUSTOMER_SERVICE` 且 `autoPipOnIntercept = true` 時，SDK 會自動進子母畫面，進不了（例如模擬器）就暫停；宿主關掉自己的頁面
+  回來後呼叫它：子母畫面中 → 退出子母畫面；因 fallback 暫停（且攔截前正在播放）→ 恢復播放；使用者自己暫停 → 不恢復。
+  SDK 以弱參考記住最近一次觸發自動子母畫面的播放器；沒有紀錄或播放器已釋放時不做事；一律在主執行緒執行。
+- `LivebuyPlayerViewController.enterPiP()`／`exitPiP()`／`isPiPActive`／`resumeAfterIntercept()`（`component-contracts`
+  §PiP 觸發契約要求的 Player 方法，先前未實作）。`enablePiP` 開著但裝置不能進子母畫面時，`enterPiP()` 不進入、改派一次
+  `PIP_STATE_CHANGE(active: false)`；`enablePiP` 關閉時完全不做事。
+
+### Changed
+
+- （無。自動子母畫面的觸發條件、fallback 暫停、`auto_pip_fallback` metric 與既有 `PIP_STATE_CHANGE` 時機都不變；
+  不新增事件種類。）
+
+### Fixed
+
+- （無）
+
 ## [4.32.3] - 2026-11-23
 
 > **Patch（iOS + Android 同發）。** 只動 `LivebuyUI`（view-model）、**無 BREAKING**、零 public 符號變動。完整敘述見
