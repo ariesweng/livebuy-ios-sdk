@@ -579,8 +579,32 @@ public final class PlayerShellModel: ObservableObject {
     public func openServiceLink() { template?.openServiceLink() }
     /// Subscribe / unsubscribe.
     public func toggleSubscribe() { template?.toggleSubscribe() }
-    /// Tap a product (pinned card / list item) → product-detail default flow.
+    /// Tap a product → product-detail default flow (template → core `simulateProductTap`).
+    /// This is the DEFAULT exit only: the shell's own product cards (LIVE pinned card, VOD
+    /// now-introducing card) go through `routeProductTap(_:)`, which lets a container override
+    /// it via `onProductTapRoute` (rb-ios-pinned-intro-card-product-tap-config).
     public func performProductTap(_ product: LBProduct) { template?.performProductTap(product) }
+
+    /// Container seam for the shell's own product cards (LIVE pinned card, VOD now-introducing
+    /// card). The drop-in `LivebuyPlayer` sets it to the SAME resolution its product-list rows
+    /// use (`config.onProductTap` if the host set one, else `player.performProductTap`), so a
+    /// host that takes over product taps via `config.onProductTap` also receives these two cards.
+    /// nil (demo / snapshot / a host composing `PlayerShellView` directly) → `routeProductTap`
+    /// falls back to `performProductTap` (unchanged default). rb-ios-pinned-intro-card-product-tap-config.
+    var onProductTapRoute: ((LBProduct) -> Void)?
+
+    /// Shell product-card tap entry: `onProductTapRoute` when set, else `performProductTap`.
+    func routeProductTap(_ product: LBProduct) {
+        Self.routeProductTap(product, route: onProductTapRoute, fallback: performProductTap)
+    }
+
+    /// Pure routing decision behind `routeProductTap(_:)` — exactly one of `route` / `fallback`
+    /// is called, exactly once. `internal` so tests can assert the branch with capturing closures.
+    static func routeProductTap(_ product: LBProduct,
+                                route: ((LBProduct) -> Void)?,
+                                fallback: (LBProduct) -> Void) {
+        if let route = route { route(product) } else { fallback(product) }
+    }
     /// Open the guest-name-edit flow.
     public func requestGuestNameEdit() { template?.requestGuestNameEdit() }
     /// Request the next page of chat history.

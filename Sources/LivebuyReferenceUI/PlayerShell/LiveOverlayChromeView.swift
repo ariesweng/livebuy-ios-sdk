@@ -148,7 +148,8 @@ public struct LiveOverlayChromeView: View {
     public let cleanMode: Bool
 
     /// Tap on the pinned-product card → host-wired turnkey product-detail flow
-    /// (PlayerShellView forwards to `model.performProductTap`). nil → the card is
+    /// (PlayerShellView forwards to `model.routeProductTap` → container override or
+    /// `performProductTap`). nil → the card is
     /// drawn but inert (demo / snapshot). No pixel change either way.
     private let onTapPinnedProduct: ((LBProduct) -> Void)?
 

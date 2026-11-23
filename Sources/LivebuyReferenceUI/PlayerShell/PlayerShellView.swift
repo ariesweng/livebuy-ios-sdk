@@ -1372,6 +1372,26 @@ public struct PlayerShellView: View {
     /// （往左縮短）避讓浮動袋，浮動袋本身不動（rb-ios-vod-now-introducing-no-bag-overlap）。
     private static let floatingBagClearance: CGFloat = 68
 
+    /// LIVE pinned-card tap handler → `model.routeProductTap` (container `onProductTapRoute` = the
+    /// drop-in's `config.onProductTap` resolution when set, else `performProductTap`).
+    /// Factored out so the card's tap behavior is unit-testable without mounting SwiftUI.
+    /// rb-ios-pinned-intro-card-product-tap-config.
+    static func pinnedCardTapHandler(model: PlayerShellModel) -> (LBProduct) -> Void {
+        { product in model.routeProductTap(product) }
+    }
+
+    /// VOD now-introducing card `onOpenDetail(productId)` handler: resolves the id against the
+    /// shown (dismissed-filtered) products and forwards through the SAME `model.routeProductTap`
+    /// as the pinned card; an unknown id is a no-op. rb-ios-pinned-intro-card-product-tap-config.
+    static func nowIntroducingOpenDetailHandler(model: PlayerShellModel,
+                                                introducing: [LBProduct]) -> (String) -> Void {
+        { id in
+            if let product = introducing.first(where: { $0.id == id }) {
+                model.routeProductTap(product)
+            }
+        }
+    }
+
     // MARK: - CC caption overlay gate (rb-ios-replay-caption-overlay-fix)
     //
     // BUG: the real VTT/CC caption (`CaptionOverlayView`, fed by `effectiveCaption`) used to be
@@ -1716,8 +1736,10 @@ public struct PlayerShellView: View {
                     // banner / host caption / 手勢提示，MUST NOT 影響釘選商品卡（見
                     // `LiveOverlayChromeView.cleanMode` 的內部 gate 範圍）。
                     cleanMode: cleanMode,
-                    // Pinned-product card tap → turnkey product-detail default flow.
-                    onTapPinnedProduct: { product in model.performProductTap(product) },
+                    // Pinned-product card tap → `model.routeProductTap` (container-set
+                    // `onProductTapRoute` = drop-in `config.onProductTap` when the host set one, else
+                    // the turnkey `performProductTap` default — rb-ios-pinned-intro-card-product-tap-config).
+                    onTapPinnedProduct: Self.pinnedCardTapHandler(model: model),
                     // 釘選卡 close X → 逐商品本地隱藏（把 id 加入本地 dismissedLivePinnedIds，
                     // 下次過濾即不再餵入該卡；鏡像 VOD onDismiss，rb-ios-live-pinned-card-dismiss）。
                     onDismissPinnedProduct: { id in dismissedLivePinnedIds.insert(id) },
@@ -1773,11 +1795,10 @@ public struct PlayerShellView: View {
                             // the snapshot path keeps the deterministic placeholder.
                             live: !paintsBackgroundPlaceholder,
                             onDismiss: { id in dismissedVodProductIds.insert(id) },
-                            onOpenDetail: { id in
-                                if let product = introducing.first(where: { $0.id == id }) {
-                                    model.performProductTap(product)
-                                }
-                            })
+                            // Same container-overridable route as the pinned card
+                            // (rb-ios-pinned-intro-card-product-tap-config).
+                            onOpenDetail: Self.nowIntroducingOpenDetailHandler(
+                                model: model, introducing: introducing))
                             // 往左佔滿；但在浮動商品袋顯示時（showsVodMainChrome，即 VOD 且
                             // startPhase ∈ {.buffering, .done}），trailing 內縮讓出浮動袋的右側空間，
                             // 避免卡片右下角與袋重疊（rb-ios-vod-now-introducing-no-bag-overlap）。

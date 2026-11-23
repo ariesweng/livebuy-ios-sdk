@@ -42,7 +42,8 @@ public struct NowIntroducingCarouselView: View {
     /// Close one product (by id) — the container hides it locally (`Set<String>`).
     let onDismiss: ((String) -> Void)?
 
-    /// Open one product's detail (by id) — the container forwards `model.performProductTap`.
+    /// Open one product's detail (by id) — the container forwards `model.routeProductTap`
+    /// (drop-in `config.onProductTap` override, else `performProductTap`).
     let onOpenDetail: ((String) -> Void)?
 
     @State private var index: Int = 0

@@ -92,7 +92,13 @@ public struct LivebuyPlayerConfig {
     /// CTA is inert (the modal still informs + dismisses). rb-ios-live-comment-login-gate.
     public var onLogin: (() -> Void)?
 
-    /// Product-row / pinned-card tap. Default: the core product-tap flow (`performProductTap`).
+    /// Product tap from ANY of the drop-in's product entry points: the product-list rows
+    /// (detail / add-to-cart / restock), the LIVE pinned card, and the VOD now-introducing card.
+    /// Default: the core product-tap flow (`performProductTap` → SDK product-detail sheet). Set it
+    /// to take over product taps entirely (e.g. open the host's own product page): the SDK detail
+    /// sheet is then NOT opened from any of these entry points.
+    /// (Before rb-ios-pinned-intro-card-product-tap-config, the pinned card and the
+    /// now-introducing card bypassed this seam and always opened the SDK detail sheet.)
     public var onProductTap: ((LivebuyPlayerViewController, LBProduct) -> Void)?
 
     /// 頻道 / detail-footer 分享. Default (dropin-player-default-share-sheet, B 案): 先派
@@ -888,10 +894,12 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
     /// `public final` in layers this change MUST NOT modify), so byte-faithfulness to the
     /// proven Example wiring is the correctness guarantee. Splitting it would only scatter
     /// that faithfulness across more surfaces.
-    private func makeOverlayContext(player: LivebuyPlayerViewController,
-                                    template: DefaultPlayerTemplate,
-                                    theme: ReferenceUITheme,
-                                    coordinator: Coordinator) -> PlayerOverlayContext {
+    /// `internal` (not `private`) so a test can assert the product-tap wiring end-to-end
+    /// (rb-ios-pinned-intro-card-product-tap-config).
+    func makeOverlayContext(player: LivebuyPlayerViewController,
+                            template: DefaultPlayerTemplate,
+                            theme: ReferenceUITheme,
+                            coordinator: Coordinator) -> PlayerOverlayContext {
         let composerController = coordinator.composerController ?? ChatComposerController()
         let nicknameController = coordinator.nicknameController ?? NicknamePromptController()
         let loginController = coordinator.loginController ?? LoginPromptController()
@@ -920,6 +928,17 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
         let resolvedDismiss: (LivebuyPlayerViewController) -> Void = { p in
             resolvedPlayerDismiss(onDismiss: config.onDismiss, player: p)
         }
+
+        // ONE product-tap resolution for every product entry point
+        // (rb-ios-pinned-intro-card-product-tap-config): the product-list rows (via the design's
+        // `onProductTap`) AND the shell's own pinned / now-introducing cards (via
+        // `shellModel.onProductTapRoute`) — so `config.onProductTap` takes over all of them.
+        let onProductTapOverride = config.onProductTap
+        let productTap: (LBProduct) -> Void = { [weak player] product in
+            guard let player = player else { return }
+            routeDropInProductTap(product, player: player, onProductTap: onProductTapOverride)
+        }
+        shellModel.onProductTapRoute = productTap
 
         return PlayerOverlayContext(
             shellModel: shellModel,
@@ -1075,10 +1094,7 @@ public struct LivebuyPlayer: UIViewControllerRepresentable {
                 onFailure: { [weak nicknameController] message in
                     nicknameController?.failSubmit(message: message)
                 }),
-            onProductTap: { [weak player] product in
-                guard let player = player else { return }
-                if let custom = config.onProductTap { custom(player, product) } else { player.performProductTap(product) }
-            },
+            onProductTap: productTap,
             // Footer / channel 分享 (dropin-player-default-share-sheet, B 案): host override wins;
             // else re-emit `VIDEO_SHARE_REQUEST` and, ONLY if the host did NOT intercept it
             // (`performShare()` returns false), present the default system share sheet for the
@@ -1484,6 +1500,20 @@ func resolveSwipeSwitchItem(id: String, next: [LBNavItem], prev: [LBNavItem],
     return switchedVideoItem(id: id, cover: nav.cover, title: nav.title ?? "",
                              duration: nav.duration, liveStatus: liveStatus,
                              preview: nav.preview)
+}
+
+/// Drop-in product-tap resolution (rb-ios-pinned-intro-card-product-tap-config): the host's
+/// `config.onProductTap` when set (the default is then NOT called), else `fallback` (default
+/// `player.performProductTap` → core `simulateProductTap` → SDK product-detail sheet). Shared by
+/// the product-list rows and the shell's pinned / now-introducing cards. `fallback` is injectable
+/// so a test can assert the branch without a real core round-trip.
+func routeDropInProductTap(
+    _ product: LBProduct,
+    player: LivebuyPlayerViewController,
+    onProductTap: ((LivebuyPlayerViewController, LBProduct) -> Void)?,
+    fallback: (LivebuyPlayerViewController, LBProduct) -> Void = { $0.performProductTap($1) }
+) {
+    if let custom = onProductTap { custom(player, product) } else { fallback(player, product) }
 }
 
 /// Build the `LBVideoItem` reported via `onVideoSwitchedItem` after an in-place switch, from the

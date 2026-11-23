@@ -5,6 +5,34 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.33.1] - 2026-11-24
+
+> **Patch（iOS-only）。** 動 `LivebuySDK`（core）的播放／暫停判斷與 `LivebuyReferenceUI` 的 drop-in 置頂卡／介紹中卡點擊路由；
+> **無 BREAKING**、零 public 符號變動；`LivebuyUI`（view-model）原始碼零變更。Android `4.33.1` 已於 2026-11-23 另行發佈（只含
+> Android 的同類播放／暫停修正），本次 Android 不發。完整敘述見 [`docs/release-notes/v4.33.1.md`](../docs/release-notes/v4.33.1.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- **drop-in 置頂商品卡／回放「介紹中」卡改走 `LivebuyPlayerConfig.onProductTap`**（`LivebuyReferenceUI`）：以前這兩張卡直接開
+  SDK 商品明細，不經 config，與文件不符。現在與商品列表同一條路徑：**已設 `onProductTap` 的 host，點這兩張卡改由 host 的
+  closure 接手、不再開 SDK 明細**；未設的 host 行為不變。像素零變動。
+
+### Fixed
+
+- **直播暫停後播放鈕每次都只會再暫停**（`LivebuySDK`）：IVS 暫停後只回報 idle，播放器狀態一直停在 `.playing`。
+  `togglePlayPause()` 與 core 播放控制鈕改依播放意圖（engine 內部的 `playWhenReady`）決定方向：宿主 `pause()`、自動子母畫面
+  fallback 暫停或 toggle 暫停之後，第一次按就播放。`.ended`／`.endScreenShown`／`.error`／`.awaitingLive` 時按下一律播放。
+- **直播被觀眾自己暫停後遇到攔截，`resumeAfterIntercept()` 把它恢復播放**（`LivebuySDK`）：「攔截前正在播放」改為「有播放意圖，
+  且狀態為 `.playing` 或 `.buffering`」。
+- **直播暫停後進度 `isPlaying` 仍回報 `true`**（`LivebuySDK`）：改為 `state == .playing` 且有播放意圖。
+- 行為差異：載入／緩衝中按播放鈕現在會暫停（舊行為呼叫 `play()`、等於沒效果；直播 IVS 就緒後會自動起播、蓋掉這次暫停）；
+  緩衝中且有播放意圖時被攔截，現在會記為 fallback 暫停，`resumeAfterIntercept()` 會恢復播放（舊行為不恢復）。VOD 一般播放／暫停
+  不變。`play()`／`pause()` 本身仍不更新 `playerState`、不派 `VIDEO_STATE_CHANGE`。未經真機驗證。
+
 ## [4.33.0] - 2026-11-23
 
 > **Minor（iOS + Android 同發）。** 只動 `LivebuySDK`（core）、**新增公開 API、無 BREAKING**（只有新增，沒有改名、移除或改簽章）。
