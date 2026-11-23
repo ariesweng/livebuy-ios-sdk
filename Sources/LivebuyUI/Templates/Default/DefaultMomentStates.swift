@@ -236,9 +236,8 @@ public final class DefaultProductOverlayState {
 
     init() {}
 
-    /// DIFF by product id array + active id (LBProduct is NOT Equatable, mirror
-    /// `DefaultActivityFeed` comparing `winner.id`). An unchanged 5s refresh MUST
-    /// NOT re-notify.
+    /// DIFF by full product content + active product (see `sameContent`): a field-only
+    /// change on the same ids re-notifies; an unchanged 5s refresh MUST NOT re-notify.
     ///
     /// `introActive` (suppress-product-overlay-during-intro-ios-template): while the
     /// intro MP4 preroll is playing (`Player.momentState.startScreenActive == true`),
@@ -256,12 +255,23 @@ public final class DefaultProductOverlayState {
         let exposedProducts = introActive ? [] : products
         let exposedActive = introActive ? nil : active
 
-        let changed = exposedProducts.map(\.id) != self.products.map(\.id)
-            || exposedActive?.id != self.activeProduct?.id
+        let changed = !Self.sameContent(exposedProducts, self.products)
+            || !Self.sameContent(exposedActive.map { [$0] } ?? [], self.activeProduct.map { [$0] } ?? [])
         guard changed else { return }
         self.products = exposedProducts
         self.activeProduct = exposedActive
         onMutation?()
+    }
+
+    /// product-overlay-content-diff-ios-template: a 5s refresh that keeps the same ids
+    /// but changes a field (stock / sold_out / buying_num / label …) MUST still update
+    /// the snapshot, or a detail opened afterwards shows stale data (e.g. no「正在等待
+    /// 結果...」banner after a bid). `LBProduct` is a core value type without
+    /// `Equatable` (the view-model layer must not add core conformances), so compare
+    /// the full value description — every stored field, nested specs included.
+    static func sameContent(_ lhs: [LBProduct], _ rhs: [LBProduct]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { String(reflecting: $0) == String(reflecting: $1) }
     }
 }
 

@@ -80,6 +80,12 @@ final class TemplateAuxListener: NSObject, LivebuyEventListener {
             // Non-primary: returns false so the host's primary listener still sees the event.
             template?.handleBidWon(params: params)
             return false
+        case LBEvent.bidPlaceResult:
+            // keyword-bid-result-toast-ios-template: a chat「關鍵字+數量」bid is placed by the core
+            // in the background, so only this event tells the view-model its result → same toast
+            // as the button path. Button bids are ignored here (their requester already reports).
+            template?.handleBidPlaceResult(params: params)
+            return false
         case LBEvent.awardClaimResult:
             // Notify event → win-claim result-state model (§4). `.claimed`
             // decrements the unclaimed count for the in-flight winner.

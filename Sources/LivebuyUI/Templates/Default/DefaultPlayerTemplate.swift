@@ -970,6 +970,13 @@ public final class DefaultPlayerTemplate {
     public func loadChatHistory() { player?.performLoadChatHistory() }
     /// Send a chat message — wraps the already-public async core `sendChat`.
     public func sendChat(_ text: String, eventId: Int? = nil) {
+        // keyword-bid-result-toast-ios-template: a chat send may be a「關鍵字+數量」bid whose result
+        // arrives later via BID_PLACE_RESULT — reset the last outcome first (same as addToCart's
+        // per-attempt reset) so that result is always a fresh change.
+        if bidOutcome != nil {
+            bidOutcome = nil
+            notifyChange()
+        }
         Task { try? await player?.sendChat(message: text, eventId: eventId) }
     }
     /// Telemetry-only: emit the product-panel toggle event (list visibility host-owned).
@@ -1372,6 +1379,37 @@ public final class DefaultPlayerTemplate {
             }
             notifyChange()
         }
+    }
+
+    /// `BID_PLACE_RESULT` from a chat keyword bid (`is_keyword == true`) → `bidOutcome`, so the
+    /// reference-ui flashes the same「已加入搶購」/ failure toast as the button path (the web
+    /// shows it for 關鍵字+1 too). Button bids (`is_keyword == false`) are ignored: their requester
+    /// already set `bidOutcome`. The outcome is first reset to nil and set on the next main-loop
+    /// turn so a repeat of the same outcome is still a fresh change for observers.
+    func handleBidPlaceResult(params: [String: Any]) {
+        guard let outcome = Self.keywordBidOutcome(params: params) else { return }
+        Self.runOnMain { [weak self] in
+            guard let self = self else { return }
+            // A result for another video (arrived after a switch) is not shown here.
+            if let eventVideo = params["video_id"] as? String, !eventVideo.isEmpty,
+               let current = self.currentVideoId, !current.isEmpty, eventVideo != current { return }
+            if self.bidOutcome != nil {
+                self.bidOutcome = nil
+                self.notifyChange()
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.bidOutcome = outcome
+                self?.notifyChange()
+            }
+        }
+    }
+
+    /// Pure: keyword-bid `BID_PLACE_RESULT` params → outcome; nil for a button bid.
+    static func keywordBidOutcome(params: [String: Any]) -> LBBidOutcome? {
+        let isKeyword = (params["is_keyword"] as? Bool) ?? ((params["is_keyword"] as? Int) == 1)
+        guard isKeyword else { return nil }
+        if params["status"] as? String == "placed" { return .placed }
+        return .failed(code: params["backend_error_code"] as? String)
     }
 
     /// `BID_WON` → win popup (main thread).

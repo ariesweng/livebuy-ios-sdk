@@ -5,6 +5,28 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.32.3] - 2026-11-23
+
+> **Patch（iOS + Android 同發）。** 只動 `LivebuyUI`（view-model）、**無 BREAKING**、零 public 符號變動。完整敘述見
+> [`docs/release-notes/v4.32.3.md`](../docs/release-notes/v4.32.3.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- （無）
+
+### Fixed
+
+- **直播中商品資料刷新沒有即時反映到 view-model**（`LivebuyUI`）：ProductOverlay 快照原本只在商品 id 清單或介紹中商品改變時才更新，
+  core 每 5 秒帶回的下標數（`buyingNum`）、庫存、售完等欄位變動被丟掉——搶購場下標後重開商品明細看不到「正在等待結果...」，
+  直播中的庫存與「已售完」也不會即時更新。現改為依商品完整內容判斷變更；內容相同的刷新仍不通知。
+- **聊天室「關鍵字+數量」下標沒有「已加入搶購」提示**（`LivebuyUI`）：關鍵字下標由 core 在背景送出，view-model 原本只在按鈕下標
+  設定下標結果，所以關鍵字下標成功／失敗都不會提示（網頁會顯示「已加入搶購」）。現改為接收 core `BID_PLACE_RESULT`
+  （`is_keyword` 為真），顯示與按鈕下標相同的提示；按鈕下標的事件與換片後才到的舊結果忽略。
+
 ## [4.32.2] - 2026-11-23
 
 > **Patch（iOS + Android 同發）。** 只動 `LivebuyUI`（view-model）、**無 BREAKING**、零 public 符號變動。完整敘述見
