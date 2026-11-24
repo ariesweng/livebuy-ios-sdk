@@ -5,6 +5,26 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.33.2] - 2026-11-24
+
+> **Patch（iOS-only）。** 只動 `LivebuySDK`（core）；**無 BREAKING**、零 public 符號變動；`LivebuyUI`／`LivebuyReferenceUI` 原始碼零變更。
+> Android 維持 `4.33.1`，本次不發。完整敘述見 [`docs/release-notes/v4.33.2.md`](../docs/release-notes/v4.33.2.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- （無）
+
+### Fixed
+
+- **直播子母畫面按系統播放／暫停鈕後，回到 App 第一次按播放鈕沒反應**（`LivebuySDK`）：子母畫面視窗的按鈕由 IVS 播放器直接控制、
+  不經 SDK，`4.33.1` 的播放意圖沒跟著改。現在改從 IVS 回報的狀態同步意圖（idle 且不在載入中 → 暫停；playing → 播放），載入／換串流
+  途中的 idle 不算暫停。`playerState` 與事件不變。未經真機驗證。
+- 內部：離線事件佇列測試改用獨立暫存資料庫（新增 internal 測試入口），修全套件偶發 `SQLITE_BUSY`；正式執行路徑不變。
+
 ## [4.33.1] - 2026-11-24
 
 > **Patch（iOS-only）。** 動 `LivebuySDK`（core）的播放／暫停判斷與 `LivebuyReferenceUI` 的 drop-in 置頂卡／介紹中卡點擊路由；
