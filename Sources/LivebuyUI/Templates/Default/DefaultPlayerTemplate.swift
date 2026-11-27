@@ -1080,6 +1080,9 @@ public final class DefaultPlayerTemplate {
 
     // MARK: - Auth-gate + identity-label handlers (auth-gate-template-state)
 
+    /// See `identityTransition` (template-clear-viewer-state-on-identity-change).
+    private var viewerIdentity = ViewerIdentity()
+
     /// `AUTH_REQUIRED` — un-intercepted「請先登入」→ host-bindable auth-gate state.
     /// `hostIntercepted` is hard-wired `false` at the route-B call site: the core's
     /// primary-before-aux short-circuit means the aux listener only ever sees this
@@ -1094,12 +1097,60 @@ public final class DefaultPlayerTemplate {
     /// auth-gate prompt. ONE event = AT MOST ONE notification (D5): the two model
     /// mutations are coalesced so a single login-success fires `onChange` exactly
     /// once. `resumed_action` is NOT reflected in identity-label (Non-Goal).
+    ///
+    /// template-clear-viewer-state-on-identity-change: when the viewer identity changes
+    /// (`identityTransition` decides), the previous viewer's personal state — unclaimed
+    /// wins / claim result / award code / `lastSubmittedWinnerId` / claim in-flight and the
+    /// bid-won items — is dropped in the SAME coalesced batch (still one notification).
+    /// Runs on the main thread, like `handleBidWon`, so it never races the bid-won writes.
     func handleAuthStateChanged(params: [String: Any]) {
-        coalescing {
-            let state = params["state"] as? String ?? ""
-            identityLabel.update(state: state, displayName: params["display_name"] as? String)
-            if state == "logged_in" { authGate.clearOnLogin() }
+        Self.runOnMain { [weak self] in
+            guard let self = self else { return }
+            self.coalescing {
+                let state = params["state"] as? String ?? ""
+                self.identityLabel.update(state: state, displayName: params["display_name"] as? String)
+                if state == "logged_in" { self.authGate.clearOnLogin() }
+                let transition = Self.identityTransition(
+                    from: self.viewerIdentity, state: state,
+                    externalUserId: params["external_user_id"] as? String)
+                self.viewerIdentity = transition.next
+                if transition.clearsViewerState { self.clearViewerStateForIdentityChange() }
+            }
         }
+    }
+
+    /// Last identity seen through `AUTH_STATE_CHANGED` (`loggedIn == false` = guest / not yet
+    /// seen). Only `identityTransition` reads or produces it.
+    struct ViewerIdentity: Equatable {
+        var loggedIn = false
+        var externalUserId: String?
+    }
+
+    /// Pure: does this `AUTH_STATE_CHANGED` mean a different viewer?
+    /// - `logged_out` → yes (forget the identity).
+    /// - `logged_in` after guest / nothing seen → no (guest → login keeps the guest's wins:
+    ///   a product award blocked by `requireLoginForAddToCart` is claimed right after login).
+    /// - `logged_in` after `logged_in` → no only when both `external_user_id`s are non-empty
+    ///   and equal; a missing id cannot prove "same viewer", so it clears.
+    /// - `guest` (nickname set) / unknown states → no, identity unchanged.
+    static func identityTransition(from previous: ViewerIdentity, state: String,
+                                   externalUserId: String?) -> (clearsViewerState: Bool, next: ViewerIdentity) {
+        switch state {
+        case "logged_out":
+            return (true, ViewerIdentity())
+        case "logged_in":
+            let id = (externalUserId?.isEmpty == false) ? externalUserId : nil
+            let sameViewer = id != nil && id == previous.externalUserId
+            return (previous.loggedIn && !sameViewer, ViewerIdentity(loggedIn: true, externalUserId: id))
+        default:
+            return (false, previous)
+        }
+    }
+
+    /// Drop the previous viewer's win-claim + bid-won state (reuses each model's own clear).
+    private func clearViewerStateForIdentityChange() {
+        winClaim.resetForIdentityChange()
+        bidWon.clear()
     }
 
     /// Host-triggered「請求改名」intent (guest 態) → injected core exit

@@ -742,11 +742,14 @@ public struct LiveOverlayChromeView: View {
     }
 
     /// The live-price label. Prefers the pre-formatted `priceShow`; falls back to
-    /// `NT$ <price>` when the show string is empty. Pure.
+    /// `NT$ <price>` when the show string is empty. When `price` cannot be represented as an
+    /// `Int` (NaN / ±infinity / out of `Int` range) it returns `""` instead of trapping
+    /// (rb-ios-price-int-conversion-guard). Pure.
     static func livePriceText(_ product: LBProduct) -> String {
         let show = product.priceShow.trimmingCharacters(in: .whitespaces)
         if !show.isEmpty { return show }
-        return "NT$ \(Int(product.price))"
+        guard let price = ReferenceUINumberFormat.safeInt(product.price) else { return "" }
+        return "NT$ \(price)"
     }
 
     /// Sold-out check for the pinned introducing-product card

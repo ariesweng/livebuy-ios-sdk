@@ -50,6 +50,12 @@ enum ReferenceUIImageSizing {
     static let maxEdge = 4096
     /// Bytes per decoded pixel (ImageIO hands back 8-bit RGBA / BGRA bitmaps).
     static let bytesPerPixel = 4
+    /// Largest number of pixels one decode may materialise (4096 × 4096 = 64 MiB at
+    /// `bytesPerPixel`), whatever the source and the request (rb-image-decode-pixel-cap). The
+    /// cover rule alone keeps an extreme-aspect source whose SHORT edge is already below the
+    /// request at its original size (e.g. a 65535 × 420 PNG of a few dozen KB → ~105 MiB). Same
+    /// value on Android / Flutter.
+    static let maxDecodedPixelCount = 16_777_216
 
     /// PURE: round a frame edge UP to a coarse ladder (64, 96, 128, 192, 256, 384, 512, … —
     /// powers of two and their ×1.5 midpoints), clamped to `minEdge...maxEdge`. Frames that
@@ -85,7 +91,23 @@ enum ReferenceUIImageSizing {
     /// the source aspect ratio and is at least `request` on BOTH edges whenever the source is
     /// large enough; a source smaller than the request on either edge is decoded at its
     /// original size (never upscaled). `maxPixelSize` is the LONGEST edge to hand to ImageIO.
+    ///
+    /// Either way the decode never exceeds `maxPixelCount` pixels (rb-image-decode-pixel-cap):
+    /// when the cover rule's result would, the longest edge is reduced (aspect kept) until it
+    /// fits — at an extreme aspect ratio the decode then no longer covers the request, which is
+    /// the accepted trade-off. `isFullResolution` is `false` for such a capped decode.
     static func decodePlan(
+        source: ReferenceUIImagePixelSize, request: ReferenceUIImagePixelSize,
+        maxPixelCount: Int = maxDecodedPixelCount
+    ) -> (maxPixelSize: Int, isFullResolution: Bool) {
+        let plan = coverDecodePlan(source: source, request: request)
+        guard let cappedEdge = pixelCapLongestEdge(source: source, maxPixelCount: maxPixelCount),
+              cappedEdge < plan.maxPixelSize else { return plan }
+        return (cappedEdge, false)
+    }
+
+    /// PURE: the cover rule alone (no pixel cap) — see `decodePlan`.
+    static func coverDecodePlan(
         source: ReferenceUIImagePixelSize, request: ReferenceUIImagePixelSize
     ) -> (maxPixelSize: Int, isFullResolution: Bool) {
         let longest = max(source.width, source.height)
@@ -96,6 +118,29 @@ enum ReferenceUIImageSizing {
         // +1 absorbs ImageIO's rounding of the shorter edge so it cannot land one pixel short.
         let target = Int((Double(longest) * scale).rounded(.up)) + 1
         return target >= longest ? (longest, true) : (target, false)
+    }
+
+    /// PURE: the largest longest-edge at which a `source`-shaped decode stays within
+    /// `maxPixelCount` pixels — its shorter edge counted rounded UP, so ImageIO's own rounding
+    /// cannot push it over — or `nil` when the whole source already fits. Never below 1.
+    ///
+    /// For a decoded shorter edge of `k` px the longest edge can be at most
+    /// `min(k × longest / shortest, maxPixelCount / k)`; that is largest at one of the two
+    /// integers around `√(maxPixelCount × shortest / longest)` (or at `k = 1`). Constant time
+    /// whatever the source's dimensions.
+    static func pixelCapLongestEdge(
+        source: ReferenceUIImagePixelSize, maxPixelCount: Int
+    ) -> Int? {
+        guard source.width > 0, source.height > 0, maxPixelCount > 0 else { return nil }
+        let longest = Double(max(source.width, source.height))
+        let shortest = Double(min(source.width, source.height))
+        guard longest * shortest > Double(maxPixelCount) else { return nil }
+        let pivot = Int((Double(maxPixelCount) * shortest / longest).squareRoot())
+        let best = [1, pivot, pivot + 1].filter { $0 >= 1 }.map { k -> Int in
+            let byAspect = (Double(k) * longest / shortest).rounded(.down)
+            return min(Int(min(byAspect, longest)), maxPixelCount / k)
+        }.max() ?? 1
+        return max(1, best)
     }
 
     /// PURE: memory-cache key — the same URL at two request sizes is two entries.
@@ -162,12 +207,17 @@ enum ReferenceUIImageDecoder {
 
     /// Decode `data` for a `request`-sized frame via an ImageIO thumbnail — the bitmap that
     /// reaches memory is the downsampled one, the full-resolution bitmap is never materialised.
-    /// `nil` when `data` is not a decodable image.
-    static func decode(_ data: Data, request: ReferenceUIImagePixelSize) -> ReferenceUIDecodedImage? {
+    /// `nil` when `data` is not a decodable image. The decode never exceeds `maxPixelCount`
+    /// pixels (`ReferenceUIImageSizing.decodePlan`); production always uses the default.
+    static func decode(
+        _ data: Data, request: ReferenceUIImagePixelSize,
+        maxPixelCount: Int = ReferenceUIImageSizing.maxDecodedPixelCount
+    ) -> ReferenceUIDecodedImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
               let sourceSize = sourcePixelSize(source) else { return nil }
-        let plan = ReferenceUIImageSizing.decodePlan(source: sourceSize, request: request)
+        let plan = ReferenceUIImageSizing.decodePlan(
+            source: sourceSize, request: request, maxPixelCount: maxPixelCount)
         let options = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

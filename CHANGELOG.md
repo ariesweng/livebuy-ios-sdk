@@ -5,6 +5,34 @@ All notable changes to the Livebuy iOS SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.34.0] - 2026-11-27
+
+> **Minor（iOS＋Android 同發）。** 資安稽核 run-1 修正，動 `LivebuySDK`（core）、`LivebuyUI`（view-model）、`LivebuyReferenceUI`；
+> **源碼面無 BREAKING**、零 public 符號變動，但有升級後可見的行為變化（⚠️）。完整敘述見 [`docs/release-notes/v4.34.0.md`](../docs/release-notes/v4.34.0.md)。
+
+### Added
+
+- （無）
+
+### Changed
+
+- ⚠️ **`clearUser()` 換一組新的訪客 id 並清除訪客暱稱**（`LivebuySDK`）：每次登出都把 `lb_guest_id` 換成新的隨機 UUID、清掉 `lb_guest_nickname`；
+  `fbp`／`fbc` 不動；`setUser`／`login`／設暱稱不換。`bindSession` 切帳號時 B 的登入帶新的 `guest_id`。自己存 `guestId` 的 host 登出後請重新讀取。
+- ⚠️ **搶購得標自動確認**（`LivebuySDK`）：`shop_cart_synced = true`（168money／直播管家）取單成功後，SDK 在派完 `CART_ADD_REQUEST`／`BID_WON`
+  後自動送 `bidconfirm`；失敗在之後的輪次重試（上限 12 次）。重開播放器或切回同片不再重派事件。168+EC 不變，仍由 host 呼叫 `confirmBidWin`。
+- **`setFbclid`／`captureAdClick` 只接受 1–500 個 `[A-Za-z0-9_-]` 字元**（`LivebuySDK`），不符合整筆忽略、不覆寫既有 `fbc`。
+- **外部直播 `liveurl` 與聯絡商家連結先過 `LBURLOpenPolicy.decide`**（`LivebuyReferenceUI`）：外部直播限 `http(s)`，其他協定即使網域命中也改走點影片流程。
+- **登出或換會員時清除上一位觀眾的中獎／領獎／得標狀態**（`LivebuyUI`）：晚到的領獎結果丟棄，`confirmBidWin` 不替上一位送；訪客登入、同一會員重複登入不清。
+
+### Fixed
+
+- 登出後才回來的 `login()`／`bindSession()` 結果不再寫入 token、不再派 `logged_in`，改丟取消型錯誤（`LivebuySDK`）。
+- 登入身分改變時重設得標取單狀態，不再派上一位會員的 `CART_ADD_REQUEST`／`BID_WON`（`LivebuySDK`）。
+- 伺服器下發的事件上報排程值加上下限：送出間隔 1–3600 秒、每批 1–200 筆、保存 60–86400 秒，避免忙迴圈（`LivebuySDK`）。
+- drop-in 商品價格與折扣遇 NaN／無限大／超出整數範圍時顯示空白、不畫徽章，以前會閃退（`LivebuyReferenceUI`）。
+- 遠端圖片每次解碼最多 4096×4096 像素，超過才依比例縮小（`LivebuyReferenceUI`）。
+- 文件註解訂正（`LBURLOpenPolicy`、`confirmBidWin`、`BID_WON`），零行為變動。
+
 ## [4.33.2] - 2026-11-24
 
 > **Patch（iOS-only）。** 只動 `LivebuySDK`（core）；**無 BREAKING**、零 public 符號變動；`LivebuyUI`／`LivebuyReferenceUI` 原始碼零變更。

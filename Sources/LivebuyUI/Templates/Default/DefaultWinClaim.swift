@@ -90,6 +90,17 @@ public final class DefaultWinClaim {
     /// `clear()` on video switch / release). The template MUST NOT guess the outcome.
     private(set) public var submitInFlight: Bool = false
 
+    /// Winner ids dropped by `resetForIdentityChange()` (template-clear-viewer-state-on-
+    /// identity-change). A host sheet may still hold the previous viewer's `LBWinner`, so
+    /// `submit` refuses these ids — otherwise the next viewer's token would claim the
+    /// previous viewer's ticket. A fresh `recordWin` of the same id lifts the block.
+    private var revokedWinnerIds: Set<String> = []
+
+    /// Set by `resetForIdentityChange()` when a previous submit may still be outstanding:
+    /// its late `awardClaimResult` (possibly carrying the previous viewer's award code)
+    /// MUST NOT reach the next viewer. Cleared by the next submit.
+    private var dropsLateResult = false
+
     /// Internal coalesced "win-claim state mutated" hook. The owning
     /// `DefaultPlayerTemplate` wires this to fan a single host-facing `onChange`
     /// (main-thread) per mutation. NOT public — the host observes via the
@@ -108,6 +119,7 @@ public final class DefaultWinClaim {
     /// Record a new win (from core `showWin(text, winner)`). Deduped by
     /// `winner.id`; a repeated id does NOT increment the count.
     public func recordWin(_ winner: LBWinner) {
+        revokedWinnerIds.remove(winner.id)
         guard unclaimedIds.insert(winner.id).inserted else { return }
         unclaimedWinners.append(winner)
         onMutation?()
@@ -161,6 +173,7 @@ public final class DefaultWinClaim {
     @discardableResult
     public func submit(winner: LBWinner, email: String) -> Bool {
         guard !submitInFlight else { return false }
+        guard !revokedWinnerIds.contains(winner.id) else { return false }
         guard Self.isValidEmail(email) else { return false }
         let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
         beginSubmit(winner: winner, contact: LBAwardClaimInput(email: trimmed))
@@ -182,6 +195,7 @@ public final class DefaultWinClaim {
     @available(*, deprecated, message: "EMAIL-LESS 領獎在未被 host 攔截時必然失敗（core 預設領獎路徑 email 必填，缺 email 直接 fail-fast、連 API 都不送）。改用 submit(winner:email:)；本入口將於下一個 major 移除。")
     public func submit(winner: LBWinner) {
         guard !submitInFlight else { return }
+        guard !revokedWinnerIds.contains(winner.id) else { return }
         beginSubmit(winner: winner, contact: nil)
     }
 
@@ -190,6 +204,7 @@ public final class DefaultWinClaim {
     /// spinner), enter in-flight, hand off to core, notify ONCE.
     private func beginSubmit(winner: LBWinner, contact: LBAwardClaimInput?) {
         lastSubmittedWinnerId = winner.id
+        dropsLateResult = false
         resultState = nil
         submitInFlight = true
         requester?.requestAwardClaim(winner: winner, contact: contact)
@@ -231,6 +246,8 @@ public final class DefaultWinClaim {
                               winnerId: String?,
                               awardCode: String?) -> LBAwardClaimResultState {
         let state = Self.mapResult(status: status, awardType: awardType, awardCode: awardCode)
+        // A result for a submit made before an identity change belongs to the previous viewer.
+        if dropsLateResult { return state }
         if status == .claimed, let id = winnerId { remove(winnerId: id) }
         submitInFlight = false
         resultState = state
@@ -281,5 +298,19 @@ public final class DefaultWinClaim {
         resultState = nil
         submitInFlight = false
         onMutation?()
+    }
+
+    /// Identity change (template-clear-viewer-state-on-identity-change): drop everything the
+    /// previous viewer owned — unclaimed set, result (incl. award code), in-flight flag (via
+    /// `clear()`), plus `lastSubmittedWinnerId` — and block re-submitting the dropped ids.
+    /// Notifies once (through `clear()`).
+    func resetForIdentityChange() {
+        revokedWinnerIds.formUnion(unclaimedIds)
+        if let id = lastSubmittedWinnerId {
+            revokedWinnerIds.insert(id)
+            dropsLateResult = true
+        }
+        lastSubmittedWinnerId = nil
+        clear()
     }
 }

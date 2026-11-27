@@ -24,11 +24,19 @@ public enum ProductRowDiscountBadge {
     /// a divide-by-zero), or a computed percentage that floors down to `0` (e.g. `originalPrice:
     /// 101, price: 100` → `0.99...%` → `floor` → `0` — a real, if rare, floor-rounding boundary,
     /// not an error — showing a misleading "0%" badge would be worse than showing nothing).
+    ///
+    /// Also `nil` (rb-ios-price-int-conversion-guard) when the floored percentage is not
+    /// representable as `Int` (non-finite, or out of `Int` range — e.g. `price: -1e20,
+    /// originalPrice: 1`, where a bare `Int(_:)` would trap and crash the host App). Every
+    /// representable result keeps the existing `off > 0` rule, same as Android / RN.
     public static func percent(price: Double, originalPrice: Double?) -> Int? {
         guard let originalPrice = originalPrice, originalPrice > price, originalPrice > 0 else {
             return nil
         }
-        let off = Int(floor((originalPrice - price) / originalPrice * 100))
+        guard let off = ReferenceUINumberFormat.safeInt(
+            floor((originalPrice - price) / originalPrice * 100)) else {
+            return nil
+        }
         return off > 0 ? off : nil
     }
 }

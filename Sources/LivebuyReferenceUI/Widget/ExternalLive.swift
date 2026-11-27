@@ -31,12 +31,33 @@ enum ExternalLive {
     /// Sub-domain match is anchored on a leading dot (`host == base` OR
     /// `host.hasSuffix("." + base)`) so look-alikes like `facebook.com.evil.example`
     /// and `notfacebook.com` do NOT match.
+    ///
+    /// **Scheme gate (`rb-url-exit-policy-gate`)**: the string is first run through the
+    /// core `LBURLOpenPolicy.decide(_:)` allowlist — a `nil` decision (custom app
+    /// scheme / `intent` / `file` / `javascript` / …) is NEVER an external live, even
+    /// when its host is `facebook.com`. A live URL must additionally be a web scheme
+    /// (`http` / `https`); `mailto` / `tel` / `sms` are openable but are not lives.
+    /// The host check runs on the policy's parsed `decision.url` (one parser, no
+    /// parser differential).
     static func isExternalLiveURL(_ urlString: String) -> Bool {
-        guard let host = URL(string: urlString)?.host?.lowercased(), !host.isEmpty else {
-            return false
+        externalLiveDecision(urlString) != nil
+    }
+
+    /// The core policy decision for `urlString` when it is an external live, else `nil`.
+    /// Callers open `decision.url` (never re-parse the raw string).
+    static func externalLiveDecision(_ urlString: String) -> LBURLOpenDecision? {
+        guard let decision = LBURLOpenPolicy.decide(urlString),
+              let scheme = decision.url.scheme?.lowercased(),
+              webSchemes.contains(scheme),
+              let host = decision.url.host?.lowercased(), !host.isEmpty else {
+            return nil
         }
         return hosts.contains { base in host == base || host.hasSuffix("." + base) }
+            ? decision : nil
     }
+
+    /// Schemes an external live URL may use (a subset of the core openable allowlist).
+    static let webSchemes: Set<String> = ["http", "https"]
 }
 
 public extension LBVideoItem {
@@ -44,9 +65,11 @@ public extension LBVideoItem {
     /// The external-platform watch URL when this live's `liveurl` is an external
     /// broadcast (Facebook today), else `nil`. Tapping such a live opens this URL
     /// externally instead of the in-app player.
+    ///
+    /// The returned URL is the core `LBURLOpenPolicy` decision's parsed URL — the
+    /// same value the scheme / host gate judged (`rb-url-exit-policy-gate`).
     var externalLiveWatchURL: URL? {
-        guard ExternalLive.isExternalLiveURL(liveurl) else { return nil }
-        return URL(string: liveurl)
+        ExternalLive.externalLiveDecision(liveurl)?.url
     }
 }
 
